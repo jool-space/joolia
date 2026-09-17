@@ -213,3 +213,9 @@ and LoweredCodeUtils dependencies. Registry download, verification, and dependen
 installation now work; the ordinary runner above does not require Revise.
 These checks do not certify every stdlib or ecosystem package. See the latest
 coverage checkpoint in [the port notes](JOOLIA_BASE_PORT.md).
+
+## External stdlib sources
+
+External stdlibs are tracked as squashed Git subtrees under `stdlib/Name`.
+Edit and commit them directly; the former patch-stack workflow is retired.
+See [the vendoring guide](stdlib/VENDORED.md) for upstream updates and provenance.

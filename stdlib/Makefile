@@ -7,7 +7,7 @@ BUILDDIR := .
 
 include $(JULIAHOME)/Make.inc
 include $(JULIAHOME)/deps/tools/common.mk
-include $(JULIAHOME)/deps/tools/stdlib-external.mk
+include $(SRCDIR)/vendored.mk
 # include all `*.version` files, import `LIBNAME_JLL_NAME` and `LIBNAME_JLL_VER`
 # Note: Some deps do not have a `_jll` pkg: [libwhich, patchelf, utf8proc]
 include $(JULIAHOME)/deps/*.version
@@ -50,19 +50,9 @@ STDLIBS_EXT = Pkg Statistics LazyArtifacts LibCURL DelimitedFiles Downloads ArgT
               Tar NetworkOptions SuiteSparse SparseArrays StyledStrings SHA Distributed \
               JuliaSyntaxHighlighting LinearAlgebra
 
-$(foreach module, $(STDLIBS_EXT), $(eval $(call stdlib-external,$(module),$(shell echo $(module) | tr a-z A-Z))))
-
-# Keep Joolia changes to fetched stdlibs reproducible after a fresh extraction.
-# Add successive patches in lexical order; already applied patches are accepted.
-define joolia-stdlib-patches
-ifneq ($$(wildcard $$(SRCDIR)/patches/$1/*.patch),)
-$$(BUILDDIR)/$$($2_SRC_DIR)/source-patched-joolia: $$(BUILDDIR)/$$($2_SRC_DIR)/source-extracted $$(sort $$(wildcard $$(SRCDIR)/patches/$1/*.patch)) $$(JULIAHOME)/contrib/apply-stdlib-patches.sh
-	@sh $$(JULIAHOME)/contrib/apply-stdlib-patches.sh $$(BUILDDIR)/$$($2_SRC_DIR) $$(sort $$(wildcard $$(SRCDIR)/patches/$1/*.patch))
-	touch $$@
-$$(BUILDDIR)/$$($2_SRC_DIR)/build-compiled: $$(BUILDDIR)/$$($2_SRC_DIR)/source-patched-joolia
-endif
-endef
-$(foreach module, $(STDLIBS_EXT), $(eval $(call joolia-stdlib-patches,$(module),$(shell echo $(module) | tr a-z A-Z))))
+# These upstream projects are tracked as squashed subtrees. Their .version files
+# remain Julia's recommended revisions; building never fetches or patches them.
+$(foreach module, $(STDLIBS_EXT), $(eval $(call stdlib-vendored,$(module))))
 
 ifneq ($(filter $(STDLIBS),$(STDLIBS_EXT)),)
 $(error ERROR duplicated STDLIBS in list)
@@ -89,10 +79,11 @@ install: version-check $(addprefix install-, $(STDLIBS_EXT) $(JLL_NAMES)) $(STDL
 .PHONY: version-check
 version-check: $(addprefix version-check-, $(STDLIBS_EXT))
 uninstall: $(addprefix uninstall-, $(STDLIBS_EXT))
+# Legacy extracted trees are no longer build inputs. Leave them alone: they may
+# contain local work from before the subtree migration.
 extstdlibclean:
-	for module in $(STDLIBS_EXT) ; do \
-		rm -rf $(JULIAHOME)/stdlib/$${module}-*; \
-	done
+.PHONY: extstdlibclean
+
 clean: $(addprefix clean-, $(STDLIBS_EXT)) $(CLEAN_TARGETS) extstdlibclean
 distclean: $(addprefix distclean-, $(STDLIBS_EXT)) clean
 checksumall: $(addprefix checksum-, $(STDLIBS_EXT))
