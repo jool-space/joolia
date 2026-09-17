@@ -1,0 +1,662 @@
+# This file is a part of Julia. License is MIT: https://julialang.org/license
+
+module Utils
+
+import ..Pkg
+import Pkg: stdout_f, stderr_f
+using Tar
+using TOML
+using UUIDs
+using Sockets
+
+export temp_pkg_dir, cd_tempdir, isinstalled, write_build, with_current_env,
+    with_temp_env, with_pkg_env, git_init_and_commit, copy_test_package,
+    git_init_package, add_this_pkg, TEST_SIG, TEST_PKG, isolate, LOADED_DEPOT,
+    list_tarball_files, recursive_rm_cov_files, copy_this_pkg_cache, make_file_url,
+    http_server, stalling_http_server
+
+# The cache directory is shared between the test-runner main process and its
+# worker processes: the first process to include this file creates the
+# directory and publishes it in ENV, so that the registry download and the
+# loaded depot are shared by all (parallel) test processes.
+const CACHE_DIRECTORY = let dir = get(ENV, "PKG_TESTS_CACHE_DIR", "")
+    if isempty(dir) || !isdir(dir)
+        dir = ENV["PKG_TESTS_CACHE_DIR"] = mktempdir(; cleanup = true)
+    end
+    realpath(dir)
+end
+
+const LOADED_DEPOT = joinpath(CACHE_DIRECTORY, "loaded_depot")
+
+const REGISTRY_DEPOT = joinpath(CACHE_DIRECTORY, "registry_depot")
+const REGISTRY_DIR = joinpath(REGISTRY_DEPOT, "registries", "General")
+
+const GENERAL_UUID = UUID("23338594-aafe-5451-b93e-139f81909106")
+
+# The compile cache of the Pkg under test, recorded before any test modifies
+# `DEPOT_PATH`. Julia processes spawned by the tests (and precompile workers
+# for packages that depend on Pkg) can only load Pkg from the cache if it is in
+# a depot they can see; precompiling Pkg is disallowed during the tests.
+const COMPILED_SUBDIR = joinpath("compiled", "v$(VERSION.major).$(VERSION.minor)")
+const THIS_PKG_COMPILE_CACHE = joinpath(Base.DEPOT_PATH[1], COMPILED_SUBDIR)
+
+function copy_this_pkg_cache(new_depot)
+    for p in ("Pkg", "REPLExt")
+        source = joinpath(THIS_PKG_COMPILE_CACHE, p)
+        isdir(source) || continue # doesn't exist if using shipped Pkg (e.g. Julia CI)
+        dest = joinpath(new_depot, COMPILED_SUBDIR, p)
+        isdir(dest) && samefile(source, dest) && continue # already the depot with the cache
+        mkpath(dirname(dest))
+        cp(source, dest; force = true)
+    end
+    # Dependencies of this Pkg that were not loaded from the bundled depots, such as
+    # a stdlib tracked from a repo or path in the manifest while developing it, are
+    # compiled next to Pkg and the Pkg cache is only valid together with them. A
+    # source checkout in the depot goes along, since the cache records it relative
+    # to the depot and the subprocesses would otherwise fall back to the stdlib.
+    packages_dir = joinpath(dirname(dirname(THIS_PKG_COMPILE_CACHE)), "packages")
+    for (id, origin) in Base.pkgorigins
+        cachefile = origin.cachepath
+        cachefile === nothing && continue
+        startswith(cachefile, THIS_PKG_COMPILE_CACHE) || continue
+        id.name in ("Pkg", "REPLExt") && continue
+        dest = joinpath(new_depot, COMPILED_SUBDIR, id.name)
+        isdir(dest) && samefile(dirname(cachefile), dest) && continue
+        mkpath(dest)
+        for f in (cachefile, Base.ocachefile_from_cachefile(cachefile))
+            isfile(f) && cp(f, joinpath(dest, basename(f)); force = true)
+        end
+        source = origin.path
+        if source !== nothing && startswith(source, packages_dir)
+            name, slug = splitpath(relpath(source, packages_dir))[1:2]
+            source_dir = joinpath(packages_dir, name, slug)
+            dest_dir = joinpath(new_depot, "packages", name, slug)
+            isdir(dest_dir) && continue
+            mkpath(dirname(dest_dir))
+            cp(source_dir, dest_dir)
+        end
+    end
+    return
+end
+
+# Where the General registry comes from during the tests. With a package
+# server, Pkg installs registries compressed and reads them into memory; the
+# shared registry depot then holds the compressed registry, downloaded once
+# from the (caching, hash-pinning) package server proxy, and it is linked into
+# each test depot that wants it (see `link_shared_registry!`). Downloading it
+# into every test depot instead, as Pkg does on demand, costs ~1 s per depot
+# (download, tree hash verification), and unpacking the registry is pointless
+# in that mode: Pkg's package server code path takes precedence over
+# `DEFAULT_REGISTRIES[1].path`, and unpacking takes ~100 s on Windows.
+#
+# Without a package server the registry is cloned once into the shared
+# registry depot, and `DEFAULT_REGISTRIES[1]` points there so that Pkg symlinks
+# it into the test depots on first use. Registry updates in those depots fetch
+# into the shared clone through the link, so the depots that want a copy of the
+# registry instead (`linked_reg = false`) get it from a second clone that is
+# never updated: copying the shared clone while another test process fetches
+# into it fails on the files git replaces during the fetch.
+registry_is_compressed() = Pkg.Registry.registry_read_from_tarball()
+
+const SHARED_REGISTRIES_DIR = joinpath(REGISTRY_DEPOT, "registries")
+const PRISTINE_REGISTRY_DIR = joinpath(REGISTRY_DEPOT, "pristine", "General")
+const GENERAL_URL = "https://github.com/JuliaRegistries/General.git"
+
+function check_init_reg()
+    if registry_is_compressed()
+        isfile(joinpath(SHARED_REGISTRIES_DIR, "General.toml")) && return
+        Pkg.Registry.download_default_registries(stderr_f(); depots = REGISTRY_DEPOT)
+        isfile(joinpath(SHARED_REGISTRIES_DIR, "General.toml")) || error("Registry did not install properly")
+        # The test depots link to these files; guard against writes through the links
+        for f in readdir(SHARED_REGISTRIES_DIR; join = true)
+            chmod(f, 0o444)
+        end
+        return
+    end
+    if !isfile(joinpath(REGISTRY_DIR, "Registry.toml"))
+        init_registry_clone()
+    end
+    isfile(joinpath(PRISTINE_REGISTRY_DIR, "Registry.toml")) || init_pristine_registry()
+    return
+end
+
+function init_registry_clone()
+    mkpath(REGISTRY_DIR)
+    if Pkg.Registry.registry_use_pkg_server()
+        url = Pkg.Registry.pkg_server_registry_urls()[GENERAL_UUID]
+        @info "Downloading General registry from $url"
+        Pkg.PlatformEngines.download_verify_unpack(url, nothing, REGISTRY_DIR, ignore_existence = true, io = stderr_f())
+        tree_info_file = joinpath(REGISTRY_DIR, ".tree_info.toml")
+        hash = Pkg.Registry.pkg_server_url_hash(url)
+        write(tree_info_file, "git-tree-sha1 = " * repr(string(hash)))
+    else
+        Base.shred!(LibGit2.CachedCredentials()) do creds
+            f = retry(delays = fill(5.0, 3), check = (s, e) -> isa(e, Pkg.Types.PkgError)) do
+                LibGit2.with(
+                    Pkg.GitTools.clone(
+                        stderr_f(),
+                        GENERAL_URL,
+                        REGISTRY_DIR,
+                        credentials = creds
+                    )
+                ) do repo
+                end
+            end
+            f() # retry returns a function that should be called
+        end
+    end
+    return isfile(joinpath(REGISTRY_DIR, "Registry.toml")) || error("Registry did not install properly")
+end
+
+# The clone that unlinked test depots copy. A local clone hardlinks the object
+# store, so this costs a checkout rather than a second download; the remote is
+# pointed back at the upstream repository so that copies of it update like a
+# regular clone. An unpacked (non-git) registry is simply copied.
+function init_pristine_registry()
+    mkpath(dirname(PRISTINE_REGISTRY_DIR))
+    if isdir(joinpath(REGISTRY_DIR, ".git"))
+        LibGit2.with(LibGit2.clone(REGISTRY_DIR, PRISTINE_REGISTRY_DIR)) do repo
+            LibGit2.set_remote_url(repo, "origin", GENERAL_URL)
+        end
+    else
+        cp(REGISTRY_DIR, PRISTINE_REGISTRY_DIR)
+    end
+    return
+end
+
+# Install the shared compressed General registry into `depot`, the way Pkg
+# would install it on first use, without the download: the small TOML file is
+# copied and the tarball symlinked (copied where symlinks are unavailable).
+# `Pkg.Registry.rm` and `update` remove or replace the link, not its target.
+function link_shared_registry!(depot::String)
+    regdir = joinpath(depot, "registries")
+    mkpath(regdir)
+    for f in filter(startswith("General"), readdir(SHARED_REGISTRIES_DIR))
+        src = joinpath(SHARED_REGISTRIES_DIR, f)
+        dst = joinpath(regdir, f)
+        if endswith(f, ".toml")
+            cp(src, dst)
+            chmod(dst, 0o644)
+        else
+            try
+                symlink(src, dst)
+            catch
+                cp(src, dst)
+            end
+        end
+    end
+    return
+end
+
+# Populate the shared loaded depot with the packages used by tests that run
+# with `isolate(loaded_depot = true)`, so those don't have to download them.
+# Called once by the test runner before any tests run; the workers of a
+# parallel run share the result through `CACHE_DIRECTORY`.
+function populate_loaded_depot!()
+    isdir(joinpath(LOADED_DEPOT, "packages")) && return # already populated
+    isolate() do
+        empty!(DEPOT_PATH)
+        push!(DEPOT_PATH, LOADED_DEPOT)
+        Base.append_bundled_depot_path!(DEPOT_PATH)
+        registry_is_compressed() && link_shared_registry!(LOADED_DEPOT)
+        Pkg.add(name = "Example", version = "0.5.3")
+        Pkg.add(name = "Example", version = "0.5.1")
+        Pkg.add(name = "Example", version = "0.5.0")
+        Pkg.add(name = "Example") # latest
+        Pkg.add(name = "Example", version = "0.3.0")
+        Pkg.add(name = "Example", version = "0.3.3")
+        Pkg.add(name = "JSON", version = "0.18.0")
+        Pkg.add(name = "JSON", version = "0.20.0")
+        # Keep only the package store and registry: environments and logs are
+        # created per test in the target depot.
+        rm(joinpath(LOADED_DEPOT, "environments"); force = true, recursive = true)
+        rm(joinpath(LOADED_DEPOT, "logs"); force = true, recursive = true)
+        # Make the files read-only so tests can't accidentally modify them.
+        for (root, _, files) in walkdir(LOADED_DEPOT)
+            for file in files
+                filepath = joinpath(root, file)
+                fmode = filemode(filepath)
+                try
+                    chmod(filepath, fmode & (typemax(fmode) ⊻ 0o222))
+                catch
+                end
+            end
+        end
+    end
+    # Allow julia subprocesses using the loaded depot to load this Pkg from
+    # cache (precompilation of Pkg is disallowed during tests).
+    copy_this_pkg_cache(LOADED_DEPOT)
+    return
+end
+
+# The helpers taking a `do` block are called with hundreds of distinct closures
+# across the test suite; `@nospecialize` keeps them from being compiled once per
+# closure type (each specialization took 0.2-0.5 s).
+function isolate(@nospecialize(fn::Function); loaded_depot = false, linked_reg = true)
+    old_load_path = copy(LOAD_PATH)
+    old_depot_path = copy(DEPOT_PATH)
+    old_home_project = Base.HOME_PROJECT[]
+    old_active_project = Base.ACTIVE_PROJECT[]
+    old_working_directory = pwd()
+    old_general_registry_url = Pkg.Registry.DEFAULT_REGISTRIES[1].url
+    old_general_registry_path = Pkg.Registry.DEFAULT_REGISTRIES[1].path
+    old_general_registry_linked = Pkg.Registry.DEFAULT_REGISTRIES[1].linked
+    return try
+        # Clone/download the registry only once
+        check_init_reg()
+
+        empty!(LOAD_PATH)
+        empty!(DEPOT_PATH)
+        Base.HOME_PROJECT[] = nothing
+        Base.ACTIVE_PROJECT[] = nothing
+        Pkg.UPDATED_REGISTRY_THIS_SESSION[] = false
+        if !registry_is_compressed()
+            Pkg.Registry.DEFAULT_REGISTRIES[1].url = nothing
+            Pkg.Registry.DEFAULT_REGISTRIES[1].path = linked_reg ? REGISTRY_DIR : PRISTINE_REGISTRY_DIR
+            Pkg.Registry.DEFAULT_REGISTRIES[1].linked = linked_reg
+        end
+        Pkg.REPLMode.TEST_MODE[] = false
+        withenv(
+            "JULIA_PROJECT" => nothing,
+            "JULIA_LOAD_PATH" => nothing,
+            "JULIA_PKG_DEVDIR" => nothing,
+            "JULIA_DEPOT_PATH" => nothing
+        ) do
+            target_depot = realpath(mktempdir())
+            push!(LOAD_PATH, "@", "@v#.#", "@stdlib")
+            push!(DEPOT_PATH, target_depot)
+            Base.append_bundled_depot_path!(DEPOT_PATH)
+            loaded_depot && push!(DEPOT_PATH, LOADED_DEPOT)
+            # (with the loaded depot the registry is reachable through that)
+            registry_is_compressed() && linked_reg && !loaded_depot && link_shared_registry!(target_depot)
+            depot_mtimes = Dict(d => mtime(d) for d in DEPOT_PATH if isdir(d))
+            try
+                fn()
+            finally
+                for (d, t) in depot_mtimes
+                    d == target_depot && continue # tests allowed to modify target depot
+                    isdir(d) || continue
+                    if mtime(d) != t
+                        error("shared depot $d was modified during isolated test: readdir(depot) = $(readdir(d))")
+                    end
+                end
+                if !haskey(ENV, "CI") && target_depot !== nothing && isdir(target_depot)
+                    try
+                        Base.rm(target_depot; force = true, recursive = true)
+                    catch err
+                        println("warning: isolate failed to clean up depot.\n  $err")
+                    end
+                end
+            end
+        end
+    finally
+        empty!(LOAD_PATH)
+        empty!(DEPOT_PATH)
+        append!(LOAD_PATH, old_load_path)
+        append!(DEPOT_PATH, old_depot_path)
+        Base.HOME_PROJECT[] = old_home_project
+        Base.ACTIVE_PROJECT[] = old_active_project
+        cd(old_working_directory)
+        Pkg.REPLMode.TEST_MODE[] = false # reset unconditionally
+        Pkg.Registry.DEFAULT_REGISTRIES[1].path = old_general_registry_path
+        Pkg.Registry.DEFAULT_REGISTRIES[1].url = old_general_registry_url
+        Pkg.Registry.DEFAULT_REGISTRIES[1].linked = old_general_registry_linked
+    end
+end
+
+# Run `fn` in an isolated depot whose General registry is pinned to `registry_commit`.
+# Only that commit is fetched (a full clone of the registry history takes
+# minutes), and the registry is installed compressed, the way the package
+# server delivers it: Pkg reads it into memory, which avoids checking out
+# the tens of thousands of registry files (minutes on Windows).
+function isolate_and_pin_registry(@nospecialize(fn::Function); registry_url::String, registry_commit::String)
+    isolate(loaded_depot = false, linked_reg = true) do
+        registries = joinpath(first(Base.DEPOT_PATH), "registries")
+        mkpath(registries)
+        # delete the linked registry (a symlinked directory, or the compressed
+        # registry's TOML file and tarball link, which must not be written through)
+        for f in filter(startswith("General"), readdir(registries))
+            rm(joinpath(registries, f); force = true)
+        end
+        mktempdir() do clone
+            git(cmd) = run(pipeline(`git -C $clone $cmd`, stdout = stdout_f(), stderr = stderr_f()))
+            git(`init --quiet .`)
+            git(`fetch --quiet --depth=1 $(registry_url) $(registry_commit)`)
+            tarball = joinpath(registries, "General.tar.gz")
+            git(`archive --format=tar.gz --output=$tarball FETCH_HEAD`)
+            tree_hash = readchomp(`git -C $clone rev-parse "FETCH_HEAD^{tree}"`)
+            if Pkg.Registry.registry_read_from_tarball()
+                write(
+                    joinpath(registries, "General.toml"), """
+                    git-tree-sha1 = "$tree_hash"
+                    uuid = "$GENERAL_UUID"
+                    path = "General.tar.gz"
+                    """
+                )
+            else
+                # Compressed registries are only read when a package server is
+                # used; otherwise install the registry as a directory.
+                regdir = joinpath(registries, "General")
+                Pkg.PlatformEngines.unpack(tarball, regdir)
+                write(joinpath(regdir, ".tree_info.toml"), "git-tree-sha1 = \"$tree_hash\"\n")
+                rm(tarball)
+            end
+        end
+        # Pkg would otherwise replace the pinned registry with the current one
+        # from the package server on the first operation.
+        Pkg.UPDATED_REGISTRY_THIS_SESSION[] = true
+        fn()
+    end
+    return nothing
+end
+
+function temp_pkg_dir(@nospecialize(fn::Function); rm = true, linked_reg = true)
+    old_load_path = copy(LOAD_PATH)
+    old_depot_path = copy(DEPOT_PATH)
+    old_home_project = Base.HOME_PROJECT[]
+    old_active_project = Base.ACTIVE_PROJECT[]
+    old_general_registry_url = Pkg.Registry.DEFAULT_REGISTRIES[1].url
+    old_general_registry_path = Pkg.Registry.DEFAULT_REGISTRIES[1].path
+    old_general_registry_linked = Pkg.Registry.DEFAULT_REGISTRIES[1].linked
+    return try
+        # Clone/download the registry only once
+        check_init_reg()
+
+        empty!(LOAD_PATH)
+        empty!(DEPOT_PATH)
+        Base.HOME_PROJECT[] = nothing
+        Base.ACTIVE_PROJECT[] = nothing
+        if !registry_is_compressed()
+            Pkg.Registry.DEFAULT_REGISTRIES[1].url = nothing
+            Pkg.Registry.DEFAULT_REGISTRIES[1].path = linked_reg ? REGISTRY_DIR : PRISTINE_REGISTRY_DIR
+            Pkg.Registry.DEFAULT_REGISTRIES[1].linked = linked_reg
+        end
+        withenv(
+            "JULIA_PROJECT" => nothing,
+            "JULIA_LOAD_PATH" => nothing,
+            "JULIA_PKG_DEVDIR" => nothing,
+            "JULIA_DEPOT_PATH" => nothing
+        ) do
+            env_dir = realpath(mktempdir())
+            depot_dir = realpath(mktempdir())
+            try
+                push!(LOAD_PATH, "@", "@v#.#", "@stdlib")
+                push!(DEPOT_PATH, depot_dir)
+                Base.append_bundled_depot_path!(DEPOT_PATH)
+                registry_is_compressed() && linked_reg && link_shared_registry!(depot_dir)
+                fn(env_dir)
+            finally
+                if rm && !haskey(ENV, "CI")
+                    try
+                        Base.rm(env_dir; force = true, recursive = true)
+                        Base.rm(depot_dir; force = true, recursive = true)
+                    catch err
+                        # Avoid raising an exception here as it will mask the original exception
+                        println(stderr_f(), "Exception in finally: $(sprint(showerror, err))")
+                    end
+                end
+            end
+        end
+    finally
+        empty!(LOAD_PATH)
+        empty!(DEPOT_PATH)
+        append!(LOAD_PATH, old_load_path)
+        append!(DEPOT_PATH, old_depot_path)
+        Base.HOME_PROJECT[] = old_home_project
+        Base.ACTIVE_PROJECT[] = old_active_project
+        Pkg.Registry.DEFAULT_REGISTRIES[1].path = old_general_registry_path
+        Pkg.Registry.DEFAULT_REGISTRIES[1].url = old_general_registry_url
+        Pkg.Registry.DEFAULT_REGISTRIES[1].linked = old_general_registry_linked
+    end
+end
+
+function cd_tempdir(@nospecialize(f); rm = true)
+    tmp = realpath(mktempdir())
+    cd(tmp) do
+        f(tmp)
+    end
+    return if rm && !haskey(ENV, "CI")
+        try
+            Base.rm(tmp; force = true, recursive = true)
+        catch err
+            # Avoid raising an exception here as it will mask the original exception
+            println(stderr_f(), "Exception in finally: $(sprint(showerror, err))")
+        end
+    end
+end
+
+isinstalled(pkg) = Base.locate_package(Base.PkgId(pkg.uuid, pkg.name)) !== nothing
+# For top level deps
+isinstalled(pkg::String) = Base.find_package(pkg) !== nothing
+
+function write_build(path, content)
+    build_filename = joinpath(path, "deps", "build.jl")
+    mkpath(dirname(build_filename))
+    return write(build_filename, content)
+end
+
+function with_current_env(@nospecialize(f))
+    prev_active = Base.ACTIVE_PROJECT[]
+    Pkg.activate(".")
+    return try
+        f()
+    finally
+        Base.ACTIVE_PROJECT[] = prev_active
+    end
+end
+
+function with_temp_env(@nospecialize(f), env_name::AbstractString = "Dummy"; rm = true)
+    prev_active = Base.ACTIVE_PROJECT[]
+    env_path = joinpath(realpath(mktempdir()), env_name)
+    Pkg.generate(env_path)
+    Pkg.activate(env_path)
+    return try
+        applicable(f, env_path) ? f(env_path) : f()
+    finally
+        Base.ACTIVE_PROJECT[] = prev_active
+        if rm && !haskey(ENV, "CI")
+            try
+                Base.rm(env_path; force = true, recursive = true)
+            catch err
+                # Avoid raising an exception here as it will mask the original exception
+                println(stderr_f(), "Exception in finally: $(sprint(showerror, err))")
+            end
+        end
+    end
+end
+
+function with_pkg_env(@nospecialize(fn::Function), path::AbstractString = "."; change_dir = false)
+    prev_active = Base.ACTIVE_PROJECT[]
+    Pkg.activate(path)
+    return try
+        if change_dir
+            cd(fn, path)
+        else
+            fn()
+        end
+    finally
+        Base.ACTIVE_PROJECT[] = prev_active
+    end
+end
+
+import LibGit2
+using UUIDs
+const TEST_SIG = LibGit2.Signature("TEST", "TEST@TEST.COM", round(time()), 0)
+const TEST_PKG = (name = "Example", uuid = UUID("7876af07-990d-54b4-ab0e-23690620f79a"))
+
+function git_init_and_commit(path; msg = "initial commit")
+    return LibGit2.with(LibGit2.init(path)) do repo
+        LibGit2.add!(repo, "*")
+        LibGit2.commit(repo, msg; author = TEST_SIG, committer = TEST_SIG)
+    end
+end
+
+function git_init_package(tmp, path)
+    base = basename(path)
+    pkgpath = joinpath(tmp, base)
+    cp(path, pkgpath)
+    git_init_and_commit(pkgpath)
+    return pkgpath
+end
+
+function ensure_test_package_user_writable(dir)
+    for (root, _, files) in walkdir(dir)
+        chmod(root, filemode(root) | 0o200 | 0o100)
+
+        for file in files
+            filepath = joinpath(root, file)
+            chmod(filepath, filemode(filepath) | 0o200)
+        end
+    end
+    return
+end
+
+function copy_test_package(tmpdir::String, name::String; use_pkg = true)
+    target = joinpath(tmpdir, name)
+    cp(joinpath(@__DIR__, "test_packages", name), target)
+    ensure_test_package_user_writable(target)
+    use_pkg || return target
+
+    # The known Pkg UUID, and whatever UUID we're currently using for testing
+    known_pkg_uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+    pkg_uuid = TOML.parsefile(joinpath(dirname(@__DIR__), "Project.toml"))["uuid"]
+
+    # We usually want this test package to load our pkg, so update its Pkg UUID:
+    test_pkg_dir = joinpath(@__DIR__, "test_packages", name)
+    for f in ("Manifest.toml", "Project.toml")
+        fpath = joinpath(tmpdir, name, f)
+        if isfile(fpath)
+            write(fpath, replace(read(fpath, String), known_pkg_uuid => pkg_uuid))
+        end
+    end
+    return target
+end
+
+function add_this_pkg(; platform = Base.BinaryPlatforms.HostPlatform())
+    return try
+        Pkg.respect_sysimage_versions(false)
+        pkg_dir = dirname(@__DIR__)
+        pkg_uuid = TOML.parsefile(joinpath(pkg_dir, "Project.toml"))["uuid"]
+        spec = Pkg.PackageSpec(
+            name = "Pkg",
+            uuid = UUID(pkg_uuid),
+            path = pkg_dir,
+        )
+        Pkg.develop(spec; platform)
+        # Packages depending on Pkg are precompiled in a subprocess, which
+        # must find Pkg's cache in the (usually fresh) primary depot.
+        copy_this_pkg_cache(Base.DEPOT_PATH[1])
+    finally
+        Pkg.respect_sysimage_versions(true)
+    end
+end
+
+function list_tarball_files(tarball_path::AbstractString)
+    names = String[]
+    Tar.list(`$(Pkg.PlatformEngines.exe7z()) x $tarball_path -so`) do hdr
+        push!(names, hdr.path)
+    end
+    return names
+end
+
+function show_output_if_command_errors(cmd::Cmd)
+    out = IOBuffer()
+    err = IOBuffer()
+    proc = run(pipeline(cmd; stdout = out, stderr = err); wait = false)
+    wait(proc)
+    if !success(proc)
+        seekstart(out); seekstart(err)
+        println(read(out, String))
+        println(read(err, String))
+        Base.pipeline_error(proc)
+    end
+    return true
+end
+
+function recursive_rm_cov_files(rootdir::String)
+    for (root, _, files) in walkdir(rootdir)
+        for file in files
+            endswith(file, ".cov") && rm(joinpath(root, file))
+        end
+    end
+    return
+end
+
+# A minimal HTTP/1.1 server on a free localhost port. `respond(sock, target)` is called on
+# its own task for every request once the request line and headers have been consumed,
+# and writes the whole response; the connection is closed when it returns. `close` shuts
+# down the server and every connection it still holds open.
+function http_server(respond::Function)
+    server = listen(Sockets.localhost, 0)
+    url = "http://$(Sockets.localhost):$(Int(last(getsockname(server))))"
+    sockets = TCPSocket[]
+    @async while isopen(server)
+        sock = try
+            accept(server)
+        catch
+            break # closed
+        end
+        push!(sockets, sock)
+        handler = @async try
+            request_line = readline(sock)
+            while !isempty(rstrip(readline(sock)))
+            end
+            words = split(request_line)
+            length(words) >= 2 && respond(sock, String(words[2]))
+        catch
+            # a connection torn down by `close` is not a failure
+            isopen(sock) && rethrow()
+        finally
+            close(sock)
+        end
+        Base.errormonitor(handler)
+    end
+    return (; url, close = () -> (foreach(close, sockets); close(server)))
+end
+
+# Answers every request with the headers and the start of a body that then trickles in far
+# too slowly to ever complete, but fast enough that curl does not give up on it, so the
+# transfer stays in flight until it is cancelled. `requested` gets one item per transfer
+# under way and `disconnected` one per client that hangs up.
+function stalling_http_server()
+    requested = Channel{Nothing}(Inf)
+    disconnected = Channel{Nothing}(Inf)
+    server = http_server() do sock, target
+        write(sock, "HTTP/1.1 200 OK\r\nContent-Type: application/gzip\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\n")
+        write(sock, zeros(UInt8, 4096))
+        flush(sock)
+        put!(requested, nothing)
+        trickle = @async try
+            while true
+                sleep(0.25)
+                write(sock, zeros(UInt8, 64))
+                flush(sock)
+            end
+        catch
+            # the socket was closed
+        end
+        try
+            while !eof(sock)
+                readavailable(sock)
+            end
+        finally
+            close(sock)
+            wait(trickle)
+        end
+        return put!(disconnected, nothing)
+    end
+    return (; server.url, requested, disconnected, server.close)
+end
+
+# Convert a path into a file URL.
+function make_file_url(path)
+    # Turn the slashes on Windows. In case the path starts with a
+    # drive letter, an extra slash will be needed in the file URL.
+    path = replace(path, "\\" => "/")
+    if !startswith(path, "/")
+        path = "/" * path
+    end
+    return "file://$(path)"
+end
+
+end

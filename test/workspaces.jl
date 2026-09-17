@@ -1,0 +1,295 @@
+module WorkspaceTest
+
+import ..Pkg # ensure we are using the correct Pkg
+using Test
+using TOML
+using UUIDs
+using ..Utils
+
+temp_pkg_dir() do project_path
+    cd(project_path) do;
+        with_temp_env() do
+            name = "MonorepoSub"
+            rm(name, force = true, recursive = true)
+            Pkg.generate(name)
+            cd("MonorepoSub") do
+                Pkg.activate(".")
+                # Add Example, Crayons, PrivatePackage to the "MonorepoSub" package
+                Pkg.add("Example")
+                Pkg.add(; name = "Crayons", version = "v4.0.3")
+                Pkg.compat("Crayons", "=4.0.0, =4.0.1, =4.0.2, =4.0.3")
+                Pkg.generate("PrivatePackage")
+                Pkg.develop(path = "PrivatePackage")
+                d = TOML.parsefile("Project.toml")
+                d["workspace"] = Dict("projects" => ["test", "docs", "benchmarks", "PrivatePackage"])
+                d["sources"] = Dict("PrivatePackage" => Dict("path" => "PrivatePackage"))
+                Pkg.Types.write_project(d, "Project.toml")
+                write(
+                    "src/MonorepoSub.jl", """
+                        module MonorepoSub
+                        using Example, Crayons, PrivatePackage
+                        end
+                    """
+                )
+
+                # Add some deps to PrivatePackage
+                Pkg.activate("PrivatePackage")
+                Pkg.add(; name = "Chairmarks", version = v"1.1.2")
+                @test !isfile("PrivatePackage/Manifest.toml")
+                d = TOML.parsefile("PrivatePackage/Project.toml")
+                d["workspace"] = Dict("projects" => ["test"])
+                Pkg.Types.write_project(d, "PrivatePackage/Project.toml")
+                write(
+                    "PrivatePackage/src/PrivatePackage.jl", """
+                    module PrivatePackage
+                        using Chairmarks
+                    end
+                    """
+                )
+                io = IOBuffer()
+                Pkg.status(; io)
+                status = String(take!(io))
+                for pkg in ["Crayons v", "Example v", "TestSpecificPackage v"]
+                    @test !occursin(pkg, status)
+                end
+                @test occursin("Chairmarks v", status)
+
+                # Make a test subproject in PrivatePackage
+                # Note that this is a "nested subproject" since in this environment
+                # PrivatePackage is a subproject of MonorepoSub
+                mkdir("PrivatePackage/test")
+                Pkg.activate("PrivatePackage/test")
+                # This adds too many packages to the Project file...
+                Pkg.add("Test")
+                Pkg.develop(path = "PrivatePackage")
+                @test length(Pkg.project().dependencies) == 2
+                write(
+                    "PrivatePackage/test/runtests.jl", """
+                        using Test
+                        using PrivatePackage
+                    """
+                )
+                # A nested subproject should still use the root base manifest
+                @test !isfile("PrivatePackage/test/Manifest.toml")
+                # Test status shows deps in test-subproject + base (MonoRepoSub)
+                io = IOBuffer()
+                Pkg.status(; io)
+                status = String(take!(io))
+                for pkg in ["Crayons", "Example", "TestSpecificPackage"]
+                    @test !occursin(pkg, status)
+                end
+                @test occursin("Test v", status)
+
+                Pkg.status(; io, workspace = true)
+                status = String(take!(io))
+                for pkg in ["Crayons", "Example", "Test"]
+                    @test occursin(pkg, status)
+                end
+
+                # Add tests to MonorepoSub
+                mkdir("test")
+                Pkg.activate("test")
+                # Test specific deps
+                Pkg.add("Test")
+                Pkg.add("Crayons")
+                Pkg.compat("Crayons", "=4.0.1, =4.0.2, =4.0.3, =4.0.4")
+                Pkg.develop(; path = ".")
+                # Compat in base package should prevent updating to 4.0.4
+                Pkg.update()
+                @test Pkg.dependencies()[UUID("a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f")].version == v"4.0.3"
+                Pkg.generate("TestSpecificPackage")
+                Pkg.develop(path = "TestSpecificPackage")
+                d = TOML.parsefile("test/Project.toml")
+                d["sources"] = Dict("TestSpecificPackage" => Dict("path" => "../TestSpecificPackage"))
+                Pkg.Types.write_project(d, "test/Project.toml")
+
+                @test !isfile("test/Manifest.toml")
+                write(
+                    "test/runtests.jl", """
+                        using Test
+                        using Crayons
+                        using TestSpecificPackage
+                        using MonorepoSub
+                    """
+                )
+
+                Pkg.activate(".")
+                env = Pkg.Types.EnvCache()
+                hash_1 = Pkg.Types.workspace_resolve_hash(env)
+                Pkg.activate("PrivatePackage")
+                env = Pkg.Types.EnvCache()
+                hash_2 = Pkg.Types.workspace_resolve_hash(env)
+                Pkg.activate("test")
+                env = Pkg.Types.EnvCache()
+                hash_3 = Pkg.Types.workspace_resolve_hash(env)
+                Pkg.activate("PrivatePackage/test")
+                env = Pkg.Types.EnvCache()
+                hash_4 = Pkg.Types.workspace_resolve_hash(env)
+
+                @test hash_1 == hash_2 == hash_3 == hash_4
+
+                # Test workspace option for update, pin, free
+                Pkg.activate(".")
+                # Chairmarks is only a dep of the PrivatePackage subproject, not the root
+                all_deps = Pkg.dependencies()
+                chairmarks_uuid = only([uuid for (uuid, info) in all_deps if info.name == "Chairmarks"])
+                @test all_deps[chairmarks_uuid].version == v"1.1.2"
+
+                # update without workspace should not touch Chairmarks (not a root dep)
+                Pkg.update()
+                Pkg.dependencies(chairmarks_uuid) do pkg
+                    @test pkg.version == v"1.1.2"
+                end
+
+                # update with workspace=true should update Chairmarks from the subproject
+                Pkg.update(; workspace = true)
+                Pkg.dependencies(chairmarks_uuid) do pkg
+                    @test pkg.version > v"1.1.2"
+                end
+
+                # Test that the subprojects are working
+                depot_path_string = join(Base.DEPOT_PATH, Sys.iswindows() ? ";" : ":")
+                # The subprocesses run no Pkg code; with coverage enabled they
+                # could not use native code for the packages they load.
+                julia = `$(Base.julia_cmd()) --startup-file=no --code-coverage=none`
+                withenv("JULIA_DEPOT_PATH" => depot_path_string) do
+                    @test success(run(`$(julia) --project="test" test/runtests.jl`))
+                    @test success(run(`$(julia) --project -e 'using MonorepoSub'`))
+                    @test success(run(`$(julia) --project="PrivatePackage" -e 'using PrivatePackage'`))
+                    @test success(run(`$(julia) --project="PrivatePackage/test" PrivatePackage/test/runtests.jl`))
+
+                    rm("Manifest.toml")
+                    Pkg.activate(".")
+                    Pkg.resolve()
+                    # Resolve should have fixed the manifest so that everything above works from the existing project files
+                    @test success(run(`$(julia) --project="test" test/runtests.jl`))
+                    @test success(run(`$(julia) --project -e 'using MonorepoSub'`))
+                    @test success(run(`$(julia) --project="PrivatePackage" -e 'using PrivatePackage'`))
+                    @test success(run(`$(julia) --project="PrivatePackage/test" PrivatePackage/test/runtests.jl`))
+                end
+            end
+        end
+    end
+end
+
+@testset "test resolve with tree hash" begin
+    isolate() do
+        mktempdir() do dir
+            path = copy_test_package(dir, "WorkspaceTestInstantiate")
+            cd(path) do
+                with_current_env() do
+                    withenv("JULIA_PKG_PRECOMPILE_AUTO" => "1") do
+                        @test !isfile("Manifest.toml")
+                        @test !isfile("test/Manifest.toml")
+                        Pkg.test()
+                        @test isfile("Manifest.toml")
+                        @test !isfile("test/Manifest.toml")
+                        rm(joinpath(DEPOT_PATH[1], "packages", "Example"); recursive = true)
+                        Pkg.test()
+                    end
+                end
+            end
+        end
+    end
+end
+
+@testset "workspace path resolution issue #4222" begin
+    isolate() do
+        mktempdir() do dir
+            path = copy_test_package(dir, "WorkspacePathResolution")
+            cd(path) do
+                with_current_env() do
+                    # First resolve SubProjectB (non-root project) without existing Manifest
+                    Pkg.activate("SubProjectB")
+                    @test !isfile("Manifest.toml")
+                    # Should be able to find SubProjectA and succeed
+                    Pkg.update()
+                end
+            end
+        end
+    end
+end
+
+# Test that workspace child projects with [sources] pointing to parent work correctly
+# This was broken in 1.12.3 due to stale assertions after #4539
+@testset "workspace sources pointing to parent package" begin
+    mktempdir() do dir
+        path = copy_test_package(dir, "WorkspaceSourcesParent")
+        cd(path) do
+            with_current_env() do
+                # Activate the docs subproject which has [sources] WorkspaceSourcesParent = {path = ".."}
+                Pkg.activate("docs")
+                @test !isfile("Manifest.toml")
+                # This should succeed without AssertionError
+                Pkg.instantiate()
+                @test isfile("Manifest.toml")
+                # Verify the manifest has the correct path for the parent package
+                manifest = TOML.parsefile("Manifest.toml")
+                parent_entry = only(manifest["deps"]["WorkspaceSourcesParent"])
+                @test parent_entry["path"] == "."
+                # Verify the Project.toml sources path was NOT corrupted (issue #4575)
+                # The path should remain ".." (project-relative), not "." (manifest-relative)
+                project = TOML.parsefile("docs/Project.toml")
+                @test project["sources"]["WorkspaceSourcesParent"]["path"] == ".."
+            end
+        end
+    end
+end
+
+@testset "selective workspace instantiate" begin
+    mktempdir() do dir
+        path = copy_test_package(dir, "WorkspaceTestInstantiate")
+        cd(path) do
+            with_current_env() do
+                # Add Crayons dependency to root project to differentiate from subproject's Example
+                Pkg.activate(".")
+                Pkg.add("Crayons")
+
+                # The test subproject already has Example dependency
+                # Workspace structure is already set up in the test package
+
+                # Resolve to create full manifest
+                Pkg.resolve()
+                @test isfile("Manifest.toml")
+
+                # Verify manifest contains both dependencies
+                manifest = Pkg.Types.read_manifest("Manifest.toml")
+                example_uuid = UUID("7876af07-990d-54b4-ab0e-23690620f79a")  # From test subproject
+                crayons_uuid = UUID("a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f")  # From root project
+                @test haskey(manifest.deps, example_uuid)
+                @test haskey(manifest.deps, crayons_uuid)
+
+                # Clear package installations to test selective download
+                depot_path = first(Pkg.depots())
+                packages_dir = joinpath(depot_path, "packages")
+                for pkg_name in ["Example", "Crayons"]
+                    pkg_dir = joinpath(packages_dir, pkg_name)
+                    rm(pkg_dir, recursive = true, force = true)
+                end
+
+                # Test workspace=false only downloads root project deps (Crayons)
+                Pkg.instantiate(workspace = false)
+                example_installed = isdir(joinpath(packages_dir, "Example"))
+                crayons_installed = isdir(joinpath(packages_dir, "Crayons"))
+                @test crayons_installed   # Should be installed (root project dependency)
+                @test !example_installed  # Should not be installed with workspace=false
+
+                # Clear and test workspace=true downloads all deps
+                rm(joinpath(packages_dir, "Crayons"), recursive = true, force = true)
+                Pkg.instantiate(workspace = true)
+                example_installed = isdir(joinpath(packages_dir, "Example"))
+                crayons_installed = isdir(joinpath(packages_dir, "Crayons"))
+                @test crayons_installed   # Should be installed
+                @test example_installed   # Should be installed with workspace=true
+
+                # Test is_instantiated behavior
+                rm(joinpath(packages_dir, "Example"), recursive = true, force = true)
+                ctx = Pkg.Types.Context()
+                @test Pkg.Operations.is_instantiated(ctx.env, false)   # Root project complete (has Crayons)
+                @test !Pkg.Operations.is_instantiated(ctx.env, true)   # Workspace incomplete (missing Example)
+            end
+        end
+    end
+end
+
+end # module
