@@ -1705,8 +1705,8 @@ pairs(s::AbstractString) = IterableStatePairs(s)
 """
     nth(itr, n::Integer)
 
-Get the element at zero-based position `n` in an iterable collection. Throw a `BoundsError`[@ref] if not existing.
-Will advance any `Stateful`[@ref] iterator.
+Get the element at zero-based position `n` in an iterable collection. Throw a [`BoundsError`](@ref) if not existing.
+Will advance any [`Stateful`](@ref) iterator.
 
 See also: [`first`](@ref), [`last`](@ref)
 

@@ -256,6 +256,9 @@ precompile_test_harness(false) do dir
               const d29936a = UnionAll(Dict.var, UnionAll(Dict.body.var, Dict.body.body))
               const d29936b = UnionAll(Dict.body.var, UnionAll(Dict.var, Dict.body.body))
 
+              const gr54932 = GlobalRef(Base, gensym(:hash54932))
+              const dict54932 = Dict(gr54932 => :found)
+
               # issue #28998
               const x28998 = [missing, 2, missing, 6, missing,
                               missing, missing, missing,
@@ -369,6 +372,13 @@ precompile_test_harness(false) do dir
 
         @test Foo.d29936a === Dict
         @test Foo.d29936b === Dict{K,V} where {V,K}
+
+        gr = Foo.gr54932
+        fresh = GlobalRef(gr.mod, gr.name)
+        @test isequal(gr, fresh)
+        @test hash(gr) == hash(fresh)
+        @test Foo.dict54932[gr] === :found
+        @test Foo.dict54932[fresh] === :found
 
         @test Foo.x28998[end] == 6
 
@@ -2870,6 +2880,41 @@ end
     end
 end
 
+# Requesting precompilation of a package that lives in the sysimage has nothing to do
+# and must not error, even when it is the only dependency of the environment (#63189)
+@testset "precompilepkgs on a sysimage package" begin
+    mkdepottempdir() do depot
+        project_path = joinpath(depot, "testenv")
+        mkpath(project_path)
+        sha_uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+        @test Base.in_sysimage(Base.PkgId(Base.UUID(sha_uuid), "SHA"))
+        write(joinpath(project_path, "Project.toml"), """
+            [deps]
+            SHA = "$sha_uuid"
+            """)
+        write(joinpath(project_path, "Manifest.toml"), """
+            manifest_format = "2.0"
+
+            [[deps.SHA]]
+            uuid = "$sha_uuid"
+            version = "1.0.0"
+            """)
+        original_depot_path = copy(Base.DEPOT_PATH)
+        old_proj = Base.active_project()
+        try
+            push!(empty!(DEPOT_PATH), depot)
+            Base.set_active_project(project_path)
+            io = IOBuffer()
+            @test Base.Precompilation.precompilepkgs(["SHA"]; io, fancyprint=false) === nothing
+            @test Base.Precompilation.precompilepkgs(; io, fancyprint=false) === nothing
+            @test isempty(takestring!(io))
+        finally
+            Base.set_active_project(old_proj)
+            append!(empty!(DEPOT_PATH), original_depot_path)
+        end
+    end
+end
+
 precompile_test_harness("invalidation for 'foreign-keyed' Preferences") do load_path
     # Test that compile-time preferences invalidate, even when queried from a
     # "foreign" UUID / package namespace
@@ -3073,6 +3118,34 @@ end
         finally
             Base.set_active_project(old_proj)
             append!(empty!(DEPOT_PATH), original_depot_path)
+        end
+    end
+end
+
+# Full workspace precompilation should find the root and recursively include member packages.
+@testset "full workspace precompilation" begin
+    workspace_path = joinpath(@__DIR__, "project", "Workspaces", "PrecompileExt")
+    nested_member_path = joinpath(workspace_path, "Nested", "Baz")
+    for active_project in (workspace_path, nested_member_path)
+        mkdepottempdir() do depot
+            original_depot_path = copy(Base.DEPOT_PATH)
+            old_proj = Base.active_project()
+            try
+                push!(empty!(DEPOT_PATH), depot)
+                Base.set_active_project(active_project)
+
+                io = IOBuffer()
+                ioc = IOContext(io, :color => false)
+                Base.Precompilation.precompilepkgs(; io=ioc, fancyprint=false, manifest=true)
+                output = String(take!(io))
+
+                @test occursin("Foo", output)
+                @test occursin("Bar", output)
+                @test occursin("Baz", output)
+            finally
+                Base.set_active_project(old_proj)
+                append!(empty!(DEPOT_PATH), original_depot_path)
+            end
         end
     end
 end
@@ -3723,6 +3796,10 @@ precompile_test_harness("cache rejection reasons") do dir
     # actionable reasons are reported over rejections of other-version caches
     Base.record_reason(reasons, :incompatible_header)
     @test Base.list_reasons(reasons) == msg
+
+    # a dependency loaded at a different version is reported by name
+    @test Base.list_reasons(Dict(Symbol("dep_loaded_incompatible:Foo") => 1)) ==
+        " (cache not reused: Foo is already loaded at a different version)"
 
     # rejections of caches that weren't the ones searched for are never reported
     @test Base.list_reasons(Dict(:buildid_mismatch => 2)) == ""

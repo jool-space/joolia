@@ -207,7 +207,7 @@ end
 
 # A request to do precompilation work, either in a new session or merged into a running one.
 struct PrecompileRequest
-    pkgs::Vector{String}
+    pkgs::Union{Vector{String}, Vector{PkgId}}
     internal_call::Bool
     strict::Bool
     warn_loaded::Bool
@@ -528,7 +528,7 @@ struct ExplicitEnv
     project_weakdeps::Dict{String, UUID} # [weakdeps] in the active project's Project.toml
     project_extras::Dict{String, UUID}   # [extras] in the active project's Project.toml
     project_extensions::Dict{String, Vector{UUID}} # [extensions] in the active project's Project.toml
-    workspace_deps::Dict{String, UUID}   # union of [deps] from all workspace member Project.tomls
+    workspace_deps::Dict{UUID, String}   # packages and [deps] from all workspace member Project.tomls
     deps::Dict{UUID, Vector{UUID}}       # full dependency graph from Manifest.toml
     weakdeps::Dict{UUID, Vector{UUID}}   # full weak dependency graph from Manifest.toml
     extensions::Dict{UUID, Dict{String, Vector{UUID}}}
@@ -550,7 +550,7 @@ function ExplicitEnv(::Nothing, envpath::String="")
         Dict{String, UUID}(),     # project_weakdeps
         Dict{String, UUID}(),     # project_extras
         Dict{String, Vector{UUID}}(), # project_extensions
-        Dict{String, UUID}(),     # workspace_deps
+        Dict{UUID, String}(),     # workspace_deps
         Dict{UUID, Vector{UUID}}(),   # deps
         Dict{UUID, Vector{UUID}}(),   # weakdeps
         Dict{UUID, Dict{String, Vector{UUID}}}(), # extensions
@@ -780,39 +780,52 @@ function ExplicitEnv(envpath::String)
     end
     =#
 
-    # Collect the union of [deps] from all workspace member projects.
-    # For non-workspace projects, this is the same as project_deps.
-    workspace_deps = copy(project_deps)
-    base = base_project(envpath)
-    if base !== nothing
-        base_d = parsed_toml(base)
-        # Add deps from the workspace root project
-        for (name, _uuid) in get(Dict{String, Any}, base_d, "deps")::Dict{String, Any}
-            workspace_deps[name] = UUID(_uuid::String)
-        end
-        # Add deps from each workspace member project
-        ws = get(base_d, "workspace", nothing)::Union{Dict{String, Any}, Nothing}
-        if ws !== nothing
-            ws_projects = get(ws, "projects", nothing)::Union{Vector{String}, Nothing, String}
-            if ws_projects isa Vector
-                ws_root = dirname(base)
-                for ws_proj in ws_projects
-                    ws_proj_dir = joinpath(ws_root, ws_proj)
-                    ws_proj_file = Base.env_project_file(ws_proj_dir)
-                    ws_proj_file isa String || continue
-                    ws_d = parsed_toml(ws_proj_file)
-                    for (name, _uuid) in get(Dict{String, Any}, ws_d, "deps")::Dict{String, Any}
-                        workspace_deps[name] = UUID(_uuid::String)
-                    end
-                end
-            end
-        end
-    end
+    workspace_deps = collect_workspace_deps(envpath)
 
     return ExplicitEnv(envpath, project_deps, project_weakdeps, project_extras,
                        project_extensions, workspace_deps,
                        deps_expanded, weakdeps_expanded, extensions_expanded,
                        names, lookup_strategy, #=prefs, local_prefs=#)
+end
+
+function collect_workspace_deps(project_file::String)
+    while true
+        base = base_project(project_file)
+        base === nothing && break
+        project_file = base
+    end
+
+    workspace_deps = Dict{UUID, String}()
+    collect_workspace_deps!(workspace_deps, Set{String}(), project_file)
+    return workspace_deps
+end
+
+function collect_workspace_deps!(workspace_deps::Dict{UUID, String}, seen::Set{String}, project_file::String)
+    project_file = abspath(project_file)
+    project_file in seen && return
+    push!(seen, project_file)
+
+    project = parsed_toml(project_file)
+    for (name, _uuid) in get(Dict{String, Any}, project, "deps")::Dict{String, Any}
+        workspace_deps[UUID(_uuid::String)] = name
+    end
+
+    name = get(project, "name", nothing)::Union{String, Nothing}
+    _uuid = get(project, "uuid", nothing)::Union{String, Nothing}
+    if name !== nothing && _uuid !== nothing
+        workspace_deps[UUID(_uuid)] = name
+    end
+
+    workspace = get(project, "workspace", nothing)::Union{Dict{String, Any}, Nothing}
+    workspace === nothing && return
+    projects = get(workspace, "projects", nothing)::Union{Vector{String}, Nothing, String}
+    projects isa Vector || return
+    for member in projects
+        member_file = Base.env_project_file(joinpath(dirname(project_file), member))
+        member_file isa String || continue
+        collect_workspace_deps!(workspace_deps, seen, member_file)
+    end
+    return
 end
 
 # A manifest resolved by a different Julia version can record stale information for
@@ -994,9 +1007,9 @@ function build_dep_graph(env::ExplicitEnv, manifest::Bool, _from_loading::Bool, 
     # Determine which packages to consider for precompilation by walking
     # transitive dependencies from the appropriate roots.
     # `manifest` controls the scope: workspace_deps (all members) vs project_deps (current project).
-    roots = manifest ? env.workspace_deps : env.project_deps
+    root_uuids = manifest ? keys(env.workspace_deps) : values(env.project_deps)
     pkg_uuids = Set{UUID}()
-    for (_, uuid) in roots
+    for uuid in root_uuids
         _collect_reachable!(pkg_uuids, env.deps, uuid)
     end
 
@@ -1031,12 +1044,19 @@ function build_dep_graph(env::ExplicitEnv, manifest::Bool, _from_loading::Bool, 
         end
     end
 
-    project_deps = [
-        PkgId(uuid, name)
-        for (name, uuid) in env.project_deps if !Base.in_sysimage(PkgId(uuid, name))
-    ]
+    project_deps = PkgId[]
+    if manifest
+        for (uuid, name) in env.workspace_deps
+            push!(project_deps, PkgId(uuid, name))
+        end
+    else
+        for (name, uuid) in env.project_deps
+            push!(project_deps, PkgId(uuid, name))
+        end
+    end
+    filter!(!Base.in_sysimage, project_deps)
     # consider exts of project deps to be project deps so that errors are reported
-    append!(project_deps, keys(filter(d->last(d).name in keys(env.project_deps), ext_to_parent)))
+    append!(project_deps, keys(filter(d -> last(d) in project_deps, ext_to_parent)))
 
     # An extension effectively depends on another extension if it has a strict superset of its triggers
     for ext_a in keys(ext_to_parent)
@@ -1293,6 +1313,92 @@ function precompilepkgs(pkgs::Union{Vector{String}, Vector{PkgId}}=String[];
     _precompilepkgs(pkgs, internal_call, strict, warn_loaded, timing, verbose, _from_loading,
                    configs isa Vector{Config} ? configs : [configs],
                    unstable_iocontext(io), fancyprint, manifest, ignore_loaded, detachable)
+end
+
+"""
+    precompile_for_loading(into::Module, names::Vector{Symbol})
+
+Look-ahead for a `using`/`import` statement that is about to load the packages
+`names` into `into`. Precompiles in one parallel session every package of the
+statement that is not loaded yet and has no usable cache, together with the
+extensions that become loadable once they all are (including extensions whose
+other triggers are already loaded). Each subsequent `require` then finds a fresh
+cache instead of starting its own session per package, and extensions do not
+trail as extra sessions after their triggers load.
+
+Any failure is left for `require` to report: this only does work `require`
+would otherwise do itself, one package at a time.
+"""
+function precompile_for_loading(into::Module, names::Vector{Symbol})
+    Base.JLOptions().use_compiled_modules == 1 || return
+    Base.generating_output() && return
+    Base.disable_parallel_precompile && return
+    try
+        _precompile_for_loading(into, names)
+    catch err
+        err isa Union{InterruptException, Base.CancellationRequest} && rethrow()
+        @debug "Look-ahead precompilation failed, leaving it to `require`" exception=(err, catch_backtrace())
+    end
+    return
+end
+
+function _precompile_for_loading(into::Module, names::Vector{Symbol})
+    pkgs = PkgId[]
+    for name in names
+        pkg = Base.identify_package(into, String(name))
+        pkg === nothing && continue
+        Base.root_module_exists(pkg) && continue
+        pkg in pkgs || push!(pkgs, pkg)
+    end
+    isempty(pkgs) && return
+
+    # Extensions the statement makes loadable: the parent is reachable from what is
+    # being loaded or already loaded, at least one trigger is being loaded, and every
+    # trigger is reachable, already loaded, or in the sysimage.
+    env = ExplicitEnv()
+    reachable = Set{UUID}()
+    for pkg in pkgs
+        pkg.uuid === nothing && continue
+        _collect_reachable!(reachable, env.deps, pkg.uuid)
+    end
+    loaded = @lock Base.require_lock Set{UUID}(pkg.uuid::UUID for pkg in keys(Base.loaded_modules) if pkg.uuid !== nothing)
+    available(uuid::UUID) = uuid in reachable || uuid in loaded ||
+        (haskey(env.names, uuid) && Base.in_sysimage(PkgId(uuid, env.names[uuid])))
+    ext_parents = Dict{PkgId, PkgId}()
+    for uuid in Iterators.flatten((reachable, loaded))
+        for (ext_name, trigger_uuids) in get(Dict{String, Vector{UUID}}, env.extensions, uuid)
+            all(available, trigger_uuids) || continue
+            (uuid in reachable || any(in(reachable), trigger_uuids)) || continue
+            ext = PkgId(Base.uuid5(uuid, ext_name), ext_name)
+            (Base.root_module_exists(ext) || haskey(ext_parents, ext)) && continue
+            push!(pkgs, ext)
+            ext_parents[ext] = PkgId(uuid, env.names[uuid])
+        end
+    end
+    # a single package gets no benefit over the session `require` starts itself
+    length(pkgs) > 1 || return
+
+    stale = PkgId[]
+    reasons = Dict{Symbol,Int}()
+    stale_cache = Dict{Base.StaleCacheKey,Bool}()
+    cachepath_cache = Dict{PkgId, Vector{String}}()
+    for pkg in pkgs
+        fresh = try
+            Base.compilecache_freshest_path(pkg; ignore_loaded=false, stale_cache, cachepath_cache,
+                                            verify_checksums=false, reasons) !== nothing
+        catch
+            true # e.g. no source located: leave it to `require` to report
+        end
+        fresh || push!(stale, pkg)
+    end
+    isempty(stale) && return
+
+    verbosity = isinteractive() ? CoreLogging.Info : CoreLogging.Debug
+    label(pkg) = haskey(ext_parents, pkg) ? Base.pkg_log_name(pkg, ext_parents[pkg]) : Base.pkg_log_name(pkg)
+    Base.@logmsg verbosity "Precompiling $(join((label(pkg) for pkg in stale), ", "))$(Base.list_reasons(reasons))"
+    # `@invokelatest` for the same reason as in `Base.__require_prelocked`, see #60223
+    @invokelatest precompilepkgs(pkgs; _from_loading=true, ignore_loaded=false)
+    return
 end
 
 ## Background lifecycle
@@ -1715,9 +1821,6 @@ function launch_background_precompile(pkgs::Union{Vector{String}, Vector{PkgId}}
         BG.work_channel = Channel{PrecompileRequest}(Inf)
     end
 
-    # Capture necessary context for background task
-    pkg_names = pkgs isa Vector{String} ? copy(pkgs) : String[pkg.name for pkg in pkgs]
-
     # Register an atexit hook (once) to cleanly shut down background precompilation
     # before the event loop is torn down.
     register_atexit_hook()
@@ -1727,7 +1830,8 @@ function launch_background_precompile(pkgs::Union{Vector{String}, Vector{PkgId}}
         wc = BG.work_channel
         BG.task = Threads.@spawn :samepool begin
             try
-                ret = do_precompile(pkg_names, internal_call, strict, warn_loaded, timing, _from_loading,
+                # pass the ids through: an extension has no name resolvable from `Main`
+                ret = do_precompile(pkgs, internal_call, strict, warn_loaded, timing, _from_loading,
                                     configs, io, fancyprint, manifest, ignore_loaded, detachable, wc)
 
                 @lock BG begin
@@ -1799,8 +1903,7 @@ function _precompilepkgs(pkgs::Union{Vector{String}, Vector{PkgId}},
         did_inject = @lock BG begin
             if BG.task !== nothing && !istaskdone(BG.task) &&
                     isopen(BG.work_channel)
-                pkg_names = pkgs isa Vector{String} ? copy(pkgs) : String[pkg.name for pkg in pkgs]
-                req = PrecompileRequest(pkg_names, internal_call, strict, warn_loaded, timing, _from_loading,
+                req = PrecompileRequest(copy(pkgs), internal_call, strict, warn_loaded, timing, _from_loading,
                                         configs, io, fancyprint′, manifest, ignore_loaded, detachable,
                                         Channel{Any}(1))
                 try
@@ -2532,9 +2635,13 @@ function drain_work_channel!(s::PrecompileSession, work_channel::Channel{Precomp
             try
                 new_env = ExplicitEnv()
                 req_pkgids = PkgId[]
-                for name in request.pkgs
-                    pkgid = Base.identify_package(name)
-                    pkgid !== nothing && push!(req_pkgids, pkgid)
+                if request.pkgs isa Vector{PkgId}
+                    append!(req_pkgids, request.pkgs)
+                else
+                    for name in request.pkgs
+                        pkgid = Base.identify_package(name)
+                        pkgid !== nothing && push!(req_pkgids, pkgid)
+                    end
                 end
                 new_graph = build_dep_graph(new_env, request.manifest, request._from_loading, req_pkgids)
                 # When no specific packages were requested, treat project deps as the requested set
@@ -2548,7 +2655,7 @@ function drain_work_channel!(s::PrecompileSession, work_channel::Channel{Precomp
                     union!(s.serial_deps, new_graph.serial_deps)
                     union!(s.requested_pkgids, effective_pkgids)
                 end
-                new_pkg_names = copy(request.pkgs)
+                new_pkg_names = String[pkg isa PkgId ? pkg.name : pkg for pkg in request.pkgs]
                 new_dd = new_graph.direct_deps
                 filter_dep_graph!(new_dd, new_pkg_names, new_graph.ext_to_parent, req_pkgids)
                 skip_pkgs = Set{PkgId}()
@@ -2603,7 +2710,7 @@ function drain_work_channel!(s::PrecompileSession, work_channel::Channel{Precomp
                 new_tasks = spawn_precompile_tasks!(s;
                     direct_deps=new_dd, was_processed=new_wp, configs=request.configs,
                     circular_deps=new_circular, requested_pkgids=effective_pkgids,
-                    pkg_names=request.pkgs, requested_pkgs=request.pkgs,
+                    pkg_names=new_pkg_names, requested_pkgs=request.pkgs,
                     from_loading=request._from_loading)
                 append!(s.injected_tasks, new_tasks)
                 waiter = Threads.@spawn :samepool begin
@@ -2896,6 +3003,8 @@ function do_precompile(pkgs::Union{Vector{String}, Vector{PkgId}},
     # Return early if no deps
     if isempty(graph.direct_deps)
         isempty(pkgs) && return
+        # a request for packages that are all in the sysimage has nothing to do
+        all(Base.in_sysimage, requested_pkgids) && return
         error("No direct dependencies outside of the sysimage found matching $(pkgs)")
     end
 
@@ -2925,7 +3034,7 @@ function do_precompile(pkgs::Union{Vector{String}, Vector{PkgId}},
     nconfigs = length(configs)
     target = if nconfigs == 1
         flags = only(configs)[0]
-        isempty(flags) ? "project..." : "for configuration $(join(flags, " "))"
+        isempty(flags) ? (requested_all ? "project..." : "packages...") : "for configuration $(join(flags, " "))"
     else
         "for $nconfigs compilation configurations"
     end

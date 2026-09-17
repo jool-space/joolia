@@ -984,6 +984,18 @@ end
         @test !issorted(v[2001:4000])
         @test !issorted(v)
     end
+
+    # out-of-range lo/hi must throw rather than silently corrupt memory (#63215)
+    for alg in [MergeSort, QuickSort, InsertionSort, PartialQuickSort(0:4),
+                Base.DEFAULT_STABLE, Base.DEFAULT_UNSTABLE]
+        w = rand(10)
+        @test_throws BoundsError sort!(w, 0, 10, alg, Base.Forward)
+        @test_throws BoundsError sort!(w, -1, 9, alg, Base.Forward)
+        @test_throws BoundsError sort!(w, 0, 1999, alg, Base.Forward)
+        @test_throws BoundsError sort!(w, 0, 1999, alg, Base.Forward, similar(w))
+        @test sort!(w, 10, 9, alg, Base.Forward) === w # empty range is fine
+        @test issorted(sort!(w, 0, 9, alg, Base.Forward))
+    end
 end
 
 @testset "IEEEFloatOptimization with -0.0" begin

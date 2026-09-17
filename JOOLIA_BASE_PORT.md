@@ -1,5 +1,18 @@
 # Base port: boundaries and audit notes
 
+## September 17 — subtree migration and upstream integration
+
+External stdlibs now live directly in tracked `stdlib/Name` subtrees. The
+23 patch files and their helper were retired after verifying all 16 source
+trees against the existing port. Historical patch instructions below are
+superseded by [stdlib/VENDORED.md](stdlib/VENDORED.md).
+
+The upstream merge includes all 26 commits through `272aa7e2a0`. New compiler
+global-binding transformations retain internal one-origin SSA identifiers but
+use zero-origin accesses for Julia storage. Incoming loader offsets and test
+fixtures were adapted as part of the merge. Verification results follow below.
+
+
 This is a staged port, not a declaration that every Base method is zero-based.
 The native runtime, compiler bootstrap, and default system image build. Normal
 command-line execution and the full interactive LineEditREPL now work with the
