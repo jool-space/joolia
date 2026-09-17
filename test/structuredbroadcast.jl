@@ -1,0 +1,599 @@
+# This file is a part of Julia. License is MIT: https://julialang.org/license
+
+module TestStructuredBroadcast
+
+isdefined(Main, :pruned_old_LA) || @eval Main include("prune_old_LA.jl")
+
+using Test, LinearAlgebra
+
+const TESTDIR = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
+const TESTHELPERS = joinpath(TESTDIR, "testhelpers", "testhelpers.jl")
+isdefined(Main, :LinearAlgebraTestHelpers) || Base.include(Main, TESTHELPERS)
+
+using Main.LinearAlgebraTestHelpers.SizedArrays
+
+@testset "broadcast[!] over combinations of scalars, structured matrices, and dense vectors/matrices" begin
+    @testset for N in (0,1,2,10) # some edge cases, and a structured case
+        s = rand()
+        fV = rand(N)
+        fA = rand(N, N)
+        Z = copy(fA)
+        D = Diagonal(rand(N))
+        B = Bidiagonal(rand(N), rand(max(0,N-1)), :U)
+        T = Tridiagonal(rand(max(0,N-1)), rand(N), rand(max(0,N-1)))
+
+        U = UpperTriangular(rand(N,N))
+        L = LowerTriangular(rand(N,N))
+        UH = UpperHessenberg(rand(N,N))
+        M = Matrix(rand(N,N))
+        structuredarrays = (D, B, T, U, L, M, UH)
+        fstructuredarrays = map(Array, structuredarrays)
+        @testset "$(nameof(typeof(X)))" for (X, fX) in zip(structuredarrays, fstructuredarrays)
+            @test (Q = broadcast(sin, X); typeof(Q) == typeof(X) && Q == broadcast(sin, fX))
+            @test broadcast!(sin, Z, X) == broadcast(sin, fX)
+            @test (Q = broadcast(cos, X); Q isa Matrix && Q == broadcast(cos, fX))
+            @test broadcast!(cos, Z, X) == broadcast(cos, fX)
+            @test (Q = broadcast(*, s, X); typeof(Q) == typeof(X) && Q == broadcast(*, s, fX))
+            @test broadcast!(*, Z, s, X) == broadcast(*, s, fX)
+            @test (Q = broadcast(+, fV, fA, X); Q isa Matrix && Q == broadcast(+, fV, fA, fX))
+            @test broadcast!(+, Z, fV, fA, X) == broadcast(+, fV, fA, fX)
+            @test (Q = broadcast(*, s, fV, fA, X); Q isa typeof(X) && Q == broadcast(*, s, fV, fA, fX))
+            @test broadcast!(*, Z, s, fV, fA, X) == broadcast(*, s, fV, fA, fX)
+
+            @test X .* 2.0 == X .* (2.0,) == fX .* 2.0
+            @test X .* 2.0 isa typeof(X)
+            @test X .* (2.0,) isa typeof(X)
+            @test isequal(X .* Inf, fX .* Inf)
+
+            two = 2
+            @test X .^ 2 ==  X .^ (2,) == fX .^ 2 == X .^ two
+            @test X .^ 2 isa typeof(X)
+            @test X .^ (2,) isa typeof(X)
+            @test X .^ two isa typeof(X)
+            @test X .^ 0 == fX .^ 0
+            @test X .^ -1 == fX .^ -1
+
+            for (Y, fY) in zip(structuredarrays, fstructuredarrays)
+                @test broadcast(+, X, Y) == broadcast(+, fX, fY)
+                @test broadcast!(+, Z, X, Y) == broadcast(+, fX, fY)
+                @test broadcast(*, X, Y) == broadcast(*, fX, fY)
+                @test broadcast!(*, Z, X, Y) == broadcast(*, fX, fY)
+            end
+        end
+        diagonals = (D, B, T)
+        fdiagonals = map(Array, diagonals)
+        for (X, fX) in zip(diagonals, fdiagonals)
+            for (Y, fY) in zip(diagonals, fdiagonals)
+                @test broadcast(+, X, Y)::Union{Diagonal,Bidiagonal,Tridiagonal} == broadcast(+, fX, fY)
+                @test broadcast!(+, Z, X, Y) == broadcast(+, fX, fY)
+                @test broadcast(*, X, Y)::Union{Diagonal,Bidiagonal,Tridiagonal} == broadcast(*, fX, fY)
+                @test broadcast!(*, Z, X, Y) == broadcast(*, fX, fY)
+            end
+        end
+        UU = UnitUpperTriangular(rand(N,N))
+        UL = UnitLowerTriangular(rand(N,N))
+        unittriangulars = (UU, UL)
+        Ttris = typeof.((UpperTriangular(parent(UU)), LowerTriangular(parent(UU))))
+        funittriangulars = map(Array, unittriangulars)
+        for (X, fX, Ttri) in zip(unittriangulars, funittriangulars, Ttris)
+            @test (Q = broadcast(sin, X); typeof(Q) == Ttri && Q == broadcast(sin, fX))
+            @test broadcast!(sin, Z, X) == broadcast(sin, fX)
+            @test (Q = broadcast(cos, X); Q isa Matrix && Q == broadcast(cos, fX))
+            @test broadcast!(cos, Z, X) == broadcast(cos, fX)
+            @test (Q = broadcast(*, s, X); typeof(Q) == Ttri && Q == broadcast(*, s, fX))
+            @test broadcast!(*, Z, s, X) == broadcast(*, s, fX)
+            @test (Q = broadcast(+, fV, fA, X); Q isa Matrix && Q == broadcast(+, fV, fA, fX))
+            @test broadcast!(+, Z, fV, fA, X) == broadcast(+, fV, fA, fX)
+            @test (Q = broadcast(*, s, fV, fA, X); typeof(Q) == Ttri && Q == broadcast(*, s, fV, fA, fX))
+            @test broadcast!(*, Z, s, fV, fA, X) == broadcast(*, s, fV, fA, fX)
+
+            @test X .* 2.0 == X .* (2.0,) == fX .* 2.0
+            @test X .* 2.0 isa Ttri
+            @test X .* (2.0,) isa Ttri
+            @test isequal(X .* Inf, fX .* Inf)
+
+            two = 2
+            @test X .^ 2 ==  X .^ (2,) == fX .^ 2 == X .^ two
+            @test X .^ 2 isa typeof(X) # special cased, as isstructurepreserving
+            @test X .^ (2,) isa Ttri
+            @test X .^ two isa Ttri
+            @test X .^ 0 == fX .^ 0
+            @test X .^ -1 == fX .^ -1
+
+            for (Y, fY) in zip(unittriangulars, funittriangulars)
+                @test broadcast(+, X, Y) == broadcast(+, fX, fY)
+                @test broadcast!(+, Z, X, Y) == broadcast(+, fX, fY)
+                @test broadcast(*, X, Y) == broadcast(*, fX, fY)
+                @test broadcast!(*, Z, X, Y) == broadcast(*, fX, fY)
+            end
+        end
+
+        S = SymTridiagonal(rand(N), rand(max(0,N-1)))
+        fS = Array(S)
+        Stri = typeof(S)
+
+        @test (Q = broadcast(sin, S); typeof(Q) == Stri && Q == broadcast(sin, fS))
+        @test broadcast!(sin, Z, S) == broadcast(sin, fS)
+        @test (Q = broadcast(cos, S); Q isa Matrix && Q == broadcast(cos, fS))
+        @test broadcast!(cos, Z, S) == broadcast(cos, fS)
+        @test (Q = broadcast(*, s, S); typeof(Q) == Stri && Q == broadcast(*, s, fS))
+        @test broadcast!(*, Z, s, S) == broadcast(*, s, fS)
+        @test (Q = broadcast(+, fV, fA, S); Q isa Matrix && Q == broadcast(+, fV, fA, fS))
+        @test broadcast!(+, Z, fV, fA, S) == broadcast(+, fV, fA, fS)
+        @test (Q = broadcast(*, s, fV, fA, S); Q isa Tridiagonal && Q == broadcast(*, s, fV, fA, fS))
+        @test broadcast!(*, Z, s, fV, fA, S) == broadcast(*, s, fV, fA, fS)
+
+        @test S .* 2.0 == S .* (2.0,) == fS .* 2.0
+        @test S .* 2.0 isa Stri
+        @test S .* (2.0,) isa Tridiagonal
+        @test isequal(S .* Inf, fS .* Inf)
+
+        two = 2
+        @test S .^ 2 ==  S .^ (2,) == fS .^ 2 == S .^ two
+        @test S .^ 2 isa Stri
+        @test S .^ (2,) isa Tridiagonal
+        @test S .^ two isa Stri
+        @test S .^ 0 == fS .^ 0
+        @test S .^ -1 == fS .^ -1
+
+        @testset "type-stability in Bidiagonal" begin
+            B2 = @inferred (B -> .- B)(B)
+            @test B2 isa Bidiagonal
+            @test B2 == -1 * B
+            B2 = @inferred (B -> B .* 2)(B)
+            @test B2 isa Bidiagonal
+            @test B2 == B + B
+            B2 = @inferred (B -> 2 .* B)(B)
+            @test B2 isa Bidiagonal
+            @test B2 == B + B
+            B2 = @inferred (B -> B ./ 1)(B)
+            @test B2 isa Bidiagonal
+            @test B2 == B
+            B2 = @inferred (B -> 1 .\ B)(B)
+            @test B2 isa Bidiagonal
+            @test B2 == B
+        end
+
+        @testset "left zero absorbing functions" begin
+            fD = fdiagonals[1]
+            @test (Q = broadcast(/, D, fV); Q isa Diagonal && Q == broadcast(/, fD, fV))
+            @test (Q = broadcast(/, fV, D); Q isa Matrix && Q == broadcast(/, fV, fD))
+            if N > 0
+                a = copy(fV)
+                a[1] = 0
+                @test (Q = broadcast(/, D, a); Q isa Matrix
+                    && Q[2:end, :] == broadcast(/, fD, a)[2:end, :]
+                    && Q[1, 1] == Inf
+                    && all(isnan, Q[1, 2:end]))
+            end
+        end
+    end
+end
+
+@testset "broadcast! where the destination is a structured matrix" begin
+    @testset for N in (0,1,2,5)
+        A = rand(N, N)
+        sA = A + copy(A')
+        D = Diagonal(rand(N))
+        Bu = Bidiagonal(rand(N), rand(max(0,N-1)), :U)
+        Bl = Bidiagonal(rand(N), rand(max(0,N-1)), :L)
+        T = Tridiagonal(rand(max(0,N-1)), rand(N), rand(max(0,N-1)))
+        ◣ = LowerTriangular(rand(N,N))
+        ◥ = UpperTriangular(rand(N,N))
+        UH = UpperHessenberg(rand(N,N))
+        M = Matrix(rand(N,N))
+
+        @test broadcast!(sin, copy(D), D)::Diagonal == sin.(D)::Diagonal
+        @test broadcast!(sin, copy(Bu), Bu)::Bidiagonal == sin.(Bu)::Bidiagonal
+        @test broadcast!(sin, copy(Bl), Bl)::Bidiagonal == sin.(Bl)::Bidiagonal
+        @test broadcast!(sin, copy(T), T)::Tridiagonal == sin.(T)::Tridiagonal
+        @test broadcast!(sin, copy(◣), ◣)::LowerTriangular == sin.(◣)::LowerTriangular
+        @test broadcast!(sin, copy(◥), ◥)::UpperTriangular == sin.(◥)::UpperTriangular
+        @test broadcast!(sin, copy(UH), UH)::UpperHessenberg == sin.(UH)::UpperHessenberg
+        @test broadcast!(sin, copy(M), M)::Matrix == sin.(M)::Matrix
+        @test broadcast!(*, copy(D), D, A) == Diagonal(broadcast(*, D, A))
+        @test broadcast!(*, copy(Bu), Bu, A) == Bidiagonal(broadcast(*, Bu, A), :U)
+        @test broadcast!(*, copy(Bl), Bl, A) == Bidiagonal(broadcast(*, Bl, A), :L)
+        @test broadcast!(*, copy(T), T, A) == Tridiagonal(broadcast(*, T, A))
+        @test broadcast!(*, copy(◣), ◣, A) == LowerTriangular(broadcast(*, ◣, A))
+        @test broadcast!(*, copy(◥), ◥, A) == UpperTriangular(broadcast(*, ◥, A))
+        @test broadcast!(*, copy(UH), UH, A) == UpperHessenberg(broadcast(*, UH, A))
+        @test broadcast!(*, copy(M), M, A) == Matrix(broadcast(*, M, A))
+
+        if N > 2
+            @test_throws ArgumentError broadcast!(cos, copy(D), D)
+            @test_throws ArgumentError broadcast!(cos, copy(Bu), Bu)
+            @test_throws ArgumentError broadcast!(cos, copy(Bl), Bl)
+            @test_throws ArgumentError broadcast!(cos, copy(T), T)
+            @test_throws ArgumentError broadcast!(cos, copy(◣), ◣)
+            @test_throws ArgumentError broadcast!(cos, copy(◥), ◥)
+            @test_throws ArgumentError broadcast!(+, copy(D), D, A)
+            @test_throws ArgumentError broadcast!(+, copy(Bu), Bu, A)
+            @test_throws ArgumentError broadcast!(+, copy(Bl), Bl, A)
+            @test_throws ArgumentError broadcast!(+, copy(T), T, A)
+            @test_throws ArgumentError broadcast!(+, copy(◣), ◣, A)
+            @test_throws ArgumentError broadcast!(+, copy(◥), ◥, A)
+            @test_throws ArgumentError broadcast!(*, copy(◥), ◣, 2)
+            @test_throws ArgumentError broadcast!(*, copy(Bu), Bl, 2)
+        end
+    end
+end
+
+@testset "map[!] over combinations of structured matrices" begin
+    N = 3
+    fA = rand(N, N)
+    Z = copy(fA)
+    D = Diagonal(rand(N))
+    B = Bidiagonal(rand(N), rand(N - 1), :U)
+    T = Tridiagonal(rand(N - 1), rand(N), rand(N - 1))
+    S = SymTridiagonal(rand(N), rand(N - 1))
+    U = UpperTriangular(rand(N,N))
+    L = LowerTriangular(rand(N,N))
+    UH = UpperHessenberg(rand(N,N))
+    Sy = Symmetric(rand(N,N))
+    H = Hermitian(rand(N,N))
+    M = Matrix(rand(N,N))
+    structuredarrays = (M, D, B, T, S, U, L, UH, Sy, H)
+    fstructuredarrays = map(Array, structuredarrays)
+    for (X, fX) in zip(structuredarrays, fstructuredarrays)
+        @test (Q = map(sin, X); typeof(Q) == typeof(X) && Q == map(sin, fX))
+        @test map!(sin, Z, X) == map(sin, fX)
+        @test map(cos, X) == map(cos, fX)
+        @test map!(cos, Z, X) == map(cos, fX)
+        @test (Q = map(+, fA, X); Q isa Matrix && Q == map(+, fA, fX))
+        @test map!(+, Z, fA, X) == map(+, fA, fX)
+        for (Y, fY) in zip(structuredarrays, fstructuredarrays)
+            @test map(+, X, Y) == map(+, fX, fY)
+            @test map!(+, Z, X, Y) == map(+, fX, fY)
+            @test map(*, X, Y) == map(*, fX, fY)
+            @test map!(*, Z, X, Y) == map(*, fX, fY)
+            @test map(+, X, fA, Y) == map(+, fX, fA, fY)
+            @test map!(+, Z, X, fA, Y) == map(+, fX, fA, fY)
+        end
+    end
+    diagonals = (D, B, T)
+    fdiagonals = map(Array, diagonals)
+    for (X, fX) in zip(diagonals, fdiagonals)
+        for (Y, fY) in zip(diagonals, fdiagonals)
+            @test map(+, X, Y)::Union{Diagonal,Bidiagonal,Tridiagonal} == broadcast(+, fX, fY)
+            @test map!(+, Z, X, Y) == broadcast(+, fX, fY)
+            @test map(*, X, Y)::Union{Diagonal,Bidiagonal,Tridiagonal} == broadcast(*, fX, fY)
+            @test map!(*, Z, X, Y) == broadcast(*, fX, fY)
+        end
+    end
+    # these would be valid for broadcast, but not for map
+    @test_throws DimensionMismatch map(+, D, Diagonal(rand(1)))
+    @test_throws DimensionMismatch map(+, D, Diagonal(rand(1)), D)
+    @test_throws DimensionMismatch map(+, D, D, Diagonal(rand(1)))
+    @test_throws DimensionMismatch map(+, Diagonal(rand(1)), D, D)
+end
+
+@testset "Issue #33397" begin
+    N = 5
+    U = UpperTriangular(rand(N, N))
+    L = LowerTriangular(rand(N, N))
+    UnitU = UnitUpperTriangular(rand(N, N))
+    UnitL = UnitLowerTriangular(rand(N, N))
+    D = Diagonal(rand(N))
+    @test U .+ L .+ D == U + L + D
+    @test L .+ U .+ D == L + U + D
+    @test UnitU .+ UnitL .+ D == UnitU + UnitL + D
+    @test UnitL .+ UnitU .+ D == UnitL + UnitU + D
+    @test U .+ UnitL .+ D == U + UnitL + D
+    @test L .+ UnitU .+ D == L + UnitU + D
+    @test L .+ U .+ L .+ U == L + U + L + U
+    @test U .+ L .+ U .+ L == U + L + U + L
+    @test L .+ UnitL .+ UnitU .+ U .+ D == L + UnitL + UnitU + U + D
+    @test L .+ U .+ D .+ D .+ D .+ D == L + U + D + D + D + D
+end
+@testset "Broadcast Returned Types" begin
+    # Issue 35245
+    N = 3
+    dV = rand(N)
+    evu = rand(N-1)
+    evl = rand(N-1)
+
+    Bu = Bidiagonal(dV, evu, :U)
+    Bl = Bidiagonal(dV, evl, :L)
+    T = Tridiagonal(evl, dV * 2, evu)
+
+    @test typeof(Bu .+ Bl) <: Tridiagonal
+    @test typeof(Bl .+ Bu) <: Tridiagonal
+    @test typeof(Bu .+ Bu) <: Bidiagonal
+    @test typeof(Bl .+ Bl) <: Bidiagonal
+    @test Bu .+ Bl == T
+    @test Bl .+ Bu == T
+    @test Bu .+ Bu == Bidiagonal(dV * 2, evu * 2, :U)
+    @test Bl .+ Bl == Bidiagonal(dV * 2, evl * 2, :L)
+
+
+    @test typeof(Bu .* Bl) <: Tridiagonal
+    @test typeof(Bl .* Bu) <: Tridiagonal
+    @test typeof(Bu .* Bu) <: Bidiagonal
+    @test typeof(Bl .* Bl) <: Bidiagonal
+
+    @test Bu .* Bl == Tridiagonal(zeros(N-1), dV .* dV, zeros(N-1))
+    @test Bl .* Bu == Tridiagonal(zeros(N-1), dV .* dV, zeros(N-1))
+    @test Bu .* Bu == Bidiagonal(dV .* dV, evu .* evu, :U)
+    @test Bl .* Bl == Bidiagonal(dV .* dV, evl .* evl, :L)
+
+    Bu2 =  Bu .* 2
+    @test typeof(Bu2) <: Bidiagonal && Bu2.uplo == 'U'
+    Bu2 = 2 .* Bu
+    @test typeof(Bu2) <: Bidiagonal && Bu2.uplo == 'U'
+    Bl2 =  Bl .* 2
+    @test typeof(Bl2) <: Bidiagonal && Bl2.uplo == 'L'
+    Bu2 = 2 .* Bl
+    @test typeof(Bl2) <: Bidiagonal && Bl2.uplo == 'L'
+
+    # Example of Nested Broadcasts
+    tmp = (1 .* 2) .* (Bidiagonal(1:3, 1:2, 'U') .* (3 .* 4)) .* (5 .* Bidiagonal(1:3, 1:2, 'L'))
+    @test typeof(tmp) <: Tridiagonal
+
+end
+
+struct Zero36193 end
+Base.iszero(::Zero36193) = true
+LinearAlgebra.iszerodefined(::Type{Zero36193}) = true
+@testset "PR #36193" begin
+    f(::Union{Int, Zero36193}) = Zero36193()
+    function test(el)
+        M = [el el
+             el el]
+        v = [el, el]
+        U = UpperTriangular(M)
+        L = LowerTriangular(M)
+        D = Diagonal(v)
+        for (T, A) in [(UpperTriangular, U), (LowerTriangular, L), (Diagonal, D)]
+            @test identity.(A) isa typeof(A)
+            @test map(identity, A) isa typeof(A)
+            @test f.(A) isa T{Zero36193}
+            @test map(f, A) isa T{Zero36193}
+        end
+    end
+    # This should not need `zero(::Type{Zero36193})` to be defined
+    test(1)
+    Base.zero(::Type{Zero36193}) = Zero36193()
+    # This should not need `==(::Zero36193, ::Int)` to be defined as `iszerodefined`
+    # returns true.
+    test(Zero36193())
+end
+
+# structured broadcast with function returning non-number type
+@test tuple.(Diagonal([1, 2])) == [(1,) (0,); (0,) (2,)]
+
+@testset "Broadcast with missing (#54467)" begin
+    select_first(x, y) = x
+    diag = Diagonal([1,2])
+    @test select_first.(diag, missing) == diag
+    @test select_first.(diag, missing) isa Diagonal{Int}
+    @test isequal(select_first.(missing, diag), fill(missing, 2, 2))
+    @test select_first.(missing, diag) isa Matrix{Missing}
+end
+
+@testset "broadcast over structured matrices with matrix elements" begin
+    function standardbroadcastingtests(D, T)
+        M = [x for x in D]
+        Dsum = D .+ D
+        @test Dsum isa T
+        @test Dsum == M .+ M
+        Dcopy = copy.(D)
+        @test Dcopy isa T
+        @test Dcopy == D
+        Df = float.(D)
+        @test Df isa T
+        @test Df == D
+        @test eltype(eltype(Df)) <: AbstractFloat
+        @test (x -> (x,)).(D) == (x -> (x,)).(M)
+        @test (x -> 1).(D) == ones(Int,size(D))
+        @test all(==(2), ndims.(D))
+        @test_throws MethodError size.(D)
+    end
+    @testset "Diagonal" begin
+        @testset "square" begin
+            A = [1 3; 2 4]
+            D = Diagonal([A, A])
+            standardbroadcastingtests(D, Diagonal)
+            @test sincos.(D) == sincos.(Matrix{eltype(D)}(D))
+            M = [x for x in D]
+            @test cos.(D) == cos.(M)
+        end
+
+        @testset "different-sized square blocks" begin
+            D = Diagonal([ones(3,3), fill(3.0,2,2)])
+            standardbroadcastingtests(D, Diagonal)
+        end
+
+        @testset "rectangular blocks" begin
+            D = Diagonal([ones(Bool,3,4), ones(Bool,2,3)])
+            standardbroadcastingtests(D, Diagonal)
+        end
+
+        @testset "incompatible sizes" begin
+            A = reshape(1:12, 4, 3)
+            B = reshape(1:12, 3, 4)
+            D1 = Diagonal(fill(A, 2))
+            D2 = Diagonal(fill(B, 2))
+            @test_throws DimensionMismatch D1 .+ D2
+        end
+    end
+    @testset "Bidiagonal" begin
+        A = [1 3; 2 4]
+        B = Bidiagonal(fill(A,3), fill(A,2), :U)
+        standardbroadcastingtests(B, Bidiagonal)
+    end
+    @testset "UpperTriangular" begin
+        A = [1 3; 2 4]
+        U = UpperTriangular([(i+j)*A for i in 1:3, j in 1:3])
+        standardbroadcastingtests(U, UpperTriangular)
+    end
+    @testset "SymTridiagonal" begin
+        m = SizedArrays.SizedArray{(2,2)}([1 2; 3 4])
+        S = SymTridiagonal(fill(m,4), fill(m,3))
+        standardbroadcastingtests(S, SymTridiagonal)
+    end
+end
+
+@testset "newindex with BandIndex" begin
+    ind = Broadcast.newindex(rand(2,2),LinearAlgebra.BandIndex(0,1))
+    @test ind == CartesianIndex(1,1)
+end
+
+@testset "nested triangular broadcast" begin
+    for T in (LowerTriangular, UpperTriangular)
+        L = T(rand(Int,4,4))
+        M = Matrix(L)
+        @test L .+ L .+ 0 .+ L .+ 0 .- L == 2M
+    end
+end
+
+@testset "Rectangular UpperHessenberg" begin
+    UH = UpperHessenberg(ones(4,3))
+    UH2 = UH .+ UH .- UH
+    @test UH2 == UH
+    @test UH2 isa UpperHessenberg
+end
+
+@testset "forwarding broadcast to the diag for a Diagonal" begin
+    D = Diagonal(1:4)
+    D2 = D .* 2
+    @test D2 isa Diagonal{Int, <:AbstractRange{Int}}
+
+    # test for wrappers that opt into Diagonal-like broadcasting
+    U = UpperTriangular(D)
+    bc = Broadcast.broadcasted(+, D, U)
+    bcD = Broadcast.broadcasted(+, D, D)
+    S = typeof(Broadcast.BroadcastStyle(typeof(bcD)))
+    bc2 = convert(Broadcast.Broadcasted{S}, bc)
+    @test copy(bc2) == copy(bc) == copy(bcD)
+    @test copy(bc2) isa Diagonal
+end
+
+@testset "Symmetric/Hermitian broadcasting scalar" begin
+    S = Symmetric(randn(ComplexF64, 3,3))
+    H = Hermitian(randn(ComplexF64, 3,3))
+    for M in (S, H)
+        for f in (abs, abs2, real, conj, exp, sin, cos)
+            fM = broadcast(f, M)
+            @test fM isa LinearAlgebra.wrappertype(M)
+            @test fM == broadcast(f, Matrix(M))
+        end
+        for f in (log, sqrt, imag)
+            fM = broadcast(f, M)
+            if M isa Symmetric
+                @test fM isa Symmetric
+            end
+            @test fM == broadcast(f, Matrix(M))
+        end
+        M .^ 2 isa LinearAlgebra.wrappertype(M)
+        M .^ 2 == Matrix(M) .^ 2
+    end
+    for f in (+, -, *, /)
+        for k in (2, 2im)
+            fS = broadcast(f, S, k)
+            @test fS isa Symmetric
+            @test fS == broadcast(f, Matrix(S), k)
+        end
+        fH = broadcast(f, H, 2)
+        @test fH isa Hermitian
+        @test fH == broadcast(f, Matrix(H), 2)
+        fH = broadcast(f, H, 2im)
+        @test fH == broadcast(f, Matrix(H), 2im)
+    end
+    @test_throws ArgumentError H .*= im
+end
+
+@testset "Symmetric/Hermitian broadcasting matrix" begin
+    Dr = Diagonal(randn(3))
+    Dc = Diagonal(randn(ComplexF64, 3))
+    Tr = SymTridiagonal(randn(3),randn(2))
+    Tc = SymTridiagonal(randn(ComplexF64, 3),randn(ComplexF64, 2))
+    Sr = Symmetric(randn(3,3))
+    Sc = Symmetric(randn(ComplexF64, 3,3))
+    Hr = Hermitian(randn(3,3))
+    Hc = Hermitian(randn(ComplexF64, 3,3))
+    # Diagonal, SymTridiagonal
+    @test Dr .+ Tr isa SymTridiagonal{<:Real}
+    @test Dr .+ Tr == Matrix(Dr) + Matrix(Tr)
+    @test Dr .+ Tc isa SymTridiagonal
+    @test Dr .+ Tc == Matrix(Dr) + Matrix(Tc)
+    @test Dc .+ Tr isa SymTridiagonal
+    @test Dc .+ Tr == Matrix(Dc) + Matrix(Tr)
+    @test Dc .+ Tc isa SymTridiagonal
+    @test Dc .+ Tc == Matrix(Dc) + Matrix(Tc)
+    # Diagonal, Symmetric
+    @test Dr .+ Sr isa Symmetric{<:Real}
+    @test Dr .+ Sr == Matrix(Dr) + Matrix(Sr)
+    @test Dr .+ Sc isa Symmetric
+    @test Dr .+ Sc == Matrix(Dr) + Matrix(Sc)
+    @test Dc .+ Sr isa Symmetric
+    @test Dc .+ Sr == Matrix(Dc) + Matrix(Sr)
+    @test Dc .+ Sc isa Symmetric
+    @test Dc .+ Sc == Matrix(Dc) + Matrix(Sc)
+    # Diagonal, Hermitian
+    @test Dr .+ Hr isa Hermitian{<:Real}
+    @test Dr .+ Hr == Matrix(Dr) + Matrix(Hr)
+    @test Dr .+ Hc isa Hermitian
+    @test Dr .+ Hc == Matrix(Dr) + Matrix(Hc)
+    @test Dc .+ Hr == Matrix(Dc) + Matrix(Hr)
+    @test_throws ArgumentError Hr .+= Dc
+    @test Dc .+ Hc == Matrix(Dc) + Matrix(Hc)
+    @test_throws ArgumentError Hc .+= Dc
+    # SymTridiagonal, Symmetric
+    @test Tr .+ Sr isa Symmetric{<:Real}
+    @test Tr .+ Sr == Matrix(Tr) + Matrix(Sr)
+    @test Tr .+ Sc isa Symmetric
+    @test Tr .+ Sc == Matrix(Tr) + Matrix(Sc)
+    @test Tc .+ Sr isa Symmetric
+    @test Tc .+ Sr == Matrix(Tc) + Matrix(Sr)
+    @test Tc .+ Sc isa Symmetric
+    @test Tc .+ Sc == Matrix(Tc) + Matrix(Sc)
+    # SymTridiagonal, Hermitian
+    @test Tr .+ Hr isa Hermitian{<:Real}
+    @test Tr .+ Hr == Matrix(Tr) + Matrix(Hr)
+    @test Tr .+ Hc == Matrix(Tr) + Matrix(Hc)
+    @test Tr .+ Hc isa Hermitian
+    @test Tc .+ Hr == Matrix(Tc) + Matrix(Hr)
+    @test_throws ArgumentError Hr .+= Tc
+    @test Tc .+ Hc == Matrix(Tc) + Matrix(Hc)
+    @test_throws ArgumentError Hc .+= Tc
+    for uplo1 in (:U, :L), uplo2 in (:U, :L)
+        # Symmetric, Hermitian
+        Sr = Symmetric(randn(3,3), uplo1)
+        Sc = Symmetric(randn(ComplexF64, 3,3), uplo1)
+        Hr = Hermitian(randn(3,3), uplo2)
+        Hc = Hermitian(randn(ComplexF64, 3,3), uplo2)
+        @test Sr .+ Hr isa Hermitian{<:Real}
+        @test Sr .+ Hr == Matrix(Sr) + Matrix(Hr)
+        @test Sr .+ Hc isa Hermitian
+        @test Sr .+ Hc == Matrix(Sr) + Matrix(Hc)
+        @test Sc .+ Hr == Matrix(Sc) + Matrix(Hr)
+        @test_throws ArgumentError Hr .+= Sc
+        @test Sc .+ Hc == Matrix(Sc) + Matrix(Hc)
+        @test_throws ArgumentError Hc .+= Sc
+        # Symmetric, Symmetric
+        Sr1 = Symmetric(randn(3,3), uplo1)
+        Sc1 = Symmetric(randn(ComplexF64, 3,3), uplo1)
+        Sr2 = Symmetric(randn(3,3), uplo2)
+        Sc2 = Symmetric(randn(ComplexF64, 3,3), uplo2)
+        @test Sr1 .+ Sr2 isa Symmetric{<:Real}
+        @test Sr1 .+ Sr2 == Matrix(Sr1) + Matrix(Sr2)
+        @test Sr1 .+ Sc2 isa Symmetric
+        @test Sr1 .+ Sc2 == Matrix(Sr1) + Matrix(Sc2)
+        @test Sc1 .+ Sc2 isa Symmetric
+        @test Sc1 .+ Sc2 == Matrix(Sc1) + Matrix(Sc2)
+        # Hermitian, Hermitian
+        Hr1 = Hermitian(randn(3,3), uplo1)
+        Hc1 = Hermitian(randn(ComplexF64, 3,3), uplo1)
+        Hr2 = Hermitian(randn(3,3), uplo2)
+        Hc2 = Hermitian(randn(ComplexF64, 3,3), uplo2)
+        @test Hr1 .+ Hr2 isa Hermitian{<:Real}
+        @test Hr1 .+ Hr2 == Matrix(Hr1) + Matrix(Hr2)
+        @test Hr1 .+ Hc2 isa Hermitian
+        @test Hr1 .+ Hc2 == Matrix(Hr1) + Matrix(Hc2)
+        @test Hc1 .+ Hc2 isa Hermitian
+        @test Hc1 .+ Hc2 == Matrix(Hc1) + Matrix(Hc2)
+    end
+end
+
+end
