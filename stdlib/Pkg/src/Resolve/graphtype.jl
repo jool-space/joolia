@@ -1735,7 +1735,7 @@ function prune_graph!(graph::Graph)
         @assert (new_j0 >= length(new_gadj[new_p0]) && new_j1 >= length(new_gadj[new_p1])) ||
             (new_j0 < length(new_gadj[new_p0]) && new_j1 < length(new_gadj[new_p1]))
 
-        new_j0 < length(new_gadj[new_p0]) || continue
+        new_j0 < length(new_gadj[new_p0]) && continue
         push!(new_gadj[new_p0], new_p1)
         push!(new_gadj[new_p1], new_p0)
         @assert new_j0 == length(new_gadj[new_p0]) - 1
