@@ -4,6 +4,13 @@ using Test
 using Pkg.Types: PkgError
 using UUIDs
 
+# Test workers must inherit allocation tracking without shifting its enum value.
+@testset "subprocess allocation tracking" begin
+    flags = Pkg.Operations.gen_subprocess_flags(pwd(); coverage=false, julia_args=``)
+    child = `$(Base.julia_cmd()) $flags -e 'print(Base.JLOptions().malloc_log)'`
+    @test parse(Int, read(child, String)) == Base.JLOptions().malloc_log
+end
+
 @testset "inference" begin
     f1() = Pkg.Types.STDLIBS_BY_VERSION
     @inferred f1()
@@ -368,7 +375,7 @@ end
         finally
             empty!(DEPOT_PATH)
             append!(DEPOT_PATH, original_depot)
-            Pkg.activate(original_project === nothing ? nothing : dirname(original_project))
+            original_project === nothing ? Pkg.activate() : Pkg.activate(dirname(original_project))
         end
     end
 end

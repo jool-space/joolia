@@ -10,6 +10,30 @@ using UUIDs
 using Pkg.Resolve
 import Pkg.Resolve: VersionWeight, add_reqs!, simplify_graph!, ResolverError, ResolverTimeoutError, Fixed, Requires
 
+# Pruning must preserve dependency edges that are only required by newer versions.
+@testset "pruning preserves conditional dependencies" begin
+    a, b = UUID(1), UUID(2)
+    versions = Dict(a => [v"1", v"2"], b => [v"1", v"2"])
+    deps = Dict(
+        a => [Dict(VersionRange("2") => Set([b]))],
+        b => [Dict{VersionRange, Set{UUID}}()],
+    )
+    compat = Dict(u => [Dict{VersionRange, Dict{UUID, VersionSpec}}()] for u in (a, b))
+    weakdeps = Dict(u => [Dict{VersionRange, Set{UUID}}()] for u in (a, b))
+    weakcompat = deepcopy(compat)
+    per_registry = Dict(u => [Set(v)] for (u, v) in versions)
+    graph = Pkg.Resolve.Graph(
+        deps, compat, weakdeps, weakcompat, versions, per_registry,
+        Dict(a => "A", b => "B"), Requires(a => VersionSpec()),
+        Dict{UUID, Fixed}(), false, VERSION,
+    )
+    Pkg.Resolve.prune_graph!(graph)
+    pa, pb = graph.data.pdict[a], graph.data.pdict[b]
+    @test pb in graph.gadj[pa]
+    @test pa in graph.gadj[pb]
+    @test Pkg.Resolve.resolve(graph) == Dict(a => v"2", b => v"2")
+end
+
 include("utils.jl")
 using .Utils
 include("resolve_utils.jl")
