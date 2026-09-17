@@ -24,7 +24,7 @@ module PkgTestsInner
 
     @test isempty(Test.detect_closure_boxes(Pkg))
 
-    const original_depot_had_registries = isdir(joinpath(Base.DEPOT_PATH[1], "registries"))
+    const original_depot_had_registries = isdir(joinpath(Base.DEPOT_PATH[0], "registries"))
 
     ENV["JULIA_PKG_PRECOMPILE_AUTO"] = 0
     ENV["JULIA_PKG_DISALLOW_PKG_PRECOMPILATION"] = 1
@@ -218,8 +218,8 @@ module PkgTestsInner
     end
 
     # Make sure that none of our tests have left temporary registries lying around
-    if isdir(joinpath(Base.DEPOT_PATH[1], "registries")) != original_depot_had_registries
-        @warn "Test left temporary registries in depot" Base.DEPOT_PATH[1] original_depot_had_registries
+    if isdir(joinpath(Base.DEPOT_PATH[0], "registries")) != original_depot_had_registries
+        @warn "Test left temporary registries in depot" Base.DEPOT_PATH[0] original_depot_had_registries
     end
 
     if haskey(ENV, "CI")

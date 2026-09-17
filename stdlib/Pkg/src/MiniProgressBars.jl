@@ -70,7 +70,7 @@ function show_progress(io::IO, p::MiniProgressBar; termwidth = nothing, carriage
     else
         error("Unknown mode $(p.mode)")
     end
-    termwidth = @something termwidth displaysize(io)[2]
+    termwidth = @something termwidth displaysize(io)[1]
     max_progress_width = max(0, min(termwidth - textwidth(p.header) - textwidth(progress_text) - 10, p.width))
     n_filled = floor(Int, max_progress_width * perc / 100)
     partial_filled = (max_progress_width * perc / 100) - n_filled
@@ -79,8 +79,8 @@ function show_progress(io::IO, p::MiniProgressBar; termwidth = nothing, carriage
     to_print = sprint(; context = io) do io
         print(io, " "^p.indent)
         if p.main
-            printstyled(io, headers[1], " "; color = :green, bold = true)
-            length(headers) > 1 && printstyled(io, join(headers[2:end], ' '), " ")
+            printstyled(io, headers[0], " "; color = :green, bold = true)
+            length(headers) > 1 && printstyled(io, join(headers[1:end], ' '), " ")
         else
             print(io, p.header, " ")
         end
