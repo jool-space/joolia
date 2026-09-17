@@ -92,6 +92,46 @@ end
     end
 end
 
+@testset "zero-origin archive boundaries" begin
+    src = mktempdir()
+    out = mktempdir()
+    tarball = nothing
+    try
+        write(joinpath(src, "empty"), UInt8[])
+        write(joinpath(src, "å.txt"), "unicode-data")
+        boundary = joinpath(src, "a"^99)
+        mkdir(boundary)
+        write(joinpath(boundary, "b"), "boundary")
+        longdir = joinpath(src, "deep"^40)
+        mkpath(longdir)
+        write(joinpath(longdir, "unicode-λ"), "long")
+        tarball = Tar.create(src)
+        headers = Tar.list(tarball)
+        @test any(h -> h.path == "empty" && h.size == 0, headers)
+        @test any(h -> h.path == "å.txt" && h.size == ncodeunits("unicode-data"), headers)
+        @test any(h -> endswith(h.path, "/b") && h.size == 8, headers)
+        @test any(h -> endswith(h.path, "/unicode-λ") && h.size == 4, headers)
+        Tar.extract(tarball, out)
+        @test read(joinpath(out, "empty")) == UInt8[]
+        @test read(joinpath(out, "å.txt"), String) == "unicode-data"
+        @test read(joinpath(out, "a"^99, "b"), String) == "boundary"
+        @test read(joinpath(out, "deep"^40, "unicode-λ"), String) == "long"
+
+        io = IOBuffer()
+        hdr = Tar.Header("file", :file, 0o644, 123456789, "")
+        Tar.write_standard_header(io, hdr)
+        raw = take!(io)
+        @test length(raw) == 512
+        @test String(raw[124:135]) == "00726746425 "
+        @test raw[156] == UInt8('0')
+        @test Tar.read_standard_header(IOBuffer(raw)) == hdr
+    finally
+        tarball === nothing || rm(tarball, force=true)
+        rm(src, recursive=true, force=true)
+        rm(out, recursive=true, force=true)
+    end
+end
+
 @testset "test tarball" begin
     tarball, hash = make_test_tarball()
     @testset "Tar.tree_hash" begin
@@ -634,7 +674,7 @@ end
 
     @testset "without predicate" begin
         dir = make_test_dir()
-        @test !any(splitext(name)[2] == ".skip" for name in readdir(dir))
+        @test !any(last(splitext(name)) == ".skip" for name in readdir(dir))
 
         for dir in (dir, SubString(dir))
             # create(dir)
@@ -658,8 +698,8 @@ end
 
     @testset "with predicate" begin
         dir = make_test_dir(true)
-        @test any(splitext(name)[2] == ".skip" for name in readdir(dir))
-        predicate = path -> splitext(path)[2] != ".skip"
+        @test any(last(splitext(name)) == ".skip" for name in readdir(dir))
+        predicate = path -> last(splitext(path)) != ".skip"
 
         for dir in (dir, SubString(dir))
             # create(predicate, dir)
@@ -827,7 +867,7 @@ end
         @test hash != Tar.tree_hash(tarball, skip_empty=false)
 
         # predicate to skip paths ending in `.skip`
-        predicate = hdr -> !any(splitext(p)[2] == ".skip" for p in split(hdr.path, '/'))
+        predicate = hdr -> !any(last(splitext(p)) == ".skip" for p in split(hdr.path, '/'))
         @test hash != Tar.tree_hash(predicate, tarball, skip_empty=true)
         @test hash == Tar.tree_hash(predicate, tarball, skip_empty=false)
 
@@ -974,7 +1014,7 @@ end
         tarballs[Tar.create(dir)] = true
         rm(dir, recursive=true)
     end
-    tarballs[make_test_tarball()[1]] = true
+    tarballs[first(make_test_tarball())] = true
     if @isdefined(gtar)
         tarball, _ = make_test_tarball() do root
             tarball = tempname()
@@ -1158,17 +1198,17 @@ end
     end
     @testset "octal parsing" begin
         buf = fill(0x0, 512)
-        buf[1:21] .= '7'
+        buf[0:20] .= '7'
         # largest valid octal value
         @test Tar.read_header_int(buf, :name) == typemax(Int64)
         # smallest too large octal value
-        buf[1] = '1'
-        buf[2:22] .= '0'
+        buf[0] = '1'
+        buf[1:21] .= '0'
         test_error_prefix("octal integer name value too large:") do
             Tar.read_header_int(buf, :name)
         end
         # way too large octal value
-        for i = 1:length(buf)
+        for i in eachindex(buf)
             buf[i] = '0' + (i % 8)
         end
         test_error_prefix("octal integer name value too large:") do
@@ -1203,5 +1243,27 @@ end
 if isdefined(Docs, :undocumented_names) # new in Julia 1.11
     @testset "Docstrings" begin
         @test isempty(Docs.undocumented_names(Tar))
+    end
+end
+
+# Git blob prefixes use byte positions, including the space and terminating NUL.
+@testset "zero-origin Git blob prefixes" begin
+    for n in (0, 1, 9, 10, 55, 56, 99, 100, 511, 512, 513, 10000)
+        buf = fill(0xff, 64)
+        count = Tar.git_object_prefix!(buf, "blob", n)
+        expected = "blob $n\0"
+        @test count == ncodeunits(expected)
+        @test String(buf[0:count-1]) == expected
+        @test buf[count] == 0xff
+    end
+    mktempdir() do dir
+        write(joinpath(dir, "hello.txt"), "hello\n")
+        chmod(joinpath(dir, "hello.txt"), 0o644)
+        archive = Tar.create(dir)
+        try
+            @test Tar.tree_hash(archive) == "aaa96ced2d9a1c8e72c56b253a0e2fe78393feb7"
+        finally
+            rm(archive)
+        end
     end
 end

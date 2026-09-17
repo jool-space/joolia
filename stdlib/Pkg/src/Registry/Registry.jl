@@ -124,8 +124,8 @@ function pkg_server_registry_info()
     open(tmp_path) do io
         for line in eachline(io)
             if (m = match(r"^/registry/([^/]+)/([^/]+)$", line)) !== nothing
-                uuid = UUID(m.captures[1]::SubString{String})
-                hash = Base.SHA1(m.captures[2]::SubString{String})
+                uuid = UUID(m.captures[0]::SubString{String})
+                hash = Base.SHA1(m.captures[1]::SubString{String})
                 registry_info[uuid] = hash
             end
         end
@@ -473,16 +473,16 @@ function find_installed_registries(
 end
 
 function get_registry_update_log()
-    pkg_scratch_space = joinpath(DEPOT_PATH[1], "scratchspaces", "44cfe95a-1eb2-52ea-b672-e2afdf69b78f")
+    pkg_scratch_space = joinpath(DEPOT_PATH[0], "scratchspaces", "44cfe95a-1eb2-52ea-b672-e2afdf69b78f")
     pkg_reg_updated_file = joinpath(pkg_scratch_space, "registry_updates.toml")
     updated_registry_d = isfile(pkg_reg_updated_file) ? TOML.parsefile(pkg_reg_updated_file) : Dict{String, Any}()
     return updated_registry_d
 end
 
 function save_registry_update_log(d::Dict)
-    pkg_scratch_space = joinpath(DEPOT_PATH[1], "scratchspaces", "44cfe95a-1eb2-52ea-b672-e2afdf69b78f")
+    pkg_scratch_space = joinpath(DEPOT_PATH[0], "scratchspaces", "44cfe95a-1eb2-52ea-b672-e2afdf69b78f")
     mkpath(pkg_scratch_space)
-    create_cachedir_tag(joinpath(DEPOT_PATH[1], "scratchspaces"))
+    create_cachedir_tag(joinpath(DEPOT_PATH[0], "scratchspaces"))
     pkg_reg_updated_file = joinpath(pkg_scratch_space, "registry_updates.toml")
     return atomic_toml_write(pkg_reg_updated_file, d)
 end
@@ -712,7 +712,7 @@ function status(io::IO = stderr_f())
         server_registry_info = Pkg.OFFLINE_MODE[] ? nothing : pkg_server_registry_info()
         flavor = get(ENV, "JULIA_PKG_SERVER_REGISTRY_PREFERENCE", "")
         for reg in regs
-            printstyled(io, " [$(string(reg.uuid)[1:8])]"; color = :light_black)
+            printstyled(io, " [$(string(reg.uuid)[0:7])]"; color = :light_black)
             print(io, " $(reg.name)")
             reg.repo === nothing || print(io, " ($(reg.repo))")
             println(io)

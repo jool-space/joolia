@@ -38,21 +38,8 @@ function LineEdit.complete_line(c::PkgCompletionProvider, s; hint::Bool = false)
     ret, range, should_complete = completions(full, lastindex(partial); hint)
     # Convert to new completion interface format
     named_completions = map(LineEdit.NamedCompletion, ret)
-    # Convert UnitRange to Region (Pair{Int,Int}) to match new completion interface
-    # range represents character positions in partial string, convert to 0-based byte positions
-    if length(range) == 0 && first(range) > last(range)
-        # Empty backward range like 4:3 means insert at cursor position
-        # The cursor is at position last(range), so insert after it
-        pos = thisind(partial, last(range) + 1) - 1
-        region = pos => pos
-    elseif isempty(range)
-        region = 0 => 0
-    else
-        # Convert 1-based character positions to 0-based byte positions
-        start_pos = thisind(full, first(range)) - 1
-        end_pos = thisind(full, last(range))
-        region = start_pos => end_pos
-    end
+    # Completion ranges are inclusive zero-origin string indices; regions are byte boundaries.
+    region = REPL.to_region(full, range)
     return named_completions, region, should_complete
 end
 
@@ -209,7 +196,7 @@ function create_mode(repl::REPL.AbstractREPL, main::LineEdit.Prompt)
 end
 
 function repl_init(repl::REPL.LineEditREPL)
-    main_mode = repl.interface.modes[1]
+    main_mode = first(repl.interface.modes)
     pkg_mode = create_mode(repl, main_mode)
     push!(repl.interface.modes, pkg_mode)
     keymap = Dict{Any, Any}(
@@ -266,8 +253,8 @@ function try_prompt_pkg_add(pkgs::Vector{Symbol})
         plural2 = length(available_pkgs) == 1 ? "a package" : "packages"
         plural3 = length(available_pkgs) == 1 ? "is" : "are"
         plural4 = length(available_pkgs) == 1 ? "" : "s"
-        missing_pkg_list = length(pkgs) == 1 ? String(pkgs[1]) : "[$(join(pkgs, ", "))]"
-        available_pkg_list = length(available_pkgs) == 1 ? String(available_pkgs[1]) : "[$(join(available_pkgs, ", "))]"
+        missing_pkg_list = length(pkgs) == 1 ? String(only(pkgs)) : "[$(join(pkgs, ", "))]"
+        available_pkg_list = length(available_pkgs) == 1 ? String(only(available_pkgs)) : "[$(join(available_pkgs, ", "))]"
         msg1 = "Package$(plural1) $(missing_pkg_list) not found, but $(plural2) named $(available_pkg_list) $(plural3) available from a registry."
         for line in linewrap(msg1, io = ctx.io, padding = length(" │ "))
             printstyled(ctx.io, " │ "; color = :green)
@@ -278,7 +265,7 @@ function try_prompt_pkg_add(pkgs::Vector{Symbol})
         msg2 = string("add ", join(available_pkgs, ' '))
         for (i, line) in pairs(linewrap(msg2; io = ctx.io, padding = length(string(" |   ", promptf()))))
             printstyled(ctx.io, " │   "; color = :green)
-            if i == 1
+            if i == 0
                 printstyled(ctx.io, promptf(); color = :blue)
             else
                 print(ctx.io, " "^length(promptf()))
@@ -309,7 +296,7 @@ function try_prompt_pkg_add(pkgs::Vector{Symbol})
         shown_envs = String[]
         # We use digits 1-9 as keybindings in the env selection menu
         # That's why we can display at most 9 items in the menu
-        for i in 1:min(length(editable_envs), 9)
+        for i in 0:min(length(editable_envs), 9)-1
             env = editable_envs[i]
             expanded_env = Base.load_path_expand(env)
 
@@ -324,7 +311,7 @@ function try_prompt_pkg_add(pkgs::Vector{Symbol})
         default = something(
             # select the first non-default env by default, if possible
             findfirst(!=(Base.active_project()), shown_envs),
-            1
+            0
         )
         print(ctx.io, "\e[1A\e[1G\e[0J") # go up one line, to the start, and clear it
         printstyled(ctx.io, " └ "; color = :green)

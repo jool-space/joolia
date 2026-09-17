@@ -28,7 +28,7 @@ function transform!(context::T) where {T<:SHAKE}
     pbuf = Ptr{eltype(context.state)}(pointer(context.buffer))
     # after SHAKE_256_MAX_READ (digestlen) is reached, simply work with context.state[idx]
     if !context.used 
-        for idx in 1:div(blocklen(T),8)
+        for idx in 0:Int(div(blocklen(T),8))-1
             context.state[idx] = context.state[idx] ⊻ unsafe_load(pbuf, idx)
         end
     end 
@@ -44,7 +44,7 @@ function transform!(context::T) where {T<:SHAKE}
         state = keccak_iota(round, state)
     end
 
-    for k in 1:25
+    for k in 0:24
         context.state[k] = state[k]
     end
 
@@ -55,9 +55,9 @@ function digest!(context::T,d::UInt,p::Ptr{UInt8}) where {T<:SHAKE}
     # If we have anything in the buffer still, pad and transform that data
     if usedspace < blocklen(T) - 1
         # Begin padding with a 0x1f
-        context.buffer[usedspace+1] = 0x1f
+        context.buffer[usedspace] = 0x1f
         # Fill with zeros up until the last byte
-        context.buffer[usedspace+2:end-1] .= 0x00
+        context.buffer[usedspace+1:end-1] .= 0x00
         # Finish it off with a 0x80
         context.buffer[end] = 0x80
     else
@@ -69,12 +69,12 @@ function digest!(context::T,d::UInt,p::Ptr{UInt8}) where {T<:SHAKE}
     # Return the digest:
     # fill the given memory via pointer, if d>blocklen, update pointer and digest again.
     if d <= blocklen(T)
-        for i = 1:d
+        for i = 0:Int(d)-1
             unsafe_store!(p,reinterpret(UInt8, context.state)[i],i)
         end 
         return
     else 
-        for i = 1:blocklen(T)
+        for i = 0:Int(blocklen(T))-1
             unsafe_store!(p,reinterpret(UInt8, context.state)[i],i)
         end 
         context.used = true

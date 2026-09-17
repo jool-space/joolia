@@ -202,23 +202,23 @@ end
     @test sprint(print, Pkg.Types.VersionRange("0-0.3.2")) == "0 - 0.3.2"
     # test missing paths on union! and isjoinable
     # there's no == for VersionBound or VersionRange
-    unified_vr = union!([Pkg.Types.VersionRange("1.5-2.8"), Pkg.Types.VersionRange("2.5-3")])[1]
+    unified_vr = union!([Pkg.Types.VersionRange("1.5-2.8"), Pkg.Types.VersionRange("2.5-3")])[0]
     @test unified_vr.lower.t == (UInt32(1), UInt32(5), UInt32(0))
     @test unified_vr.upper.t == (UInt32(3), UInt32(0), UInt32(0))
-    unified_vr = union!([Pkg.Types.VersionRange("2.5-3"), Pkg.Types.VersionRange("1.5-2.8")])[1]
+    unified_vr = union!([Pkg.Types.VersionRange("2.5-3"), Pkg.Types.VersionRange("1.5-2.8")])[0]
     @test unified_vr.lower.t == (UInt32(1), UInt32(5), UInt32(0))
     @test unified_vr.upper.t == (UInt32(3), UInt32(0), UInt32(0))
-    unified_vr = union!([Pkg.Types.VersionRange("1.5-2.2"), Pkg.Types.VersionRange("2.5-3")])[1]
+    unified_vr = union!([Pkg.Types.VersionRange("1.5-2.2"), Pkg.Types.VersionRange("2.5-3")])[0]
     @test unified_vr.lower.t == (UInt32(1), UInt32(5), UInt32(0))
     @test unified_vr.upper.t == (UInt32(2), UInt32(2), UInt32(0))
-    unified_vr = union!([Pkg.Types.VersionRange("1.5-2.2"), Pkg.Types.VersionRange("2.5-3")])[2]
+    unified_vr = union!([Pkg.Types.VersionRange("1.5-2.2"), Pkg.Types.VersionRange("2.5-3")])[1]
     @test unified_vr.lower.t == (UInt32(2), UInt32(5), UInt32(0))
     @test unified_vr.upper.t == (UInt32(3), UInt32(0), UInt32(0))
-    unified_vb = Pkg.Types.VersionBound(union!([v"1.5", v"1.6"])[1])
+    unified_vb = Pkg.Types.VersionBound(union!([v"1.5", v"1.6"])[0])
     @test unified_vb.t == (UInt32(1), UInt32(5), UInt32(0))
-    unified_vb = Pkg.Types.VersionBound(union!([v"1.5", v"1.6"])[2])
+    unified_vb = Pkg.Types.VersionBound(union!([v"1.5", v"1.6"])[1])
     @test unified_vb.t == (UInt32(1), UInt32(6), UInt32(0))
-    unified_vb = Pkg.Types.VersionBound(union!([v"1.5", v"1.5"])[1])
+    unified_vb = Pkg.Types.VersionBound(union!([v"1.5", v"1.5"])[0])
     @test unified_vb.t == (UInt32(1), UInt32(5), UInt32(0))
 end
 
@@ -306,3 +306,69 @@ end
 end
 
 end # module
+
+# Depot selection uses the first collection position while preserving scalar paths and errors.
+@testset "zero-origin depot selection" begin
+    @test Pkg.depots1("/tmp/single") == "/tmp/single"
+    @test Pkg.depots1(["/tmp/first"]) == "/tmp/first"
+    @test Pkg.depots1(["/tmp/first", "/tmp/second"]) == "/tmp/first"
+    @test_throws Pkg.Types.PkgError Pkg.depots1(String[])
+end
+
+
+# Package tests must execute in a child process and propagate both success and failure.
+@testset "zero-origin local package lifecycle" begin
+    mktempdir() do root
+        project = joinpath(root, "JooliaPkgSmoke")
+        depot = joinpath(root, "depot")
+        mkpath(joinpath(project, "src"))
+        mkpath(joinpath(project, "test"))
+        mkpath(joinpath(depot, "registries", "Local"))
+        write(joinpath(depot, "registries", "Local", "Registry.toml"), """
+            name = "Local"
+            uuid = "835dc3ed-f4c8-4d14-ac32-ddf2a0123456"
+            repo = "file://$root"
+            [packages]
+            """)
+        write(joinpath(project, "Project.toml"), """
+            name = "JooliaPkgSmoke"
+            uuid = "835dc3ed-f4c8-4d14-ac32-ddf2a0123457"
+            version = "0.1.0"
+            [extras]
+            Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+            LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+            [targets]
+            test = ["Test", "LinearAlgebra"]
+            """)
+        write(joinpath(project, "src", "JooliaPkgSmoke.jl"), "module JooliaPkgSmoke\nfirstvalue(x) = x[0]\nend\n")
+        testfile = joinpath(project, "test", "runtests.jl")
+        write(testfile, """
+            using Test, LinearAlgebra, JooliaPkgSmoke
+            @testset "zero-origin package tests" begin
+                @test JooliaPkgSmoke.firstvalue([17, 23]) == 17
+                @test JooliaPkgSmoke.firstvalue((17, 23)) == 17
+                @test size(ones(3, 4), 0) == 3
+                @test ones(3, 4) * ones(4, 5) == fill(4.0, 3, 5)
+                @test_throws BoundsError (17,)[1]
+            end
+            """)
+        original_depot = copy(DEPOT_PATH)
+        original_project = Base.active_project()
+        try
+            empty!(DEPOT_PATH)
+            push!(DEPOT_PATH, depot)
+            withenv("JULIA_DEPOT_PATH" => depot, "JULIA_PKG_OFFLINE" => "true", "JULIA_PKG_PRECOMPILE_AUTO" => "0") do
+                Pkg.activate(project)
+                Pkg.instantiate(; update_registry=false, allow_autoprecomp=false)
+                @test isfile(joinpath(project, "Manifest.toml"))
+                Pkg.test(; allow_reresolve=false)
+                write(testfile, "using Test\n@testset \"intentional failure\" begin\n@test false\nend\n")
+                @test_throws Pkg.Types.PkgError Pkg.test(; allow_reresolve=false)
+            end
+        finally
+            empty!(DEPOT_PATH)
+            append!(DEPOT_PATH, original_depot)
+            Pkg.activate(original_project === nothing ? nothing : dirname(original_project))
+        end
+    end
+end

@@ -878,4 +878,33 @@ end
     end
 end
 
+# Vector row wrappers must expose zero-origin axes and preserve conjugation.
+@testset "zero-origin vector row wrappers" begin
+    for op in (transpose, adjoint), values in ([2, 3, 5], ComplexF64[2+im, 3-2im, 5+3im])
+        v = copy(values)
+        row = op(v)
+        @test size(row) == (1, 3)
+        @test axes(row) == (Base.ZeroTo(1), Base.ZeroTo(3))
+        for i in eachindex(v)
+            @test row[0, i] == op(v[i])
+            @test row[i] == op(v[i])
+            @test isassigned(row, 0, i)
+        end
+        @test !isassigned(row, 1, 0)
+        @test !isassigned(row, 0, 3)
+        @test_throws BoundsError row[0, 3]
+        row[0, 0] = 7
+        @test v[0] == 7
+        row[2] = op(values[0])
+        @test v[2] == values[0]
+        @test !isempty(sprint(show, MIME"text/plain"(), row))
+    end
+    for op in (transpose, adjoint)
+        row = op(Int[])
+        @test size(row) == (1, 0)
+        @test axes(row) == (Base.ZeroTo(1), Base.ZeroTo(0))
+        @test !isassigned(row, 0, 0)
+    end
+end
+
 end # module TestAdjointTranspose

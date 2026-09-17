@@ -840,4 +840,17 @@ end
     @test ST == diagm(-1=>fill(2, length(ev)), 0=>fill(2, length(dv)), 1=>fill(2, length(ev)))
 end
 
+
+# Reversed methods must preserve the signature/body distinction and argument values.
+LinearAlgebra.@commutative function _joolia_commutative_long(a::Int, b::Float64)
+    (a, b)
+end
+LinearAlgebra.@commutative _joolia_commutative_short(a::Int, b::Float64) = (a, b)
+@testset "zero-origin commutative macro arguments" begin
+    @test _joolia_commutative_long(2, 3.0) == (2, 3.0)
+    @test _joolia_commutative_long(3.0, 2) == (2, 3.0)
+    @test _joolia_commutative_short(4, 5.0) == (4, 5.0)
+    @test _joolia_commutative_short(5.0, 4) == (4, 5.0)
+end
+
 end # module TestSpecial

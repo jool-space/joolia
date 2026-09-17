@@ -170,7 +170,7 @@ function normalize_deps(name, uuid, deps::Vector{String}, manifest::Dict{String,
                 "`$name=$uuid`'s dependency on `$dep` is ambiguous."
             )
         end
-        final[dep] = infos[1].uuid
+        final[dep] = first(infos).uuid
     end
     return final
 end
@@ -407,7 +407,7 @@ function destructure(manifest::Manifest)::Dict
         if !isempty(entry.registries)
             if length(entry.registries) == 1
                 # For backwards compatibility, write a single registry as a string
-                entry!(new_entry, "registries", entry.registries[1])
+                entry!(new_entry, "registries", first(entry.registries))
             else
                 entry!(new_entry, "registries", entry.registries)
             end

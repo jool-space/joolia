@@ -60,9 +60,9 @@ julia> tryparse(SimpleColor, "#nocolor")
 function Base.tryparse(::Type{SimpleColor}, rgb::String)
     if ncodeunits(rgb) == 7 && first(rgb) == '#' &&
         all(∈(('#',) ∪ ('0':'9') ∪ ('a':'f') ∪ ('A':'F')), rgb)
-        SimpleColor(parse(UInt8, rgb[2:3], base=16),
-                    parse(UInt8, rgb[4:5], base=16),
-                    parse(UInt8, rgb[6:7], base=16))
+        SimpleColor(parse(UInt8, rgb[1:2], base=16),
+                    parse(UInt8, rgb[3:4], base=16),
+                    parse(UInt8, rgb[5:6], base=16))
     elseif startswith(rgb, 'a':'z') || startswith(rgb, 'A':'Z')
         SimpleColor(Symbol(rgb))
     else
@@ -155,7 +155,7 @@ function Face(; font::Union{Nothing, String} = nothing,
     Face(font, height, weight, slant,
          ascolor(foreground), ascolor(background),
          if underline isa Tuple{Any, Symbol}
-             (ascolor(underline[1]), underline[2])
+             (ascolor(underline[0]), underline[1])
          elseif underline in (:straight, :double, :curly, :dotted, :dashed)
              (nothing, underline)
          elseif underline isa Bool

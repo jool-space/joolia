@@ -799,4 +799,42 @@ end
     @test length(BLAS.lbt_get_config().loaded_libs) == length(cfg0.loaded_libs)
 end
 
+
+# Decode native pointer tables and forwarding bits at byte boundaries.
+@testset "zero-origin BLAS configuration" begin
+    cfg = BLAS.lbt_get_config()
+    raw = unsafe_load(ccall((:lbt_get_config, BLAS.libblastrampoline), Ptr{BLAS.lbt_config_t}, ()))
+    @test length(cfg.exported_symbols) == Int(raw.num_exported_symbols)
+    @test first(cfg.exported_symbols) == unsafe_string(unsafe_load(raw.exported_symbols, 0))
+    @test last(cfg.exported_symbols) == unsafe_string(unsafe_load(raw.exported_symbols, Int(raw.num_exported_symbols)-1))
+    nlibs = 0
+    while unsafe_load(raw.loaded_libs, nlibs) != C_NULL
+        nlibs += 1
+    end
+    @test length(cfg.loaded_libs) == nlibs
+
+    empty_libs = Ptr{BLAS.lbt_library_info_t}[C_NULL]
+    GC.@preserve empty_libs begin
+        empty_cfg = BLAS.LBTConfig(BLAS.lbt_config_t(pointer(empty_libs), UInt32(0), Ptr{Cstring}(C_NULL), UInt32(0)))
+        @test isempty(empty_cfg.exported_symbols)
+        @test isempty(empty_cfg.loaded_libs)
+    end
+
+    libname, suffix = "joolia-test-library", ""
+    forwards = UInt8[0x81, 0x01]
+    GC.@preserve libname suffix forwards begin
+        rawlib = BLAS.lbt_library_info_t(Base.unsafe_convert(Cstring, libname), C_NULL,
+            Base.unsafe_convert(Cstring, suffix), pointer(forwards), Int32(64), Int32(0), Int32(0), Int32(0))
+        lib = BLAS.LBTLibraryInfo(rawlib, UInt32(9))
+        resize!(cfg.exported_symbols, 9)
+        empty!(cfg.loaded_libs)
+        push!(cfg.loaded_libs, lib)
+        for i in (0, 7, 8)
+            @test BLAS.lbt_find_backing_library(cfg.exported_symbols[i], :ilp64; config=cfg) === lib
+        end
+        @test BLAS.lbt_find_backing_library(cfg.exported_symbols[1], :ilp64; config=cfg) === nothing
+        @test BLAS.lbt_forwarded_funcs(cfg, lib) == cfg.exported_symbols[[0, 7, 8]]
+    end
+end
+
 end # module TestBLAS

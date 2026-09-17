@@ -85,6 +85,11 @@ end
 @testset "add: REPL" begin
     isolate() do
         Pkg.REPLMode.TEST_MODE[] = true
+        # A single package name must survive zero-origin tokenization and lowering.
+        api, args, opts = first(Pkg.pkg"add Statistics")
+        @test api == Pkg.add
+        @test only(args).name == "Statistics"
+        @test isempty(opts)
         # Add using UUID syntax
         api, args, opts = first(Pkg.pkg"add 7876af07-990d-54b4-ab0e-23690620f79a")
         @test api == Pkg.add
@@ -114,9 +119,9 @@ end
         api, args, opts = first(Pkg.pkg"add Example@0.5.5 Test")
         @test api == Pkg.add
         @test length(args) == 2
-        @test args[1].name == "Example"
-        @test args[1].version == "0.5.5"
-        @test args[2].name == "Test"
+        @test args[0].name == "Example"
+        @test args[0].version == "0.5.5"
+        @test args[1].name == "Test"
         @test isempty(opts)
         # Comma separated packages, with and without whitespace
         for input in ("add Example, Random", "add Example,Random", "add Example Random")
@@ -150,21 +155,21 @@ end
         @test isempty(opts)
 
         api, args, opts = first(Pkg.pkg"add a/path/with/@/deal/with/it")
-        @test normpath(args[1].path) == normpath("a/path/with/@/deal/with/it")
+        @test normpath(args[0].path) == normpath("a/path/with/@/deal/with/it")
 
         # github branch rewriting
         api, args, opts = first(Pkg.pkg"add https://github.com/JuliaLang/Pkg.jl/tree/aa/gitlab")
-        arg = args[1]
+        arg = args[0]
         @test arg.url == "https://github.com/JuliaLang/Pkg.jl"
         @test arg.rev == "aa/gitlab"
 
         api, args, opts = first(Pkg.pkg"add https://github.com/JuliaPy/PythonCall.jl/pull/529")
-        arg = args[1]
+        arg = args[0]
         @test arg.url == "https://github.com/JuliaPy/PythonCall.jl"
         @test arg.rev == "pull/529/head"
 
         api, args, opts = first(Pkg.pkg"add https://github.com/TimG1964/XLSX.jl#Bug-fixing-post-#289:subdir")
-        arg = args[1]
+        arg = args[0]
         @test arg.url == "https://github.com/TimG1964/XLSX.jl"
         @test arg.rev == "Bug-fixing-post-#289"
         @test arg.subdir == "subdir"
@@ -174,14 +179,14 @@ end
             api, args, opts = first(Pkg.pkg"add https://github.com/user/repo/tree/feature-branch")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://github.com/user/repo"
-            @test args[1].rev == "feature-branch"
+            @test args[0].url == "https://github.com/user/repo"
+            @test args[0].rev == "feature-branch"
 
             api, args, opts = first(Pkg.pkg"add https://github.com/user/repo/commit/abc123def")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://github.com/user/repo"
-            @test args[1].rev == "abc123def"
+            @test args[0].url == "https://github.com/user/repo"
+            @test args[0].rev == "abc123def"
         end
 
         # Test Git URLs with branch specifiers
@@ -189,26 +194,26 @@ end
             api, args, opts = first(Pkg.pkg"add https://github.com/user/repo.git#main")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://github.com/user/repo.git"
-            @test args[1].rev == "main"
+            @test args[0].url == "https://github.com/user/repo.git"
+            @test args[0].rev == "main"
 
             api, args, opts = first(Pkg.pkg"add https://bitbucket.org/user/repo.git#develop")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://bitbucket.org/user/repo.git"
-            @test args[1].rev == "develop"
+            @test args[0].url == "https://bitbucket.org/user/repo.git"
+            @test args[0].rev == "develop"
 
             api, args, opts = first(Pkg.pkg"add git@github.com:user/repo.git#feature")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "git@github.com:user/repo.git"
-            @test args[1].rev == "feature"
+            @test args[0].url == "git@github.com:user/repo.git"
+            @test args[0].rev == "feature"
 
             api, args, opts = first(Pkg.pkg"add ssh://git@server.com/path/repo.git#branch-name")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "ssh://git@server.com/path/repo.git"
-            @test args[1].rev == "branch-name"
+            @test args[0].url == "ssh://git@server.com/path/repo.git"
+            @test args[0].rev == "branch-name"
         end
 
         # Test SSH URLs with IP addresses (issue #1822)
@@ -217,14 +222,14 @@ end
             api, args, opts = first(Pkg.pkg"add user@10.20.30.40:PackageName.jl")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "user@10.20.30.40:PackageName.jl"
-            @test args[1].subdir === nothing
+            @test args[0].url == "user@10.20.30.40:PackageName.jl"
+            @test args[0].subdir === nothing
 
             api, args, opts = first(Pkg.pkg"add git@192.168.1.100:path/to/repo.jl")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "git@192.168.1.100:path/to/repo.jl"
-            @test args[1].subdir === nothing
+            @test args[0].url == "git@192.168.1.100:path/to/repo.jl"
+            @test args[0].subdir === nothing
         end
 
         # Test Git URLs with subdir specifiers
@@ -232,14 +237,14 @@ end
             api, args, opts = first(Pkg.pkg"add https://github.com/user/monorepo.git:packages/MyPackage")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://github.com/user/monorepo.git"
-            @test args[1].subdir == "packages/MyPackage"
+            @test args[0].url == "https://github.com/user/monorepo.git"
+            @test args[0].subdir == "packages/MyPackage"
 
             api, args, opts = first(Pkg.pkg"add ssh://git@server.com/repo.git:subdir/nested")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "ssh://git@server.com/repo.git"
-            @test args[1].subdir == "subdir/nested"
+            @test args[0].url == "ssh://git@server.com/repo.git"
+            @test args[0].subdir == "subdir/nested"
         end
 
         # Test complex URLs (with username in URL + branch/tag/subdir)
@@ -247,124 +252,124 @@ end
             api, args, opts = first(Pkg.pkg"add https://username@bitbucket.org/org/repo.git#dev")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://username@bitbucket.org/org/repo.git"
-            @test args[1].rev == "dev"
+            @test args[0].url == "https://username@bitbucket.org/org/repo.git"
+            @test args[0].rev == "dev"
 
             api, args, opts = first(Pkg.pkg"add https://user:token@gitlab.company.com/group/project.git")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://user:token@gitlab.company.com/group/project.git"
+            @test args[0].url == "https://user:token@gitlab.company.com/group/project.git"
 
             api, args, opts = first(Pkg.pkg"add https://example.com:8080/git/repo.git:packages/core")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://example.com:8080/git/repo.git"
-            @test args[1].subdir == "packages/core"
+            @test args[0].url == "https://example.com:8080/git/repo.git"
+            @test args[0].subdir == "packages/core"
 
             # Test URLs with complex authentication and branch names containing #
             api, args, opts = first(Pkg.pkg"add https://user:pass123@gitlab.example.com:8443/group/project.git#feature/fix-#42")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://user:pass123@gitlab.example.com:8443/group/project.git"
-            @test args[1].rev == "feature/fix-#42"
+            @test args[0].url == "https://user:pass123@gitlab.example.com:8443/group/project.git"
+            @test args[0].rev == "feature/fix-#42"
 
             # Test URLs with complex authentication and subdirs
             api, args, opts = first(Pkg.pkg"add https://api_key:secret@company.git.server.com/team/monorepo.git:libs/julia/pkg")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://api_key:secret@company.git.server.com/team/monorepo.git"
-            @test args[1].subdir == "libs/julia/pkg"
+            @test args[0].url == "https://api_key:secret@company.git.server.com/team/monorepo.git"
+            @test args[0].subdir == "libs/julia/pkg"
 
             # Test URLs with authentication, branch with #, and subdir
             api, args, opts = first(Pkg.pkg"add https://deploy:token123@internal.git.company.com/product/backend.git#hotfix/issue-#789:packages/core")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://deploy:token123@internal.git.company.com/product/backend.git"
-            @test args[1].rev == "hotfix/issue-#789"
-            @test args[1].subdir == "packages/core"
+            @test args[0].url == "https://deploy:token123@internal.git.company.com/product/backend.git"
+            @test args[0].rev == "hotfix/issue-#789"
+            @test args[0].subdir == "packages/core"
 
             # Test SSH URLs with port numbers and subdirs
             api, args, opts = first(Pkg.pkg"add ssh://git@custom.server.com:2222/path/to/repo.git:src/package")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "ssh://git@custom.server.com:2222/path/to/repo.git"
-            @test args[1].subdir == "src/package"
+            @test args[0].url == "ssh://git@custom.server.com:2222/path/to/repo.git"
+            @test args[0].subdir == "src/package"
 
             # Test URL with username in URL and multiple # in branch name
             api, args, opts = first(Pkg.pkg"add https://ci_user@build.company.net/team/project.git#release/v2.0-#123-#456")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://ci_user@build.company.net/team/project.git"
-            @test args[1].rev == "release/v2.0-#123-#456"
+            @test args[0].url == "https://ci_user@build.company.net/team/project.git"
+            @test args[0].rev == "release/v2.0-#123-#456"
 
             # Test complex case: auth + port + branch with # + subdir
             api, args, opts = first(Pkg.pkg"add https://robot:abc123@git.enterprise.com:9443/division/platform.git#bugfix/handle-#special-chars:modules/julia-pkg")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://robot:abc123@git.enterprise.com:9443/division/platform.git"
-            @test args[1].rev == "bugfix/handle-#special-chars"
-            @test args[1].subdir == "modules/julia-pkg"
+            @test args[0].url == "https://robot:abc123@git.enterprise.com:9443/division/platform.git"
+            @test args[0].rev == "bugfix/handle-#special-chars"
+            @test args[0].subdir == "modules/julia-pkg"
 
             # Test local paths with branch specifiers (paths can be repos)
             api, args, opts = first(Pkg.pkg"add ./local/repo#feature-branch")
             @test api == Pkg.add
             @test length(args) == 1
-            @test normpath(args[1].path) == normpath("local/repo")  # normpath removes "./"
-            @test args[1].rev == "feature-branch"
+            @test normpath(args[0].path) == normpath("local/repo")  # normpath removes "./"
+            @test args[0].rev == "feature-branch"
 
             # Test local paths with subdir specifiers
             api, args, opts = first(Pkg.pkg"add ./monorepo:packages/subpkg")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].path == "monorepo"  # normpath removes "./"
-            @test args[1].subdir == "packages/subpkg"
+            @test args[0].path == "monorepo"  # normpath removes "./"
+            @test args[0].subdir == "packages/subpkg"
 
             # Test local paths with both branch and subdir
             api, args, opts = first(Pkg.pkg"add ./project#develop:src/package")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].path == "project"  # normpath removes "./"
-            @test args[1].rev == "develop"
-            @test args[1].subdir == "src/package"
+            @test args[0].path == "project"  # normpath removes "./"
+            @test args[0].rev == "develop"
+            @test args[0].subdir == "src/package"
 
             # Test local paths with branch containing # characters
             api, args, opts = first(Pkg.pkg"add ../workspace/repo#bugfix/issue-#123")
             @test api == Pkg.add
             @test length(args) == 1
-            @test normpath(args[1].path) == normpath("../workspace/repo")
-            @test args[1].rev == "bugfix/issue-#123"
+            @test normpath(args[0].path) == normpath("../workspace/repo")
+            @test args[0].rev == "bugfix/issue-#123"
 
             # Test complex local path case: relative path + branch with # + subdir
             if !Sys.iswindows()
                 api, args, opts = first(Pkg.pkg"add ~/projects/myrepo#feature/fix-#456:libs/core")
                 @test api == Pkg.add
                 @test length(args) == 1
-                @test startswith(args[1].path, "/")  # ~ gets expanded to absolute path
-                @test endswith(normpath(args[1].path), normpath("/projects/myrepo"))
-                @test args[1].rev == "feature/fix-#456"
-                @test args[1].subdir == "libs/core"
+                @test startswith(args[0].path, "/")  # ~ gets expanded to absolute path
+                @test endswith(normpath(args[0].path), normpath("/projects/myrepo"))
+                @test args[0].rev == "feature/fix-#456"
+                @test args[0].subdir == "libs/core"
             end
 
             # Test quoted URL with separate revision specifier (regression test)
             api, args, opts = first(Pkg.pkg"add \"https://username@bitbucket.org/orgname/reponame.git\"#dev")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://username@bitbucket.org/orgname/reponame.git"
-            @test args[1].rev == "dev"
+            @test args[0].url == "https://username@bitbucket.org/orgname/reponame.git"
+            @test args[0].rev == "dev"
 
             # Test quoted URL with separate version specifier
             api, args, opts = first(Pkg.pkg"add \"https://company.git.server.com/project.git\"@v2.1.0")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://company.git.server.com/project.git"
-            @test args[1].version == "v2.1.0"
+            @test args[0].url == "https://company.git.server.com/project.git"
+            @test args[0].version == "v2.1.0"
 
             # Test quoted URL with separate subdir specifier
             api, args, opts = first(Pkg.pkg"add \"https://gitlab.example.com/monorepo.git\":packages/core")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://gitlab.example.com/monorepo.git"
-            @test args[1].subdir == "packages/core"
+            @test args[0].url == "https://gitlab.example.com/monorepo.git"
+            @test args[0].subdir == "packages/core"
         end
 
         # Test that regular URLs without .git still work
@@ -372,9 +377,9 @@ end
             api, args, opts = first(Pkg.pkg"add https://github.com/user/repo")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].url == "https://github.com/user/repo"
-            @test args[1].rev === nothing
-            @test args[1].subdir === nothing
+            @test args[0].url == "https://github.com/user/repo"
+            @test args[0].rev === nothing
+            @test args[0].subdir === nothing
         end
 
         @testset "Windows path handling" begin
@@ -382,22 +387,22 @@ end
             api, args, opts = first(Pkg.pkg"add C:\\Users\\test\\project")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].path == normpath("C:\\\\Users\\\\test\\\\project")
-            @test args[1].subdir === nothing
+            @test args[0].path == normpath("C:\\\\Users\\\\test\\\\project")
+            @test args[0].subdir === nothing
 
             # Test with forward slashes too
             api, args, opts = first(Pkg.pkg"add C:/Users/test/project")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].path == normpath("C:/Users/test/project")
-            @test args[1].subdir === nothing
+            @test args[0].path == normpath("C:/Users/test/project")
+            @test args[0].subdir === nothing
 
             # Test that actual subdir syntax still works with Windows paths
             api, args, opts = first(Pkg.pkg"add C:\\Users\\test\\project:subdir")
             @test api == Pkg.add
             @test length(args) == 1
-            @test args[1].path == normpath("C:\\\\Users\\\\test\\\\project")
-            @test args[1].subdir == "subdir"
+            @test args[0].path == normpath("C:\\\\Users\\\\test\\\\project")
+            @test args[0].subdir == "subdir"
         end
 
         # Add using preserve option
@@ -793,8 +798,8 @@ end
         # `;` separated commands
         cmds = Pkg.pkg"build; precompile"
         @test length(cmds) == 2
-        @test cmds[1][1] == Pkg.build
-        @test cmds[2][1] == Pkg.precompile
+        @test cmds[0][0] == Pkg.build
+        @test cmds[1][0] == Pkg.precompile
         # multiline input
         cmds = Pkg.pkg"""
             test SubModule
@@ -803,8 +808,8 @@ end
             test
         """
         @test length(cmds) == 4
-        @test all(cmd -> cmd[1] == Pkg.test, cmds)
-        @test [cmd[2] for cmd in cmds] == [
+        @test all(cmd -> cmd[0] == Pkg.test, cmds)
+        @test [cmd[1] for cmd in cmds] == [
             [Pkg.PackageSpec(; name = "SubModule")],
             [Pkg.PackageSpec(; name = "SubModule2")],
             [Pkg.PackageSpec(; name = "BigProject")],
@@ -1080,10 +1085,60 @@ end
 test_complete(s) = REPLExt.completions(s, lastindex(s))
 apply_completion(str) = begin
     c, r, s = test_complete(str)
-    str[1:prevind(str, first(r))] * first(c)
+    str[0:prevind(str, first(r))] * first(c)
 end
 
 # Autocompletions
+# Package completions must provide valid byte regions to both Tab and asynchronous hints.
+@testset "zero-origin package completion regions" begin
+    LineEdit = REPL.LineEdit
+    provider = REPLExt.PkgCompletionProvider()
+    term = REPL.Terminals.TTYTerminal("dumb", IOBuffer(), IOBuffer(), IOBuffer())
+    prompt = LineEdit.Prompt("pkg> "; complete = provider)
+    for hint in (false, true), (input, cursor, expected, text) in (
+            ("", 0, 0 => 0, ""),
+            ("stat", 4, 0 => 4, "stat"),
+            ("help act", 8, 5 => 8, "act"),
+            ("?act", 4, 1 => 4, "act"),
+            ("status; stat", 12, 8 => 12, "stat"),
+            ("stat trailing", 4, 0 => 4, "stat"))
+        state = LineEdit.init_state(term, prompt)
+        write(state.input_buffer, input)
+        seek(state.input_buffer, cursor)
+        completions, region, _ = LineEdit.complete_line(provider, state; hint)
+        @test region == expected
+        @test LineEdit.content(state, region) == text
+        @test 0 <= first(region) <= last(region) <= sizeof(input)
+        input == "stat" && @test only(completions).completion == "status"
+    end
+    mktempdir() do dir
+        cd(dir) do
+            mkdir("αβ")
+            for hint in (false, true), input in ("activate ", "activate ./α")
+                state = LineEdit.init_state(term, prompt)
+                write(state.input_buffer, input)
+                completions, region, _ = LineEdit.complete_line(provider, state; hint)
+                expected = input == "activate " ? (9 => 9) : (11 => 13)
+                @test region == expected
+                @test LineEdit.content(state, region) == (input == "activate " ? "" : "α")
+                @test joinpath("αβ", "") in getproperty.(completions, :completion)
+            end
+        end
+    end
+    state = LineEdit.init_state(term, LineEdit.ModalInterface([prompt]))
+    ps = LineEdit.state(state)
+    write(ps.input_buffer, "stat")
+    LineEdit.check_show_hint(state)
+    @test Base.timedwait(() -> lock(() -> position(term.out_stream) > 0, state.line_modify_lock),
+                        10; pollint = 0.01) == :ok
+    rendered = lock(() -> String(take!(term.out_stream)), state.line_modify_lock)
+    @test occursin("us", rendered)
+    @test LineEdit.content(ps) == "stat"
+    @test LineEdit.complete_line(ps, 0, Main)
+    @test LineEdit.content(ps) == "status"
+    @test position(ps.input_buffer) == 6
+end
+
 @testset "tab completion while offline" begin
     temp_pkg_dir(; linked_reg = false) do project_path # starts without registries
         cd(project_path) do
@@ -1290,8 +1345,8 @@ end
             )
 
             # Define the required interface methods for our mock
-            @eval REPL.beforecursor(state::NamedTuple) = String(state.input_buffer.data[1:(state.input_buffer.ptr - 1)])
-            @eval REPL.LineEdit.input_string(state::NamedTuple) = String(state.input_buffer.data[1:state.input_buffer.size])
+            @eval REPL.beforecursor(state::NamedTuple) = String(state.input_buffer.data[0:(state.input_buffer.ptr - 1)])
+            @eval REPL.LineEdit.input_string(state::NamedTuple) = String(state.input_buffer.data[0:(state.input_buffer.size - 1)])
 
             # This calls the modified LineEdit.complete_line method
             completions, region, should_complete = @invokelatest REPL.LineEdit.complete_line(provider, mock_state)

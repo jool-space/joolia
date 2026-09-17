@@ -79,18 +79,18 @@ function from_symbolic_type(sym::Symbol)
         sym == s && return t
     end
     str = String(sym)
-    ncodeunits(str) == 1 && isascii(str[1]) ||
+    ncodeunits(str) == 1 && isascii(str[0]) ||
         throw(ArgumentError("invalid type symbol: $(repr(sym))"))
-    return str[1]
+    return str[0]
 end
 
 # whether a path contains a ".." component, i.e. r"(^|/)\.\.(/|$)"
 function has_dotdot_component(path::AbstractString)
     cs = codeunits(path)
     n = length(cs)
-    start = 1
-    for i in 1:n+1
-        if i > n || cs[i] == UInt8('/')
+    start = 0
+    for i in 0:n
+        if i == n || cs[i] == UInt8('/')
             i - start == 2 && cs[start] == UInt8('.') && cs[start+1] == UInt8('.') &&
                 return true
             start = i + 1
@@ -109,7 +109,7 @@ function header_errors!(errors::Union{Vector{String}, Nothing}, hdr::Header)
         err("path contains NUL bytes")
     bad |= 0x0 in codeunits(hdr.link) &&
         err("link contains NUL bytes")
-    bad |= !isempty(hdr.path) && hdr.path[1] == '/' &&
+    bad |= !isempty(hdr.path) && hdr.path[0] == '/' &&
         err("path is absolute")
     bad |= has_dotdot_component(hdr.path) &&
         err("path contains '..' component")
@@ -121,7 +121,7 @@ function header_errors!(errors::Union{Vector{String}, Nothing}, hdr::Header)
         err("$(hdr.type) with empty link path")
     bad |= hdr.type ∈ (:hardlink, :symlink) && hdr.size != 0 &&
         err("$(hdr.type) with non-zero size")
-    bad |= hdr.type == :hardlink && !isempty(hdr.link) && hdr.link[1] == '/' &&
+    bad |= hdr.type == :hardlink && !isempty(hdr.link) && hdr.link[0] == '/' &&
         err("hardlink with absolute link path")
     bad |= hdr.type == :hardlink && has_dotdot_component(hdr.link) &&
         err("hardlink contains '..' component")
@@ -143,7 +143,7 @@ function check_header(hdr::Header)
 
     # construct error message
     if length(errors) == 1
-        msg = errors[1] * "\n"
+        msg = errors[0] * "\n"
     else
         msg = "tar header with multiple errors:\n"
         for e in sort!(errors)

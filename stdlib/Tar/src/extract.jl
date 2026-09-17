@@ -47,7 +47,7 @@ function iterate_headers(
         if fields_arg
             callback(hdr, dump_header(buf))
         elseif raw_arg
-            callback(hdr, buf[1:512])
+            callback(hdr, buf[0:511])
         else
             callback(hdr)
         end
@@ -171,8 +171,8 @@ function extract_tarball(
 
     while !isempty(copies)
         n_before = length(copies)
-        i = 1
-        while i ≤ length(copies)
+        i = 0
+        while i < length(copies)
             path, what = copies[i]
             # check if source is complete yet
             if any(startswith(p, "$what/") for (p, w) in copies)
@@ -311,9 +311,9 @@ function git_tree_lt(x::Pair, y::Pair)
     na, nb = ncodeunits(a), ncodeunits(b)
     la = na + (x.second isa GitTree)
     lb = nb + (y.second isa GitTree)
-    for i in 1:min(la, lb)
-        ca = i ≤ na ? codeunit(a, i) : UInt8('/')
-        cb = i ≤ nb ? codeunit(b, i) : UInt8('/')
+    for i in 0:min(la, lb)-1
+        ca = i < na ? codeunit(a, i) : UInt8('/')
+        cb = i < nb ? codeunit(b, i) : UInt8('/')
         ca == cb || return ca < cb
     end
     return la < lb
@@ -345,8 +345,8 @@ end
 # write "<kind> <size>\0" into the start of buf, returning the byte count
 function git_object_prefix!(buf::Vector{UInt8}, kind::String, size::Integer)
     n = ncodeunits(kind)
-    copyto!(buf, 1, codeunits(kind), 1, n)
-    buf[n += 1] = UInt8(' ')
+    copyto!(buf, 0, codeunits(kind), 0, n)
+    buf[n] = UInt8(' ')
     n += ndigits(size)
     s, i = size, n
     while true
@@ -355,8 +355,8 @@ function git_object_prefix!(buf::Vector{UInt8}, kind::String, size::Integer)
         s == 0 && break
         i -= 1
     end
-    buf[n += 1] = 0x00
-    return n
+    buf[n + 1] = 0x00
+    return n + 2
 end
 
 function git_file_hash(
@@ -366,7 +366,7 @@ function git_file_hash(
     buf::Vector{UInt8} = Vector{UInt8}(undef, DEFAULT_BUFFER_SIZE),
 ) where HashType <: SHA.SHA_CTX
     ctx = HashType()
-    SHA.update!(ctx, view(buf, 1:git_object_prefix!(buf, "blob", size)))
+    SHA.update!(ctx, view(buf, 0:git_object_prefix!(buf, "blob", size)-1))
     # TODO: this largely duplicates the logic of read_data
     # read_data could be used directly if SHA offered an interface
     # where you write data to an IO object and it maintains a hash
@@ -375,7 +375,7 @@ function git_file_hash(
         max_read_len = Int(min(padded_size, length(buf)))::Int
         read_len = Int(readbytes!(tar, buf, max_read_len))::Int
         read_len < max_read_len && eof(tar) && throw(EOFError())
-        nonpadded_view = view(buf, 1:Int(min(read_len, size)))
+        nonpadded_view = view(buf, 0:Int(min(read_len, size))-1)
         SHA.update!(ctx, nonpadded_view)
         size -= length(nonpadded_view)
         padded_size -= read_len
@@ -443,7 +443,7 @@ function read_tarball(
         if any_symlinks
             plen = 0 # byte length of the prefix of `path` before current part
             for part in parts
-                prefix = SubString(path, 1, thisind(path, plen))
+                prefix = SubString(path, 0, prevind(path, plen))
                 if get(paths, prefix, nothing) isa String
                     err = """
                     Tarball contains path with symlink prefix:
@@ -544,7 +544,7 @@ function read_header(
                       repr(String(data)))
             key = hdr.type == :L ? "path" : "linkpath"
             metadata === nothing && (metadata = Dict{String,String}())
-            metadata[key] = String(@view data[1:end-1])
+            metadata[key] = String(@view data[0:end-1])
         else
             break # non-extension header block
         end
@@ -583,32 +583,34 @@ function read_extended_metadata(
     i = 0
     while i < size
         j, m = i, 0
-        while j ≤ size
-            byte = data[j += 1]
+        while j < size
+            byte = data[j]
             byte == UInt8(' ') && break
             UInt8('0') ≤ byte ≤ UInt8('9') || malformed()
             m, fm = mul_with_overflow(m, 10)
             m, fa = add_with_overflow(m, Int(byte - UInt8('0')))
             fm | fa &&
                 error("extended header record size too large: $(repr(String(data)))")
+            j += 1
         end
-        k, l = j, i + m
-        while k ≤ l
-            byte = data[k += 1]
+        k, l = j + 1, i + m - 1
+        while k < l
+            byte = data[k]
             byte == UInt8('=') && break
+            k += 1
         end
-        # data[i]       is end of previous
-        # data[i+1:j-1] is length in decimal
+        # data[i]       is first byte of record
+        # data[i:j-1]   is length in decimal
         # data[j]       is ` ` (space)
         # data[j+1:k-1] is key string
         # data[k]       is `=` (equals)
         # data[k+1:l-1] is value string
         # data[l]       is `\n` (newline)
-        i+1 < j < k < l || malformed()
+        i ≤ j < k < l < size || malformed()
         @assert data[j] == UInt8(' ')
         @assert data[k] == UInt8('=')
         data[l] == UInt8('\n') || malformed()
-        i = l # next starting point
+        i = l + 1 # next starting point
         # pass key, value back to caller
         key = String(@view data[j+1:k-1])
         val = String(@view data[k+1:l-1])
@@ -642,13 +644,13 @@ const HEADER_FIELDS = (
 
 function index_range(field::Symbol)
     for (fld, off, len) in HEADER_FIELDS
-        fld == field && return off .+ (1:len)
+        fld == field && return off .+ (0:len-1)
     end
     error("[internal error] invalid field name: $field")
 end
 
 dump_header(buf::AbstractVector{UInt8}) =
-    [ fld => String(buf[off .+ (1:len)])
+    [ fld => String(buf[off .+ (0:len-1)])
         for (fld, off, len) in HEADER_FIELDS ]
 
 function header_error(buf::AbstractVector{UInt8}, msg::AbstractString)
@@ -677,7 +679,7 @@ function read_standard_header(
     if all(iszero, data)
         while !eof(io)
             r = Int(readbytes!(io, buf))::Int
-            write(tee, view(buf, 1:r))
+            write(tee, view(buf, 0:r-1))
         end
         return nothing
     end
@@ -688,7 +690,7 @@ function read_standard_header(
     catch err
         if err isa ErrorException
             m = match(r"^(.*?)\s*\[header block data\]"s, String(err.msg)::String)::RegexMatch
-            msg = something(m.captures[1])
+            msg = something(m.captures[0])
             msg = "This does not appear to be a TAR file/stream — $msg. Note: Tar.jl does not handle decompression; if the tarball is compressed you must use an external command like `gzcat` or package like CodecZlib.jl to decompress it. See the README file for examples."
             err = ErrorException(msg)
         end
@@ -732,11 +734,11 @@ function check_checksum_field(buf::AbstractVector{UInt8})
     r_first, r_last = first(r), last(r)
 
     actual = zero(UInt32)
-    for i in 1:(r_first-1)
+    for i in 0:(r_first-1)
         actual += buf[i]
     end
     actual += UInt32(' ') * (r_last - r_first + 1)
-    for i in (r_last+1):512
+    for i in (r_last+1):511
         actual += buf[i]
     end
 
@@ -746,9 +748,9 @@ end
 
 function read_header_size(buf::AbstractVector{UInt8})
     r = index_range(:size)
-    b1 = buf[r[1]] # high bit set for binary
+    b1 = buf[r[0]] # high bit set for binary
     b1 & 0x80 == 0 && return read_header_int(buf, :size)
-    b1 == 0x80 && return read_header_bin(buf, :size, r[1]+1:r[end])
+    b1 == 0x80 && return read_header_bin(buf, :size, r[0]+1:r[end])
     val = String(buf[r])
     header_error(buf, "binary integer size value too large: $(repr(val))")
 end
@@ -826,9 +828,9 @@ function read_data(
     while padded_size > 0
         max_read_len = Int(min(padded_size, length(buf)))::Int
         read_len = Int(readbytes!(tar, buf, max_read_len))::Int
-        write(tee, view(buf, 1:read_len))
+        write(tee, view(buf, 0:read_len-1))
         read_len < max_read_len && eof(tar) && throw(EOFError())
-        size -= write(file, view(buf, 1:Int(min(read_len, size))))
+        size -= write(file, view(buf, 0:Int(min(read_len, size))-1))
         padded_size -= read_len
     end
     @assert size == padded_size == 0 """
@@ -863,6 +865,6 @@ function read_data(
         throw(ArgumentError("read_data(tar; size) called with too large size: $size"))
     padded_size = Int(padded_size)
     length(buf) < padded_size && resize!(buf, nextpow(2, padded_size))
-    write(tee, read!(tar, view(buf, 1:padded_size)))
-    return view(buf, 1:size)
+    write(tee, read!(tar, view(buf, 0:padded_size-1)))
+    return view(buf, 0:size-1)
 end

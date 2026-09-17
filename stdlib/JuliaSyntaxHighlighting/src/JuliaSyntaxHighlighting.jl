@@ -211,8 +211,9 @@ function _hl_annotations!(highlights::Vector{@NamedTuple{region::UnitRange{Int},
                           lineage::GreenLineage, ctx::HighlightContext; syntax_errors::Bool = false)
     (; node, parent) = lineage
     (; content, offset, lnode, pdepths) = ctx
-    region = firstindex(content)+offset:span(node)+offset
-    regionstr = view(content, firstindex(content)+offset:prevind(content, span(node)+offset+1))
+    region = firstindex(content)+offset:span(node)+offset-1
+    regionstr = span(node) == 0 ? view(content, 0:-1) :
+        view(content, firstindex(content)+offset:prevind(content, span(node)+offset))
     nkind = node.head.kind
     pnode = if !isnothing(parent) parent.node end
     pkind = if !isnothing(parent) kind(parent.node) end
@@ -250,8 +251,8 @@ function _hl_annotations!(highlights::Vector{@NamedTuple{region::UnitRange{Int},
                 :julia_number
             end
         end
-    elseif nkind == K"macrocall" && kind(node[1]) == K"macro_name"
-        region = first(region):first(region)+span(node[1])-1
+    elseif nkind == K"macrocall" && kind(node[0]) == K"macro_name"
+        region = first(region):first(region)+span(node[0])-1
         :julia_macro
     elseif nkind == K"StrMacroName"
         :julia_macro
@@ -265,13 +266,13 @@ function _hl_annotations!(highlights::Vector{@NamedTuple{region::UnitRange{Int},
                 c -> kind(c) == K"::" && JuliaSyntax.is_trivia(c),
                 something(children(node), typeof(node)[]))
             if !isnothing(literal_typedecl)
-                shift = sum(c ->Int(span(c)), node[1:literal_typedecl])
+                shift = sum(c ->Int(span(c)), node[0:literal_typedecl])
                 region = first(region)+shift:last(region)
                 :julia_type
             end
         end
     elseif nkind == K"quote" && numchildren(node) == 2 &&
-        kind(node[1]) == K":" && kind(node[2]) == K"Identifier"
+        kind(node[0]) == K":" && kind(node[1]) == K"Identifier"
         :julia_symbol
     elseif nkind == K"Comment"
         :julia_comment
@@ -296,7 +297,7 @@ function _hl_annotations!(highlights::Vector{@NamedTuple{region::UnitRange{Int},
             ifelse(ppkind == K"for", :julia_keyword, :julia_assignment)
         else # updating for <op>=
             push!(highlights, (firstindex(content)+offset:span(node)+offset-1, :face, :julia_operator))
-            push!(highlights, (span(node)+offset:span(node)+offset, :face, :julia_assignment))
+            push!(highlights, (span(node)+offset-1:span(node)+offset-1, :face, :julia_assignment))
             nothing
         end
     elseif nkind == K";" && pkind == K"parameters" && pnode == lnode
@@ -309,7 +310,7 @@ function _hl_annotations!(highlights::Vector{@NamedTuple{region::UnitRange{Int},
             c -> !JuliaSyntax.is_trivia(c),
             something(children(node), typeof(node)[]))
         if !isnothing(label) && kind(node[label]) == K"Identifier"
-            shift = sum(c -> Int(span(c)), node[1:label-1], init=0)
+            shift = sum(c -> Int(span(c)), node[0:label-1], init=0)
             region = first(region)+shift:first(region)+shift+Int(span(node[label]))-1
             :julia_label
         end
@@ -323,7 +324,7 @@ function _hl_annotations!(highlights::Vector{@NamedTuple{region::UnitRange{Int},
                 c -> kind(c) == K"where" && JuliaSyntax.is_trivia(c),
                 something(children(node), typeof(node)[]))
             if !isnothing(literal_where)
-                shift = sum(c ->Int(span(c)), node[1:literal_where])
+                shift = sum(c ->Int(span(c)), node[0:literal_where])
                 region = first(region)+shift:last(region)
                 :julia_type
             end
@@ -359,11 +360,11 @@ function _hl_annotations!(highlights::Vector{@NamedTuple{region::UnitRange{Int},
         if isnothing(arg1)
         elseif kind(arg1) == K"Identifier" && pkind != K"function"
             region = first(region):first(region)+argoffset-1
-            name = Symbol(view(regionstr, 1:argoffset))
+            name = Symbol(view(regionstr, 0:prevind(regionstr, argoffset)))
             ifelse(name in BUILTIN_FUNCTIONS, :julia_builtin, :julia_funcall)
         elseif kind(arg1) == K"." && numchildren(arg1) == 3 && kind(arg1[end]) == K"Identifier"
             region = first(region)+argoffset-span(arg1[end]):first(region)+argoffset-1
-            name = Symbol(view(regionstr, (1+argoffset-span(arg1[end])):argoffset))
+            name = Symbol(view(regionstr, (argoffset-span(arg1[end])):prevind(regionstr, argoffset)))
             ifelse(name in BUILTIN_FUNCTIONS, :julia_builtin, :julia_funcall)
         end
     elseif syntax_errors && JuliaSyntax.is_error(nkind)
@@ -398,7 +399,7 @@ function _hl_annotations!(highlights::Vector{@NamedTuple{region::UnitRange{Int},
         end
     elseif nkind == K"String"
         for match in eachmatch(r"\\.", regionstr)
-            push!(highlights, (firstindex(content)+offset+match.offset-1:firstindex(content)+offset+match.offset+ncodeunits(match.match)-2,
+            push!(highlights, (firstindex(content)+offset+match.offset:firstindex(content)+offset+match.offset+ncodeunits(match.match)-1,
                                :face, :julia_backslash_literal))
         end
     end
@@ -437,12 +438,12 @@ julia> JuliaSyntaxHighlighting.highlight("sum(1:8)")
 
 julia> JuliaSyntaxHighlighting.highlight("sum(1:8)") |> Base.annotations
 6-element Vector{@NamedTuple{region::UnitRange{Int64}, label::Symbol, value}}:
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((1:3, :face, :julia_funcall))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((4:4, :face, :julia_rainbow_paren_1))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((5:5, :face, :julia_number))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((6:6, :face, :julia_operator))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((7:7, :face, :julia_number))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((8:8, :face, :julia_rainbow_paren_1))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((0:2, :face, :julia_funcall))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((3:3, :face, :julia_rainbow_paren_1))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((4:4, :face, :julia_number))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((5:5, :face, :julia_operator))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((6:6, :face, :julia_number))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((7:7, :face, :julia_rainbow_paren_1))
 ```
 """
 function highlight end
@@ -487,12 +488,12 @@ julia> JuliaSyntaxHighlighting.highlight!(str)
 
 julia> Base.annotations(str)
 6-element Vector{@NamedTuple{region::UnitRange{Int64}, label::Symbol, value}}:
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((1:3, :face, :julia_funcall))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((4:4, :face, :julia_rainbow_paren_1))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((5:5, :face, :julia_number))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((6:6, :face, :julia_operator))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((7:7, :face, :julia_number))
- @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((8:8, :face, :julia_rainbow_paren_1))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((0:2, :face, :julia_funcall))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((3:3, :face, :julia_rainbow_paren_1))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((4:4, :face, :julia_number))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((5:5, :face, :julia_operator))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((6:6, :face, :julia_number))
+ @NamedTuple{region::UnitRange{Int64}, label::Symbol, value}((7:7, :face, :julia_rainbow_paren_1))
 ```
 """
 function highlight!(str::AnnotatedString; syntax_errors::Bool = false)
@@ -524,7 +525,7 @@ end
 if Base.generating_output()
     highlight(read(@__FILE__, String))
     highlight!(Base.AnnotatedString("1 + 2"))
-    highlight!(Base.AnnotatedString("1 + 2")[1:5])
+    highlight!(Base.AnnotatedString("1 + 2")[0:4])
 end
 
 end

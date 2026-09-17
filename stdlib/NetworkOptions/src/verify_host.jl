@@ -71,9 +71,9 @@ end
 
 function url_host(url::AbstractString)
     m = match(r"^(?:[a-z]+)://(?:[^@/]+@)?([-\w\.]+)"ai, url)
-    m !== nothing && return m.captures[1]
+    m !== nothing && return m.captures[0]
     m = match(r"^(?:[-\w\.]+@)?([-\w\.]+)(?:$|:)"a, url)
-    m !== nothing && return m.captures[1]
+    m !== nothing && return m.captures[0]
     return nothing # couldn't parse
 end
 
@@ -121,7 +121,7 @@ function host_pattern_regex(value::AbstractString, var::AbstractString="")
     for parts in patterns
         re = ""
         for (i, part) in enumerate(parts)
-            re *= if i < length(parts)
+            re *= if i < lastindex(parts)
                 part == "*"  ? "[-\\w]+\\." :
                 part == "**" ? "(?:[-\\w]+\\.)*" : "$part\\."
             else

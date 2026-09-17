@@ -10,12 +10,12 @@ nonzeroinds(v::AbstractVector) = eachindex(v)
 
 Return an iterable collection of the row indices of the nonzero entries in column `col` of the matrix `A`.
 """
-nzrows(A, col) = axes(A, 1)
-nzrows(A::AbstractVector, col) = col == 1 ? nonzeroinds(A) : throw(BoundsError(A, (":", col)))
+nzrows(A, col) = axes(A, 0)
+nzrows(A::AbstractVector, col) = col == 0 ? nonzeroinds(A) : throw(BoundsError(A, (":", col)))
 
 """
     nzcols(A, row::Integer)
 
 Return an iterable collection of the column indices of the nonzero entries in row `row` of the matrix `A`.
 """
-nzcols(A, row) = axes(A, 2)
+nzcols(A, row) = axes(A, 1)

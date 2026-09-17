@@ -61,7 +61,7 @@ function termcolor8bit(io::IO, (; r, g, b)::RGBTuple, category::Char)
     from6cube(r6, g6, b6) = 16 + 6^2 * r6 + 6^1 * g6 + 6^0 * b6
     sixcube = (0, 95:40:255...)
     r6cube, g6cube, b6cube = to6cube(r), to6cube(g), to6cube(b)
-    rnear, gnear, bnear = sixcube[r6cube+1], sixcube[g6cube+1], sixcube[b6cube+1]
+    rnear, gnear, bnear = sixcube[r6cube], sixcube[g6cube], sixcube[b6cube]
     colorcode = if r == rnear && g == gnear && b == bnear
         from6cube(r6cube, g6cube, b6cube)
     else
@@ -301,8 +301,8 @@ function Base.AnnotatedDisplay.show_annot(io::IO, c::AnnotatedChar)
         out = IOBuffer()
         show(out, c.char)
         cstr = AnnotatedString(
-            String(take!(out)[2:end-1]),
-            [(1:ncodeunits(c), a...) for a in c.annotations])
+            String(take!(out)[1:end-1]),
+            [(0:ncodeunits(c)-1, a...) for a in c.annotations])
         print(io, ''', cstr, ''')
     else
         show(io, c.char)

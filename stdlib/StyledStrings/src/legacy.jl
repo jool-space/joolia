@@ -60,7 +60,7 @@ const ANSI_256_COLORS =
          0x8a8a8a, 0x949494, 0x9e9e9e, 0xa8a8a8, 0xb2b2b2, 0xbcbcbc, 0xc6c6c6,
          0xd0d0d0, 0xdadada, 0xe4e4e4, 0xeeeeee])
 
-legacy_color(color256::Int) = get(ANSI_256_COLORS, color256+1, nothing)
+legacy_color(color256::Int) = get(ANSI_256_COLORS, color256, nothing)
 
 """
 A list of all named colors recognised, including both the old `light_*` and new

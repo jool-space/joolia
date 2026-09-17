@@ -110,7 +110,7 @@ function State(content::AbstractString, mod::Union{Module, Nothing}=nothing)
           Any[], # parts
           Vector{Tuple{Int, Int, Union{Symbol, Expr, Tuple{Symbol, Any}}}}[], # active_styles
           Tuple{UnitRange{Int}, Union{Symbol, Expr, Tuple{Symbol, Any}}}[], # pending_styles
-          0, 1, # offset, point
+          0, 0, # offset, point
           false, 0, # escape, interpolations
           NamedTuple{(:message, :position, :hint), # errors
                      Tuple{AnnotatedString{String}, <:Union{Int, Nothing}, String}}[])
@@ -218,7 +218,8 @@ function addpart!(state::State, stop::Int)
                 sort!(state.pending_styles, by = (r -> (first(r), -last(r))) ∘ first) # Prioritise the most specific styles
                 for (range, annot) in state.pending_styles
                     if !isempty(range)
-                        adjrange = (first(range) - state.point):(last(range) - state.point)
+                        # Stored style bounds are one past their byte positions.
+                        adjrange = (first(range) - state.point - 1):(last(range) - state.point - 1)
                         push!(styles, tupl(adjrange, annot))
                     end
                 end
@@ -251,7 +252,7 @@ function addpart!(state::State, start::Int, expr, stop::Int)
         len = gensym("len")
         annots = Expr(:vect, [
             :(NamedTuple{(:region, :label, :value), Tuple{UnitRange{Int}, Symbol, Any}}(
-                (1:$len, $annot...)))
+                (0:$len-1, $annot...)))
             for annot in
                 map(last,
                     (Iterators.flatten(
@@ -327,7 +328,7 @@ function readexpr!(state::State, pos::Int = first(popfirst!(state.s)) + 1)
     if isempty(state.s)
         styerr!(state,
                 AnnotatedString("Identifier or parenthesised expression expected after \$ in string",
-                                [(55:55, :face, :warning)]),
+                                [(54:54, :face, :warning)]),
                 -1, "right here")
         return "", pos
     end
@@ -492,7 +493,7 @@ function read_inlineface!(state::State, i::Int, char::Char, newstyles)
         elseif startswith(color, '#') && length(color) == 7
             tryparse(SimpleColor, color)
         elseif startswith(color, "0x") && length(color) == 8
-            tryparse(SimpleColor, '#' * color[3:end])
+            tryparse(SimpleColor, '#' * color[2:end])
         else
             SimpleColor(Symbol(color))
         end
@@ -660,7 +661,7 @@ function read_inlineface!(state::State, i::Int, char::Char, newstyles)
             else
                 invalid, lastchar = readsymbol!(state, lastchar)
                 styerr!(state, AnnotatedString("Invalid height '$invalid', should be a natural number or positive float",
-                                                [(17:16+ncodeunits(string(invalid)), :face, :warning)]),
+                                                [(16:15+ncodeunits(string(invalid)), :face, :warning)]),
                         -3)
             end
         elseif key ∈ (:weight, :slant)
@@ -668,7 +669,7 @@ function read_inlineface!(state::State, i::Int, char::Char, newstyles)
             if key == :weight && v ∉ VALID_WEIGHTS
                 valid_options = join(VALID_WEIGHTS, ", ", ", or ")
                 styerr!(state, AnnotatedString("Invalid weight '$v' (should be $valid_options)",
-                                                [(17:16+ncodeunits(v), :face, :warning),
+                                                [(16:15+ncodeunits(v), :face, :warning),
                                                  (19+ncodeunits(v):30+ncodeunits(v)+ncodeunits(valid_options),
                                                   :face, :light)]),
                         -3)
@@ -704,7 +705,7 @@ function read_inlineface!(state::State, i::Int, char::Char, newstyles)
         else
             styerr!(state, AnnotatedString(
                 "Uses unrecognised face key '$key'. Recognised keys are: $(join(VALID_FACE_ATTRS, ", ", ", and "))",
-                [(29:28+ncodeunits(String(key)), :face, :warning)]),
+                [(28:27+ncodeunits(String(key)), :face, :warning)]),
                     -length(str_key) - 2)
         end
         let key = key # Avoid boxing from closure capture
@@ -714,7 +715,7 @@ function read_inlineface!(state::State, i::Int, char::Char, newstyles)
                 push!(kwargs, key => val)
             else
                 styerr!(state, AnnotatedString("Contains repeated face key '$key'",
-                                                [(29:28+ncodeunits(String(key)), :face, :warning)]),
+                                                [(28:27+ncodeunits(String(key)), :face, :warning)]),
                         -length(str_key) - 2)
             end
         end
@@ -861,7 +862,7 @@ function run_state_machine!(state::State)
     end
     for incomplete in Iterators.flatten(state.active_styles)
         styerr!(state, AnnotatedString("Unterminated annotation (missing closing '}')",
-                                        [(43:43, :face, :warning)]),
+                                        [(42:42, :face, :warning)]),
                 prevind(state.content, first(incomplete)), "starts here")
     end
 end
@@ -874,11 +875,11 @@ Merge contiguous identical annotations in `str`.
 function annotatedstring_optimize!(s::AnnotatedString)
     length(s.annotations) <= 1 && return s
     last_seen = Dict{Tuple{Symbol, Any}, Int}()
-    i = 1
-    while i <= length(s.annotations)
+    i = 0
+    while i < length(s.annotations)
         ann = s.annotations[i]
-        prev = get(last_seen, (ann.label, ann.value), 0)
-        if prev > 0
+        prev = get(last_seen, (ann.label, ann.value), -1)
+        if prev >= 0
             lregion = s.annotations[prev].region
             if last(lregion) + 1 == first(ann.region)
                 s.annotations[prev] =
@@ -1035,7 +1036,7 @@ function Base.showerror(io::IO, err::MalformedStylingMacro)
         posinfo = if isnothing(position)
             println(io, styled"{error:│} $message.")
         else
-            infowidth = displaysize(stderr)[2] ÷ 3
+            infowidth = displaysize(stderr)[1] ÷ 3
             j = clamp(12 * round(Int, position / 12),
                         firstindex(err.raw):lastindex(err.raw))
             start = if j <= infowidth firstindex(err.raw) else

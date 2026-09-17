@@ -2,14 +2,14 @@ macro R1_16(j, T)
 
     ww = (:a, :b, :c, :d, :e, :f, :g, :h)
 
-    a = ww[((81 - j) % 8) + 1]
-    b = ww[((82 - j) % 8) + 1]
-    c = ww[((83 - j) % 8) + 1]
-    d = ww[((84 - j) % 8) + 1]
-    e = ww[((85 - j) % 8) + 1]
-    f = ww[((86 - j) % 8) + 1]
-    g = ww[((87 - j) % 8) + 1]
-    h = ww[((88 - j) % 8) + 1]
+    a = ww[(81 - j) % 8]
+    b = ww[(82 - j) % 8]
+    c = ww[(83 - j) % 8]
+    d = ww[(84 - j) % 8]
+    e = ww[(85 - j) % 8]
+    f = ww[(86 - j) % 8]
+    g = ww[(87 - j) % 8]
+    h = ww[(88 - j) % 8]
 
     if T == 512
         Sigma0 = :Sigma0_512
@@ -23,11 +23,11 @@ macro R1_16(j, T)
 
     return esc(quote
         # We byteswap every input byte
-        v = bswap(unsafe_load(pbuf, $j))
-        unsafe_store!(pbuf, v, $j)
+        v = bswap(unsafe_load(pbuf, $j-1))
+        unsafe_store!(pbuf, v, $j-1)
 
         # Apply the SHA-256 compression function to update a..h
-        T1 = $h + $Sigma1($e) + Ch($e, $f, $g) + $K[$j] + v
+        T1 = $h + $Sigma1($e) + Ch($e, $f, $g) + $K[$j-1] + v
         $h = $Sigma0($a) + Maj($a, $b, $c)
         $d += T1
         $h += T1
@@ -38,14 +38,14 @@ macro R17_80(j, T)
 
     ww = (:a, :b, :c, :d, :e, :f, :g, :h)
 
-    a = ww[((81 - j) % 8) + 1]
-    b = ww[((82 - j) % 8) + 1]
-    c = ww[((83 - j) % 8) + 1]
-    d = ww[((84 - j) % 8) + 1]
-    e = ww[((85 - j) % 8) + 1]
-    f = ww[((86 - j) % 8) + 1]
-    g = ww[((87 - j) % 8) + 1]
-    h = ww[((88 - j) % 8) + 1]
+    a = ww[(81 - j) % 8]
+    b = ww[(82 - j) % 8]
+    c = ww[(83 - j) % 8]
+    d = ww[(84 - j) % 8]
+    e = ww[(85 - j) % 8]
+    f = ww[(86 - j) % 8]
+    g = ww[(87 - j) % 8]
+    h = ww[(88 - j) % 8]
 
     if T == 512
         Sigma0 = :Sigma0_512
@@ -62,15 +62,15 @@ macro R17_80(j, T)
     end
 
     return esc(quote
-        s0 = unsafe_load(pbuf, mod1($j + 1, 16))
+        s0 = unsafe_load(pbuf, mod($j, 16))
         s0 = $sigma0(s0)
-        s1 = unsafe_load(pbuf, mod1($j + 14, 16))
+        s1 = unsafe_load(pbuf, mod($j + 13, 16))
         s1 = $sigma1(s1)
 
         # Apply the SHA-256 compression function to update a..h
-        v = unsafe_load(pbuf, mod1($j, 16)) + s1 + unsafe_load(pbuf, mod1($j + 9, 16)) + s0
-        unsafe_store!(pbuf, v, mod1($j, 16))
-        T1 = $h + $Sigma1($e) + Ch($e, $f, $g) + $K[$j] + v
+        v = unsafe_load(pbuf, mod($j - 1, 16)) + s1 + unsafe_load(pbuf, mod($j + 8, 16)) + s0
+        unsafe_store!(pbuf, v, mod($j - 1, 16))
+        T1 = $h + $Sigma1($e) + Ch($e, $f, $g) + $K[$j-1] + v
         $h = $Sigma0($a) + Maj($a, $b, $c)
         $d += T1
         $h += T1
@@ -123,14 +123,14 @@ end
 
         # Compute the current intermediate hash value
         @inbounds begin
-            context.state[1] += a
-            context.state[2] += b
-            context.state[3] += c
-            context.state[4] += d
-            context.state[5] += e
-            context.state[6] += f
-            context.state[7] += g
-            context.state[8] += h
+            context.state[0] += a
+            context.state[1] += b
+            context.state[2] += c
+            context.state[3] += d
+            context.state[4] += e
+            context.state[5] += f
+            context.state[6] += g
+            context.state[7] += h
         end
     end
 end

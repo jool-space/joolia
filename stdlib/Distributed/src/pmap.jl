@@ -209,16 +209,16 @@ function process_batch_errors!(p, f, results, on_error, retry_delays, retry_chec
     end
 
     if length(reprocess) > 0
-        errors = [x[2] for x in reprocess]
+        errors = [x[1] for x in reprocess]
         exceptions = Any[x.ex for x in errors]
         state = iterate(retry_delays)
-        state !== nothing && (state = state[2])
+        state !== nothing && (state = state[1])
         error_processed = let state=state
             if (length(retry_delays)::Int > 0) &&
-                    (retry_check === nothing || all([retry_check(state,ex)[2] for ex in exceptions]))
+                    (retry_check === nothing || all([retry_check(state,ex)[1] for ex in exceptions]))
                 # BatchProcessingError.data is a tuple of original args
                 pmap(x->f(x...), p, Any[x.data for x in errors];
-                        on_error = on_error, retry_delays = collect(retry_delays)[2:end::Int], retry_check = retry_check)
+                        on_error = on_error, retry_delays = collect(retry_delays)[1:end::Int], retry_check = retry_check)
             elseif on_error !== nothing
                 map(on_error, exceptions)
             else
@@ -227,7 +227,7 @@ function process_batch_errors!(p, f, results, on_error, retry_delays, retry_chec
         end
 
         for (idx, v) in enumerate(error_processed)
-            results[reprocess[idx][1]] = v
+            results[reprocess[idx][0]] = v
         end
     end
     nothing
@@ -257,17 +257,17 @@ julia> collect(c)
 function head_and_tail(c, n)
     head = Vector{eltype(c)}(undef, n)
     n == 0 && return (head, c)
-    i = 1
+    i = 0
     y = iterate(c)
     y === nothing && return (resize!(head, 0), ())
-    head[i] = y[1]
-    while i < n
-        y = iterate(c, y[2])
-        y === nothing && return (resize!(head, i), ())
+    head[i] = y[0]
+    while i < n - 1
+        y = iterate(c, y[1])
+        y === nothing && return (resize!(head, i + 1), ())
         i += 1
-        head[i] = y[1]
+        head[i] = y[0]
     end
-    return head, Iterators.rest(c, y[2])
+    return head, Iterators.rest(c, y[1])
 end
 
 """

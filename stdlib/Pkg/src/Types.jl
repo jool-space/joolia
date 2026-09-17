@@ -132,9 +132,9 @@ function Base.hash(a::PackageSpec, h::UInt)
 end
 
 function err_rep(pkg::PackageSpec; quotes::Bool = true)
-    x = pkg.name !== nothing && pkg.uuid !== nothing ? x = "$(pkg.name) [$(string(pkg.uuid)[1:8])]" :
+    x = pkg.name !== nothing && pkg.uuid !== nothing ? x = "$(pkg.name) [$(string(pkg.uuid)[0:7])]" :
         pkg.name !== nothing ? pkg.name :
-        pkg.uuid !== nothing ? string(pkg.uuid)[1:8] :
+        pkg.uuid !== nothing ? string(pkg.uuid)[0:7] :
         pkg.repo.source
     return quotes ? "`$x`" : x
 end
@@ -1232,7 +1232,7 @@ function manifest_resolve!(manifest::Manifest, pkgs::AbstractVector{PackageSpec}
     end
     for pkg in pkgs
         if has_name(pkg) && !has_uuid(pkg) && pkg.name in keys(uuids)
-            length(uuids[pkg.name]) == 1 && (pkg.uuid = uuids[pkg.name][1])
+            length(uuids[pkg.name]) == 1 && (pkg.uuid = first(uuids[pkg.name]))
         end
         if has_uuid(pkg) && !has_name(pkg) && pkg.uuid in keys(names)
             pkg.name = names[pkg.uuid]
@@ -1317,7 +1317,7 @@ function ensure_resolved(
                         println(io)
                         prefix = "   Suggestions:"
                         printstyled(io, prefix, color = Base.info_color())
-                        FuzzySorting.printmatches(io, name, all_names_ranked; cols = FuzzySorting._displaysize(ctx.io)[2] - length(prefix))
+                        FuzzySorting.printmatches(io, name, all_names_ranked; cols = FuzzySorting._displaysize(ctx.io)[1] - length(prefix))
                     end
                 else
                     join(io, uuids, ", ", " or ")

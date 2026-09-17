@@ -23,8 +23,8 @@ include("setup.jl")
             @test ca_roots() == value
             @test ca_roots_path() == value
             ENV[var] = ""
-            @test ca_roots() == unset[1]
-            @test ca_roots_path() == unset[2]
+            @test ca_roots() == unset[0]
+            @test ca_roots_path() == unset[1]
             clear_env()
         end
         # set multiple CA_ROOT_VARS with increasing precedence
@@ -35,8 +35,8 @@ include("setup.jl")
         ENV["JULIA_SSL_CA_ROOTS_PATH"] = "1"
         @test ca_roots() == ca_roots_path() == "1"
         ENV["JULIA_SSL_CA_ROOTS_PATH"] = ""
-        @test ca_roots() == unset[1]
-        @test ca_roots_path() == unset[2]
+        @test ca_roots() == unset[0]
+        @test ca_roots_path() == unset[1]
         clear_env()
     end
 end
@@ -137,15 +137,15 @@ end
         paths = [tempname() for _ = 1:3]
         ENV["SSH_KNOWN_HOSTS_FILES"] = join(paths, path_sep)
         @test ssh_known_hosts_files() == paths
-        @test ssh_known_hosts_file() == paths[1]
-        touch(paths[3])
-        @test ssh_known_hosts_files() == paths
-        @test ssh_known_hosts_file() == paths[3]
+        @test ssh_known_hosts_file() == paths[0]
         touch(paths[2])
         @test ssh_known_hosts_files() == paths
         @test ssh_known_hosts_file() == paths[2]
+        touch(paths[1])
+        @test ssh_known_hosts_files() == paths
+        @test ssh_known_hosts_file() == paths[1]
+        rm(paths[1])
         rm(paths[2])
-        rm(paths[3])
         # prepend path
         path = tempname()
         ENV["SSH_KNOWN_HOSTS_FILES"] = path * path_sep
@@ -320,3 +320,12 @@ end
 end
 
 reset_env()
+
+
+@testset "zero-origin host parsing" begin
+    @test NetworkOptions.url_host("file:///tmp/data") == "file"
+    @test NetworkOptions.url_host("https://example.com/path") == "example.com"
+    @test NetworkOptions.url_host("user@example.com:/path") == "example.com"
+    @test occursin(NetworkOptions.host_pattern_regex("*.example.com"), "api.example.com")
+    @test !occursin(NetworkOptions.host_pattern_regex("*.example.com"), "example.com")
+end

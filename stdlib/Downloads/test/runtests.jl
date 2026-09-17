@@ -786,3 +786,18 @@ end
 
 Downloads.DOWNLOADER[] = nothing
 GC.gc(true)
+
+@testset "zero-origin URL and response parsing" begin
+    @test Downloads.url_unescape("a%20b%2Fα") == "a b/α"
+    @test Downloads.url_unescape("bad%") === nothing
+    @test Downloads.url_filename("https://example.test/path/a%CE%B1.txt?q=1") == "aα.txt"
+
+    response = Response("http", "https://example.test/", 200, "", [
+        "content-disposition" => "attachment; filename=\"a%20b.txt\""])
+    @test Downloads.get_filename(response) == "a%20b.txt"
+
+    encoding = "utf-8" * Char(39) * Char(39)
+    response = Response("http", "https://example.test/", 200, "", [
+        "content-disposition" => "attachment; filename*=" * encoding * "a%CE%B1.txt"])
+    @test Downloads.get_filename(response) == "aα.txt"
+end

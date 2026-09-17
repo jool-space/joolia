@@ -403,7 +403,7 @@ function request(
                 # libcurl does not set the default header reliably so set it
                 # explicitly unless user has specified it, xref
                 # https://github.com/JuliaLang/Pkg.jl/pull/2357
-                if !any(kv -> lowercase(kv[1]) == "user-agent", headers)
+                if !any(kv -> lowercase(kv[0]) == "user-agent", headers)
                     Curl.add_header(easy, "User-Agent", Curl.USER_AGENT)
                 end
 
@@ -540,7 +540,7 @@ end
 let
     Curl.__init__()
     d = Downloader()
-    f = mktemp()[1]
+    f = mktemp()[0]
     download("file://" * f; downloader=d)
     precompile(Tuple{typeof(Downloads.download), String, String})
     precompile(Tuple{typeof(Downloads.Curl.status_2xx_ok), Int64})

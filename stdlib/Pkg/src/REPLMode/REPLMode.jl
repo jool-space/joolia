@@ -154,8 +154,8 @@ is_opt(word::AbstractString) = first(word) == '-' && word != "-"
 function parse_option(word::AbstractString)::Option
     m = match(r"^(?: -([a-z]) | --((?:[a-z]{1,}-?)*)(?:\s*=\s*(\S*))? )$"ix, word)
     m === nothing && pkgerror("malformed option: ", repr(word))
-    option_name = m.captures[1] !== nothing ? something(m.captures[1]) : something(m.captures[2])
-    option_arg = m.captures[3] === nothing ? nothing : String(something(m.captures[3]))
+    option_name = m.captures[0] !== nothing ? something(m.captures[0]) : something(m.captures[1])
+    option_arg = m.captures[2] === nothing ? nothing : String(something(m.captures[2]))
     return Option(option_name, option_arg)
 end
 
@@ -252,8 +252,8 @@ function core_parse(words::Vector{QString}; only_cmd = false)
     word = popfirst!(words)
     # handle `?` alias for help
     # It is special in that it requires no space between command and args
-    if word.raw[1] == '?' && !word.isquoted
-        length(word.raw) > 1 && pushfirst!(words, QString(word.raw[2:end], false))
+    if word.raw[0] == '?' && !word.isquoted
+        length(word.raw) > 1 && pushfirst!(words, QString(word.raw[1:end], false))
         word = QString("?", false)
     end
     # determine command

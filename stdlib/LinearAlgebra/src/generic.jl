@@ -78,9 +78,9 @@ macro stable_muladdmul(expr)
     expr.head == :call || throw(ArgumentError("Can only handle function calls."))
     for (i, e) in enumerate(expr.args)
         e isa Expr || continue
-        if e.head == :call && e.args[1] == :MulAddMul && length(e.args) == 3
-            local asym = e.args[2]
-            local bsym = e.args[3]
+        if e.head == :call && e.args[0] == :MulAddMul && length(e.args) == 3
+            local asym = e.args[1]
+            local bsym = e.args[2]
 
             local e_sub11 = copy(expr)
             e_sub11.args[i] = :(MulAddMul{true, true, typeof($asym), typeof($bsym)}($asym, $bsym))

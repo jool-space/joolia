@@ -4,7 +4,7 @@ let nextidx = Threads.Atomic{Int}(0)
     global nextproc
     function nextproc()
         idx = Threads.atomic_add!(nextidx, 1)
-        return workers()[(idx % nworkers()) + 1]
+        return workers()[idx % nworkers()]
     end
 end
 
@@ -155,7 +155,7 @@ function extract_imports!(imports, ex::Expr)
     if Meta.isexpr(ex, (:import, :using))
         push!(imports, ex)
     elseif Meta.isexpr(ex, :let)
-        extract_imports!(imports, ex.args[2])
+        extract_imports!(imports, ex.args[1])
     elseif Meta.isexpr(ex, (:toplevel, :block))
         for arg in ex.args
             extract_imports!(imports, arg)
@@ -252,7 +252,7 @@ function splitrange(firstIndex::Int, lastIndex::Int, np::Int)
     nchunks = each > 0 ? np : extras
     chunks = Vector{UnitRange{Int}}(undef, nchunks)
     lo = firstIndex
-    for i in 1:nchunks
+    for i in 0:nchunks-1
         hi = lo + each - 1
         if extras > 0
             hi += 1
@@ -266,7 +266,7 @@ end
 
 function preduce(reducer, f, R)
     chunks = splitrange(Int(firstindex(R)), Int(lastindex(R)), nworkers())
-    all_w = workers()[1:length(chunks)]
+    all_w = workers()[0:length(chunks)-1]
 
     w_exec = Task[]
     for (idx,pid) in enumerate(all_w)
@@ -334,19 +334,19 @@ macro distributed(args...)
     na = length(args)
     if na==1
         reducer = identity
-        loop = args[1]
+        loop = args[0]
     elseif na==2
-        reducer = args[1]
-        loop = args[2]
+        reducer = args[0]
+        loop = args[1]
     else
         throw(ArgumentError("wrong number of arguments to @distributed"))
     end
     if !isa(loop,Expr) || loop.head !== :for
         error("malformed @distributed loop")
     end
-    var = loop.args[1].args[1]
-    r = loop.args[1].args[2]
-    body = loop.args[2]
+    var = loop.args[0].args[0]
+    r = loop.args[0].args[1]
+    body = loop.args[1]
     if Meta.isexpr(body, :block) && body.args[end] isa LineNumberNode
         resize!(body.args, length(body.args) - 1)
     end

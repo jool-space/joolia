@@ -32,7 +32,7 @@ function depots1(depot_list::Union{String, Vector{String}} = depots())
         return depot_list
     else
         isempty(depot_list) && Pkg.Types.pkgerror("no depots provided")
-        return depot_list[1]
+        return first(depot_list)
     end
 end
 
@@ -551,7 +551,7 @@ const free = API.free
 Make a package available for development by tracking it by path.
 If `pkg` is given with only a name or by a URL, the package will be downloaded
 to the location specified by the environment variable `JULIA_PKG_DEVDIR`, with
-`joinpath(DEPOT_PATH[1],"dev")` being the default.
+`joinpath(DEPOT_PATH[0],"dev")` being the default.
 
 If `pkg` is given as a local path, the package at that path will be tracked.
 

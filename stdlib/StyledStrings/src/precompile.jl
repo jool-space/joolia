@@ -7,7 +7,7 @@ print(colorio, styled"{face=$(Face(foreground=:red)):with color}")
 print(colorio, styled"{(foreground=red):with color}")
 show(colorio, MIME("text/plain"), styled"{red:with color}")
 show(colorio, MIME("text/html"), styled"{red:with color}")
-print(colorio, styled"{red:with color}"[1])
+print(colorio, styled"{red:with color}"[0])
 print(colorio, styled"{(underline=(blue,curly)):more styling}")
 
 convert(StyledStrings.SimpleColor, (r = 0x01, g = 0x02, b = 0x03))
@@ -27,7 +27,7 @@ show(colorio, StyledStrings.Face(foreground=:green))
 
 StyledStrings.getface()
 StyledStrings.getface(:red)
-StyledStrings.getface(styled"{red:red}", 1)
+StyledStrings.getface(styled"{red:red}", 0)
 
 StyledStrings.addface!(:_precompile => Face(font="precompile"))
 StyledStrings.loadface!(:_precompile => Face(inverse=true))

@@ -243,14 +243,14 @@ function message_handler_loop(r_stream::IO, w_stream::IO, incoming::Bool)
                 msg = invokelatest(deserialize_msg, serializer)
             catch e
                 # Deserialization error; discard bytes in stream until boundary found
-                boundary_idx = 1
+                boundary_idx = 0
                 while true
                     # This may throw an EOF error if the terminal boundary was not written
                     # correctly, triggering the higher-scoped catch block below
                     byte = read(r_stream, UInt8)
                     if byte == MSG_BOUNDARY[boundary_idx]
                         boundary_idx += 1
-                        if boundary_idx > length(MSG_BOUNDARY)
+                        if boundary_idx >= length(MSG_BOUNDARY)
                             break
                         end
                     else
@@ -328,7 +328,7 @@ function process_hdr(s, validate_cookie)
         end
 
         self_cookie = cluster_cookie()
-        for i in 1:HDR_COOKIE_LEN
+        for i in 0:HDR_COOKIE_LEN-1
             if UInt8(self_cookie[i]) != cookie[i]
                 error("Process($(myid())) - Invalid connection credentials sent by remote.")
             end

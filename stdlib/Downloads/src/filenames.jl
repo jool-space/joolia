@@ -3,7 +3,7 @@
 struct BadEncoding <: Exception end
 
 function hex_digit(str::AbstractString, i::Int)::Tuple{UInt8,Int}
-    if i ≤ ncodeunits(str)
+    if i < ncodeunits(str)
         d, i = iterate(str, i)
         '0' ≤ d ≤ '9' && return d - '0', i
         'a' ≤ d ≤ 'f' && return d - 'a' + 10, i
@@ -14,8 +14,8 @@ end
 
 function url_unescape(str::Union{String, SubString{String}})
     try return sprint(sizehint = ncodeunits(str)) do io
-            i = 1
-            while i ≤ ncodeunits(str)
+            i = 0
+            while i < ncodeunits(str)
                 c, i = iterate(str, i)
                 if c == '%'
                     hi, i = hex_digit(str, i)
@@ -36,7 +36,7 @@ end
 function url_filename(url::AbstractString)
     m = match(r"^[a-z][a-z+._-]*://[^#?]*/([^/#?]+)(?:[#?]|$)"i, url)
     if m !== nothing
-        name = url_unescape(m[1])
+        name = url_unescape(m[0])
         is_safe_filename(name) && return name
     end
     return nothing
@@ -63,15 +63,15 @@ function get_filename(response::Response)
         h_key == "content-disposition" &&
             contains(h_val, content_disposition_re) || continue
         for m in eachmatch(content_disposition_each_re, h_val)
-            a_key = lowercase(m.captures[1])
-            a_val = m.captures[2]
+            a_key = lowercase(m.captures[0])
+            a_val = m.captures[1]
             a_val === nothing && continue
             if a_key == "filename"
-                if a_val[1] in ('"', '\'') && a_val[1] == a_val[end]
+                if a_val[0] in ('"', '\'') && a_val[0] == a_val[end]
                     # quoted value
                     filename = sprint(sizehint=ncodeunits(a_val)-2) do io
-                        i = nextind(a_val, 1)
-                        while i < ncodeunits(a_val)
+                        i = nextind(a_val, 0)
+                        while i < ncodeunits(a_val)-1
                             c, i = iterate(a_val, i)
                             if c == '\\'
                                 c, i = iterate(a_val, i)
@@ -85,12 +85,12 @@ function get_filename(response::Response)
             elseif a_key == "filename*"
                 m = match(r"^([\w-]+)'\w*'(.*)$", a_val)
                 m === nothing && continue
-                encoding = lowercase(m.captures[1])
+                encoding = lowercase(m.captures[0])
                 encoding in ("utf-8", "iso-8859-1") || continue
-                encoded = m.captures[2]
+                encoded = m.captures[1]
                 try filename⁺ = sprint() do io
-                        i = 1
-                        while i ≤ ncodeunits(encoded)
+                        i = 0
+                        while i < ncodeunits(encoded)
                             c, i = iterate(encoded, i)
                             if c == '%'
                                 hi, i = hex_digit(encoded, i)

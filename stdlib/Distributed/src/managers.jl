@@ -15,8 +15,8 @@ struct SSHManager <: ClusterManager
         mhist = Dict()
         for m in machines
             if isa(m, Tuple)
-                host=m[1]
-                cnt=m[2]
+                host=m[0]
+                cnt=m[1]
             else
                 host=m
                 cnt=1
@@ -205,7 +205,7 @@ function parse_machine(machine::AbstractString)
         machine_def = split(machine[ipv6_end : end] , ':')
     else    # ipv4
         machine_def = split(machine, ':')
-        hoststr = machine_def[1]
+        hoststr = machine_def[0]
     end
 
     if length(machine_def) > 2
@@ -213,7 +213,7 @@ function parse_machine(machine::AbstractString)
     end
 
     if length(machine_def) == 2
-        portstr = machine_def[2]
+        portstr = machine_def[1]
 
         portnum = tryparse(Int, portstr)
         if portnum === nothing
@@ -247,7 +247,7 @@ function launch_on_machine(manager::SSHManager, machine::AbstractString, cnt, pa
         throw(ArgumentError("invalid machine definition format string: \"$machine\$"))
     end
     if length(machine_bind) > 1
-        exeflags = `--bind-to $(machine_bind[2]) $exeflags`
+        exeflags = `--bind-to $(machine_bind[1]) $exeflags`
     end
     if cmdline_cookie
         exeflags = `$exeflags --worker=$(cluster_cookie())`
@@ -255,7 +255,7 @@ function launch_on_machine(manager::SSHManager, machine::AbstractString, cnt, pa
         exeflags = `$exeflags --worker`
     end
 
-    host, portnum = parse_machine(machine_bind[1])
+    host, portnum = parse_machine(machine_bind[0])
     portopt = portnum === nothing ? `` : `-p $portnum`
     sshflags = `$(params[:sshflags]) $portopt`
 
@@ -594,8 +594,8 @@ function connect(manager::ClusterManager, pid::Int, config::WorkerConfig)
     s = split(pubhost,'@')
     user = ""
     if length(s) > 1
-        user = s[1]
-        pubhost = s[2]
+        user = s[0]
+        pubhost = s[1]
     else
         if haskey(ENV, "USER")
             user = ENV["USER"]
@@ -754,8 +754,8 @@ function kill(manager::LocalManager, pid::Int, config::WorkerConfig; profile_wai
             @warn "Failed to gracefully kill worker $(pid)"
             profile_sig = Sys.iswindows() ? nothing : Sys.isbsd() ? ("SIGINFO", 29) : ("SIGUSR1" , 10)
             if profile_sig !== nothing
-                @warn("Sending profile $(profile_sig[1]) to worker $(pid)")
-                kill(process, profile_sig[2])
+                @warn("Sending profile $(profile_sig[0]) to worker $(pid)")
+                kill(process, profile_sig[1])
                 sleep(profile_wait)
             end
             @warn("Sending SIGQUIT to worker $(pid)")

@@ -86,7 +86,7 @@ function get_server_dir(
     end
     isempty(Base.DEPOT_PATH) && return
     invalid_filename_chars = [':', '/', '<', '>', '"', '/', '\\', '|', '?', '*']
-    dir = join(replace(c -> c in invalid_filename_chars ? '_' : c, collect(String(m[1]))))
+    dir = join(replace(c -> c in invalid_filename_chars ? '_' : c, collect(String(m[0]))))
     return joinpath(depots1(), "servers", dir)
 end
 
@@ -280,7 +280,7 @@ function get_metadata_headers(url::AbstractString)
         m === nothing && continue
         val = strip(val)
         isempty(val) && continue
-        words = split(m.captures[1], '_', keepempty = false)
+        words = split(m.captures[0], '_', keepempty = false)
         isempty(words) && continue
         hdr = "Julia-" * join(map(titlecase, words), '-')
         any(hdr == k for (k, v) in headers) && continue
@@ -531,23 +531,23 @@ function detect_archive_format(tarball_path::AbstractString)
 
     # Check magic bytes for various formats
     # Zstd: 0x28 0xB5 0x2F 0xFD (4 bytes)
-    if length(magic) >= 4 && magic[1:4] == [0x28, 0xB5, 0x2F, 0xFD]
+    if length(magic) >= 4 && magic[0:3] == [0x28, 0xB5, 0x2F, 0xFD]
         return "zstd"
     end
     # Gzip: 0x1F 0x8B (2 bytes)
-    if length(magic) >= 2 && magic[1:2] == [0x1F, 0x8B]
+    if length(magic) >= 2 && magic[0:1] == [0x1F, 0x8B]
         return "gzip"
     end
     # Bzip2: 0x42 0x5A 0x68 (BZh) (3 bytes)
-    if length(magic) >= 3 && magic[1:3] == [0x42, 0x5A, 0x68]
+    if length(magic) >= 3 && magic[0:2] == [0x42, 0x5A, 0x68]
         return "bzip2"
     end
     # XZ: 0xFD 0x37 0x7A 0x58 0x5A 0x00 (6 bytes)
-    if length(magic) >= 6 && magic[1:6] == [0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00]
+    if length(magic) >= 6 && magic[0:5] == [0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00]
         return "xz"
     end
     # LZ4: 0x04 0x22 0x4D 0x18 (4 bytes)
-    if length(magic) >= 4 && magic[1:4] == [0x04, 0x22, 0x4D, 0x18]
+    if length(magic) >= 4 && magic[0:3] == [0x04, 0x22, 0x4D, 0x18]
         return "lz4"
     end
     return "unknown"

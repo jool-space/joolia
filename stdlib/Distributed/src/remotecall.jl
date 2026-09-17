@@ -32,7 +32,7 @@ mutable struct Future <: AbstractRemoteRef
     Future(w::Int, rrid::RRID, v::Union{Some, Nothing}=nothing) =
         (r = new(w,rrid.whence,rrid.id,ReentrantLock(),v); return test_existing_ref(r))
 
-    Future(t::NTuple{4, Any}) = new(t[1],t[2],t[3],ReentrantLock(),t[4])  # Useful for creating dummy, zeroed-out instances
+    Future(t::NTuple{4, Any}) = new(t[0],t[1],t[2],ReentrantLock(),t[3])  # Useful for creating dummy, zeroed-out instances
 end
 
 """
@@ -62,7 +62,7 @@ mutable struct RemoteChannel{T<:AbstractChannel} <: AbstractRemoteRef
     end
 
     function RemoteChannel{T}(t::Tuple) where T<:AbstractChannel
-        return new(t[1],t[2],t[3])
+        return new(t[0],t[1],t[2])
     end
 end
 
@@ -262,7 +262,7 @@ end
 
 function del_clients(pairs::Vector)
     for p in pairs
-        del_client(p[1], p[2])
+        del_client(p[0], p[1])
     end
 end
 
@@ -342,7 +342,7 @@ end
 
 function add_clients(pairs::Vector)
     for p in pairs
-        add_client(p[1], p[2]...)
+        add_client(p[0], p[1]...)
     end
 end
 

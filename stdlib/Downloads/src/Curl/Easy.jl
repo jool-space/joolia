@@ -301,16 +301,16 @@ function get_response_info(easy::Easy)
     message = ""
     headers = Pair{String,String}[]
     if proto in ("http", "https")
-        message = isempty(easy.res_hdrs) ? "" : easy.res_hdrs[1]
+        message = isempty(easy.res_hdrs) ? "" : easy.res_hdrs[0]
         for hdr in easy.res_hdrs
             if contains(hdr, r"^\s*$")
                 # ignore
             elseif (m = match(r"^(HTTP/\d+(?:.\d+)?\s+\d+\b.*?)\s*$", hdr); m) !== nothing
-                message = m.captures[1]::SubString{String}
+                message = m.captures[0]::SubString{String}
                 empty!(headers)
             elseif (m = match(r"^(\S[^:]*?)\s*:\s*(.*?)\s*$", hdr); m) !== nothing
-                key = lowercase(m.captures[1]::SubString{String})
-                val = m.captures[2]::SubString{String}
+                key = lowercase(m.captures[0]::SubString{String})
+                val = m.captures[1]::SubString{String}
                 push!(headers, key => val)
             else
                 @warn "malformed HTTP header" url status header=hdr
@@ -328,7 +328,7 @@ end
 
 function get_curl_errstr(easy::Easy)
     easy.code == Curl.CURLE_OK && return ""
-    errstr = easy.errbuf[1] == 0 ?
+    errstr = easy.errbuf[0] == 0 ?
         unsafe_string(Curl.curl_easy_strerror(easy.code)) :
         GC.@preserve easy unsafe_string(pointer(easy.errbuf))
     return chomp(errstr)
@@ -402,7 +402,7 @@ function read_callback(
         end
         n = min(size * count, length(buf))
         ccall(:memcpy, Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Csize_t), data, buf, n)
-        deleteat!(buf, 1:n)
+        deleteat!(buf, 0:n-1)
         return n
     catch err
         @async @error("read_callback: unexpected error", err=err, maxlog=1_000)

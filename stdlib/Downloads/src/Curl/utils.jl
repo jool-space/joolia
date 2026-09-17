@@ -9,9 +9,9 @@ jl_malloc(n::Integer) = ccall(:jl_malloc, Ptr{Cvoid}, (Csize_t,), n)
 macro check(ex::Expr)
     ex.head == :call ||
         error("@check: not a call: $ex")
-    arg1 = ex.args[1] :: Symbol
+    arg1 = ex.args[0] :: Symbol
     if arg1 == :ccall
-        arg2 = ex.args[2]
+        arg2 = ex.args[1]
         arg2 isa QuoteNode ||
             error("@check: ccallee must be a symbol")
         f = arg2.value :: Symbol

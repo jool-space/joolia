@@ -268,7 +268,7 @@ function check()
     # Ensure that one of our loaded libraries satisfies our interface requirement.
     wanted = USE_BLAS64 ? LBT_INTERFACE_ILP64 : LBT_INTERFACE_LP64
     found = false
-    idx = 1
+    idx = 0
     lib_ptr = unsafe_load(config.loaded_libs, idx)
     while lib_ptr != C_NULL
         if unsafe_load(lib_ptr).interface == wanted
@@ -769,7 +769,7 @@ for (fname, elty) in ((:dgemv_,:Float64),
                        A::AbstractVecOrMat{$elty}, X::AbstractVector{$elty},
                        beta::Union{($elty), Bool}, Y::AbstractVector{$elty})
             require_one_based_indexing(A, X, Y)
-            m,n = size(A,1),size(A,2)
+            m,n = size(A, 0),size(A, 1)
             if trans == 'N' && (length(X) != n || length(Y) != m)
                 throw(DimensionMismatch(lazy"A has dimensions $(size(A)), X has length $(length(X)) and Y has length $(length(Y))"))
             elseif trans == 'C' && (length(X) != m || length(Y) != n)
@@ -778,31 +778,31 @@ for (fname, elty) in ((:dgemv_,:Float64),
                 throw(DimensionMismatch(lazy"the transpose of A has dimensions $n, $m, X has length $(length(X)) and Y has length $(length(Y))"))
             end
             chkstride1(A)
-            lda = stride(A,2)
+            lda = stride(A, 1)
             pX, sX = vec_pointer_stride(X, ArgumentError("input vector with 0 stride is not allowed"))
             pY, sY = vec_pointer_stride(Y, ArgumentError("dest vector with 0 stride is not allowed"))
             pA = pointer(A)
             if lda < 0
-                pA += (size(A, 2) - 1) * lda * sizeof($elty)
+                pA += (size(A, 1) - 1) * lda * sizeof($elty)
                 lda = -lda
                 trans == 'N' ? (sX = -sX) : (sY = -sY)
             end
-            lda >= size(A,1) || size(A,2) <= 1 || error("when `size(A,2) > 1`, `abs(stride(A,2))` must be at least `size(A,1)`")
-            lda = max(1, size(A,1), lda)
+            lda >= size(A, 0) || size(A, 1) <= 1 || error("when `size(A, 1) > 1`, `abs(stride(A, 1))` must be at least `size(A, 0)`")
+            lda = max(1, size(A, 0), lda)
             GC.@preserve A X Y ccall((@blasfunc($fname), libblastrampoline), Cvoid,
                 (Ref{UInt8}, Ref{BlasInt}, Ref{BlasInt}, Ref{$elty},
                  Ptr{$elty}, Ref{BlasInt}, Ptr{$elty}, Ref{BlasInt},
                  Ref{$elty}, Ptr{$elty}, Ref{BlasInt}, Clong),
-                 trans, size(A,1), size(A,2), alpha,
+                 trans, size(A, 0), size(A, 1), alpha,
                  pA, lda, pX, sX,
                  beta, pY, sY, 1)
             Y
         end
         function gemv(trans::AbstractChar, alpha::($elty), A::AbstractMatrix{$elty}, X::AbstractVector{$elty})
-            gemv!(trans, alpha, A, X, zero($elty), similar(X, $elty, size(A, (trans == 'N' ? 1 : 2))))
+            gemv!(trans, alpha, A, X, zero($elty), similar(X, $elty, size(A, (trans == 'N' ? 0 : 1))))
         end
         function gemv(trans::AbstractChar, A::AbstractMatrix{$elty}, X::AbstractVector{$elty})
-            gemv!(trans, one($elty), A, X, zero($elty), similar(X, $elty, size(A, (trans == 'N' ? 1 : 2))))
+            gemv!(trans, one($elty), A, X, zero($elty), similar(X, $elty, size(A, (trans == 'N' ? 0 : 1))))
         end
     end
 end
@@ -1755,15 +1755,15 @@ for (gemm, elty) in
                        A::AbstractVecOrMat{$elty}, B::AbstractVecOrMat{$elty},
                        beta::Union{($elty), Bool},
                        C::AbstractVecOrMat{$elty})
-#           if any([stride(A,1), stride(B,1), stride(C,1)] .!= 1)
+#           if any([stride(A, 0), stride(B, 0), stride(C, 0)] .!= 1)
 #               error("gemm!: BLAS module requires contiguous matrix columns")
 #           end  # should this be checked on every call?
             require_one_based_indexing(A, B, C)
-            m = size(A, transA == 'N' ? 1 : 2)
-            ka = size(A, transA == 'N' ? 2 : 1)
-            kb = size(B, transB == 'N' ? 1 : 2)
-            n = size(B, transB == 'N' ? 2 : 1)
-            if ka != kb || m != size(C,1) || n != size(C,2)
+            m = size(A, transA == 'N' ? 0 : 1)
+            ka = size(A, transA == 'N' ? 1 : 0)
+            kb = size(B, transB == 'N' ? 0 : 1)
+            n = size(B, transB == 'N' ? 1 : 0)
+            if ka != kb || m != size(C, 0) || n != size(C, 1)
                 throw(DimensionMismatch(lazy"A has size ($m,$ka), B has size ($kb,$n), C has size $(size(C))"))
             end
             chkstride1(A)
@@ -1775,14 +1775,14 @@ for (gemm, elty) in
             @ccall(cancel_handler=(@cfunction(_cancel_handler, Cvoid, (Ptr{Cvoid}, UInt8)), C_NULL),
                 libblastrampoline.$fname(
                     transA::Ref{UInt8}, transB::Ref{UInt8}, m::Ref{BlasInt}, n::Ref{BlasInt},
-                    ka::Ref{BlasInt}, alpha::Ref{$elty}, A::Ptr{$elty}, max(1,stride(A,2))::Ref{BlasInt},
-                    B::Ptr{$elty}, max(1,stride(B,2))::Ref{BlasInt}, beta::Ref{$elty}, C::Ptr{$elty},
-                    max(1,stride(C,2))::Ref{BlasInt}, 1::Clong, 1::Clong)::Cvoid)
+                    ka::Ref{BlasInt}, alpha::Ref{$elty}, A::Ptr{$elty}, max(1,stride(A, 1))::Ref{BlasInt},
+                    B::Ptr{$elty}, max(1,stride(B, 1))::Ref{BlasInt}, beta::Ref{$elty}, C::Ptr{$elty},
+                    max(1,stride(C, 1))::Ref{BlasInt}, 1::Clong, 1::Clong)::Cvoid)
             Base.@cancel_check cancel_tok
             C
         end
         function gemm(transA::AbstractChar, transB::AbstractChar, alpha::($elty), A::AbstractMatrix{$elty}, B::AbstractMatrix{$elty})
-            gemm!(transA, transB, alpha, A, B, zero($elty), similar(B, $elty, (size(A, transA == 'N' ? 1 : 2), size(B, transB == 'N' ? 2 : 1))))
+            gemm!(transA, transB, alpha, A, B, zero($elty), similar(B, $elty, (size(A, transA == 'N' ? 0 : 1), size(B, transB == 'N' ? 1 : 0))))
         end
         function gemm(transA::AbstractChar, transB::AbstractChar, A::AbstractMatrix{$elty}, B::AbstractMatrix{$elty})
             gemm(transA, transB, one($elty), A, B)
@@ -2029,9 +2029,9 @@ for (fname, elty) in ((:dsyrk_,:Float64),
             chkuplo(uplo)
             require_one_based_indexing(A, C)
             n = checksquare(C)
-            nn = size(A, trans == 'N' ? 1 : 2)
+            nn = size(A, trans == 'N' ? 0 : 1)
             if nn != n throw(DimensionMismatch(lazy"C has size ($n,$n), corresponding dimension of A is $nn")) end
-            k  = size(A, trans == 'N' ? 2 : 1)
+            k  = size(A, trans == 'N' ? 1 : 0)
             chkstride1(A)
             chkstride1(C)
             ccall((@blasfunc($fname), libblastrampoline), Cvoid,
@@ -2039,15 +2039,15 @@ for (fname, elty) in ((:dsyrk_,:Float64),
                    Ref{$elty}, Ptr{$elty}, Ref{BlasInt}, Ref{$elty},
                    Ptr{$elty}, Ref{BlasInt}, Clong, Clong),
                   uplo, trans, n, k,
-                  alpha, A, max(1,stride(A,2)), beta,
-                  C, max(1,stride(C,2)), 1, 1)
+                  alpha, A, max(1,stride(A, 1)), beta,
+                  C, max(1,stride(C, 1)), 1, 1)
             C
         end
     end
 end
 function syrk(uplo::AbstractChar, trans::AbstractChar, alpha::Number, A::AbstractVecOrMat)
     T = eltype(A)
-    n = size(A, trans == 'N' ? 1 : 2)
+    n = size(A, trans == 'N' ? 0 : 1)
     syrk!(uplo, trans, convert(T,alpha), A, zero(T), similar(A, T, (n, n)))
 end
 syrk(uplo::AbstractChar, trans::AbstractChar, A::AbstractVecOrMat) = syrk(uplo, trans, one(eltype(A)), A)
@@ -2086,24 +2086,24 @@ for (fname, elty, relty) in ((:zherk_, :ComplexF64, :Float64),
             chkuplo(uplo)
             require_one_based_indexing(A, C)
             n = checksquare(C)
-            nn = size(A, trans == 'N' ? 1 : 2)
+            nn = size(A, trans == 'N' ? 0 : 1)
             if nn != n
-                throw(DimensionMismatch(lazy"the matrix to update has dimension $n but the implied dimension of the update is $(size(A, trans == 'N' ? 1 : 2))"))
+                throw(DimensionMismatch(lazy"the matrix to update has dimension $n but the implied dimension of the update is $(size(A, trans == 'N' ? 0 : 1))"))
             end
             chkstride1(A)
             chkstride1(C)
-            k  = size(A, trans == 'N' ? 2 : 1)
+            k  = size(A, trans == 'N' ? 1 : 0)
             ccall((@blasfunc($fname), libblastrampoline), Cvoid,
                     (Ref{UInt8}, Ref{UInt8}, Ref{BlasInt}, Ref{BlasInt},
                     Ref{$relty}, Ptr{$elty}, Ref{BlasInt}, Ref{$relty},
                     Ptr{$elty}, Ref{BlasInt}, Clong, Clong),
                     uplo, trans, n, k,
-                    α, A, max(1,stride(A,2)), β,
-                    C, max(1,stride(C,2)), 1, 1)
+                    α, A, max(1,stride(A, 1)), β,
+                    C, max(1,stride(C, 1)), 1, 1)
             C
         end
         function herk(uplo::AbstractChar, trans::AbstractChar, α::$relty, A::AbstractVecOrMat{$elty})
-            n = size(A, trans == 'N' ? 1 : 2)
+            n = size(A, trans == 'N' ? 0 : 1)
             herk!(uplo, trans, α, A, zero($relty), similar(A, (n,n)))
         end
         herk(uplo::AbstractChar, trans::AbstractChar, A::AbstractVecOrMat{$elty}) = herk(uplo, trans, one($relty), A)

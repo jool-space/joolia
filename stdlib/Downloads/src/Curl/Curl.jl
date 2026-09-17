@@ -78,7 +78,7 @@ const SYSTEM_SSL =
 const CURL_VERSION_STR = unsafe_string(curl_version())
 let m = match(r"^libcurl/(\d+\.\d+\.\d+)\b", CURL_VERSION_STR)
     m !== nothing || error("unexpected CURL_VERSION_STR value")
-    curl = m.captures[1]
+    curl = m.captures[0]
     julia = "$(VERSION.major).$(VERSION.minor)"
     global const CURL_VERSION = VersionNumber(curl)
     global const USER_AGENT = "curl/$curl julia/$julia"

@@ -697,3 +697,48 @@ end
         @test out in ("true,true", "same copy")
     end
 end
+
+# Styled text and its annotation regions use zero-origin UTF-8 byte positions.
+@testset "zero-origin styled markup" begin
+    @test String(styled("")) == ""
+    @test String(styled("plain")) == "plain"
+    for (text, plain, region) in (("{bold:hello}", "hello", 0:4),
+                                   ("x{bold:hello}y", "xhelloy", 1:5),
+                                   ("{bold:α😀}", "α😀", 0:5))
+        result = styled(text)
+        @test String(result) == plain
+        @test annotations(result) == [(region=region, label=:face, value=:bold)]
+    end
+    @test isempty(annotations(styled("{bold:}")))
+    result = styled("{bold:a}{bold:b}")
+    @test String(result) == "ab"
+    @test annotations(result) == [(region=0:1, label=:face, value=:bold)]
+    result = styled("{bold:a{italic:b}c}")
+    @test String(result) == "abc"
+    @test annotations(result) == [(region=0:2, label=:face, value=:bold),
+                                  (region=1:1, label=:face, value=:italic)]
+    @test String(styled(raw"\{literal\}")) == "{literal}"
+    word = "α"
+    result = styled"{bold:x$(word)y}"
+    @test String(result) == "xαy"
+    @test annotations(result) == [(region=0:3, label=:face, value=:bold)]
+end
+
+# Color components, legacy palettes, and underline tuples use zero-origin positions.
+@testset "zero-origin styled colors" begin
+    C = StyledStrings.SimpleColor
+    @test tryparse(C, "#010203").value == (r=0x01, g=0x02, b=0x03)
+    @test tryparse(C, "#AbCdEf").value == (r=0xab, g=0xcd, b=0xef)
+    @test tryparse(C, "#000000") == C(0, 0, 0)
+    @test tryparse(C, "#ffffff") == C(255, 255, 255)
+    @test tryparse(C, "#123") === nothing
+    @test tryparse(C, "") === nothing
+    @test StyledStrings.Legacy.legacy_color(0) == C(0, 0, 0)
+    @test StyledStrings.Legacy.legacy_color(255) == C(238, 238, 238)
+    @test StyledStrings.Legacy.legacy_color(-1) === nothing
+    @test StyledStrings.Legacy.legacy_color(256) === nothing
+    @test StyledStrings.Face(underline=(:blue, :curly)).underline == (C(:blue), :curly)
+    result = styled("{(fg=#010203,underline=(blue,curly)):hello}")
+    @test String(result) == "hello"
+    @test StyledStrings.getface(result, 0).foreground == C(1, 2, 3)
+end

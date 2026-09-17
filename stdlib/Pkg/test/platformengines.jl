@@ -4,6 +4,33 @@ import ..Pkg # ensure we are using the correct Pkg
 using Test, Pkg.PlatformEngines, Pkg.BinaryPlatforms, SHA, Sockets
 using ..Utils: list_tarball_files, http_server, stalling_http_server
 
+@testset "archive format magic bytes" begin
+    formats = [
+        UInt8[0x28, 0xB5, 0x2F, 0xFD] => "zstd",
+        UInt8[0x1F, 0x8B] => "gzip",
+        UInt8[0x42, 0x5A, 0x68] => "bzip2",
+        UInt8[0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00] => "xz",
+        UInt8[0x04, 0x22, 0x4D, 0x18] => "lz4",
+        UInt8[0x00] => "unknown",
+    ]
+    for (magic, expected) in formats
+        path = tempname()
+        try
+            write(path, magic)
+            @test detect_archive_format(path) == expected
+        finally
+            rm(path, force=true)
+        end
+    end
+    path = tempname()
+    try
+        touch(path)
+        @test_throws ErrorException detect_archive_format(path)
+    finally
+        rm(path, force=true)
+    end
+end
+
 function auth_refresh_server(response::String)
     server = listen(Sockets.localhost, 0)
     base_url = "http://$(Sockets.localhost):$(Int(last(getsockname(server))))"

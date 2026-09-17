@@ -38,7 +38,7 @@ const GENERAL_UUID = UUID("23338594-aafe-5451-b93e-139f81909106")
 # for packages that depend on Pkg) can only load Pkg from the cache if it is in
 # a depot they can see; precompiling Pkg is disallowed during the tests.
 const COMPILED_SUBDIR = joinpath("compiled", "v$(VERSION.major).$(VERSION.minor)")
-const THIS_PKG_COMPILE_CACHE = joinpath(Base.DEPOT_PATH[1], COMPILED_SUBDIR)
+const THIS_PKG_COMPILE_CACHE = joinpath(first(Base.DEPOT_PATH), COMPILED_SUBDIR)
 
 function copy_this_pkg_cache(new_depot)
     for p in ("Pkg", "REPLExt")
@@ -68,7 +68,7 @@ function copy_this_pkg_cache(new_depot)
         end
         source = origin.path
         if source !== nothing && startswith(source, packages_dir)
-            name, slug = splitpath(relpath(source, packages_dir))[1:2]
+            name, slug = splitpath(relpath(source, packages_dir))[0:1]
             source_dir = joinpath(packages_dir, name, slug)
             dest_dir = joinpath(new_depot, "packages", name, slug)
             isdir(dest_dir) && continue
@@ -87,10 +87,10 @@ end
 # into every test depot instead, as Pkg does on demand, costs ~1 s per depot
 # (download, tree hash verification), and unpacking the registry is pointless
 # in that mode: Pkg's package server code path takes precedence over
-# `DEFAULT_REGISTRIES[1].path`, and unpacking takes ~100 s on Windows.
+# `DEFAULT_REGISTRIES[0].path`, and unpacking takes ~100 s on Windows.
 #
 # Without a package server the registry is cloned once into the shared
-# registry depot, and `DEFAULT_REGISTRIES[1]` points there so that Pkg symlinks
+# registry depot, and `DEFAULT_REGISTRIES[0]` points there so that Pkg symlinks
 # it into the test depots on first use. Registry updates in those depots fetch
 # into the shared clone through the link, so the depots that want a copy of the
 # registry instead (`linked_reg = false`) get it from a second clone that is
@@ -238,9 +238,9 @@ function isolate(@nospecialize(fn::Function); loaded_depot = false, linked_reg =
     old_home_project = Base.HOME_PROJECT[]
     old_active_project = Base.ACTIVE_PROJECT[]
     old_working_directory = pwd()
-    old_general_registry_url = Pkg.Registry.DEFAULT_REGISTRIES[1].url
-    old_general_registry_path = Pkg.Registry.DEFAULT_REGISTRIES[1].path
-    old_general_registry_linked = Pkg.Registry.DEFAULT_REGISTRIES[1].linked
+    old_general_registry_url = Pkg.Registry.DEFAULT_REGISTRIES[0].url
+    old_general_registry_path = Pkg.Registry.DEFAULT_REGISTRIES[0].path
+    old_general_registry_linked = Pkg.Registry.DEFAULT_REGISTRIES[0].linked
     return try
         # Clone/download the registry only once
         check_init_reg()
@@ -251,9 +251,9 @@ function isolate(@nospecialize(fn::Function); loaded_depot = false, linked_reg =
         Base.ACTIVE_PROJECT[] = nothing
         Pkg.UPDATED_REGISTRY_THIS_SESSION[] = false
         if !registry_is_compressed()
-            Pkg.Registry.DEFAULT_REGISTRIES[1].url = nothing
-            Pkg.Registry.DEFAULT_REGISTRIES[1].path = linked_reg ? REGISTRY_DIR : PRISTINE_REGISTRY_DIR
-            Pkg.Registry.DEFAULT_REGISTRIES[1].linked = linked_reg
+            Pkg.Registry.DEFAULT_REGISTRIES[0].url = nothing
+            Pkg.Registry.DEFAULT_REGISTRIES[0].path = linked_reg ? REGISTRY_DIR : PRISTINE_REGISTRY_DIR
+            Pkg.Registry.DEFAULT_REGISTRIES[0].linked = linked_reg
         end
         Pkg.REPLMode.TEST_MODE[] = false
         withenv(
@@ -298,9 +298,9 @@ function isolate(@nospecialize(fn::Function); loaded_depot = false, linked_reg =
         Base.ACTIVE_PROJECT[] = old_active_project
         cd(old_working_directory)
         Pkg.REPLMode.TEST_MODE[] = false # reset unconditionally
-        Pkg.Registry.DEFAULT_REGISTRIES[1].path = old_general_registry_path
-        Pkg.Registry.DEFAULT_REGISTRIES[1].url = old_general_registry_url
-        Pkg.Registry.DEFAULT_REGISTRIES[1].linked = old_general_registry_linked
+        Pkg.Registry.DEFAULT_REGISTRIES[0].path = old_general_registry_path
+        Pkg.Registry.DEFAULT_REGISTRIES[0].url = old_general_registry_url
+        Pkg.Registry.DEFAULT_REGISTRIES[0].linked = old_general_registry_linked
     end
 end
 
@@ -355,9 +355,9 @@ function temp_pkg_dir(@nospecialize(fn::Function); rm = true, linked_reg = true)
     old_depot_path = copy(DEPOT_PATH)
     old_home_project = Base.HOME_PROJECT[]
     old_active_project = Base.ACTIVE_PROJECT[]
-    old_general_registry_url = Pkg.Registry.DEFAULT_REGISTRIES[1].url
-    old_general_registry_path = Pkg.Registry.DEFAULT_REGISTRIES[1].path
-    old_general_registry_linked = Pkg.Registry.DEFAULT_REGISTRIES[1].linked
+    old_general_registry_url = Pkg.Registry.DEFAULT_REGISTRIES[0].url
+    old_general_registry_path = Pkg.Registry.DEFAULT_REGISTRIES[0].path
+    old_general_registry_linked = Pkg.Registry.DEFAULT_REGISTRIES[0].linked
     return try
         # Clone/download the registry only once
         check_init_reg()
@@ -367,9 +367,9 @@ function temp_pkg_dir(@nospecialize(fn::Function); rm = true, linked_reg = true)
         Base.HOME_PROJECT[] = nothing
         Base.ACTIVE_PROJECT[] = nothing
         if !registry_is_compressed()
-            Pkg.Registry.DEFAULT_REGISTRIES[1].url = nothing
-            Pkg.Registry.DEFAULT_REGISTRIES[1].path = linked_reg ? REGISTRY_DIR : PRISTINE_REGISTRY_DIR
-            Pkg.Registry.DEFAULT_REGISTRIES[1].linked = linked_reg
+            Pkg.Registry.DEFAULT_REGISTRIES[0].url = nothing
+            Pkg.Registry.DEFAULT_REGISTRIES[0].path = linked_reg ? REGISTRY_DIR : PRISTINE_REGISTRY_DIR
+            Pkg.Registry.DEFAULT_REGISTRIES[0].linked = linked_reg
         end
         withenv(
             "JULIA_PROJECT" => nothing,
@@ -404,9 +404,9 @@ function temp_pkg_dir(@nospecialize(fn::Function); rm = true, linked_reg = true)
         append!(DEPOT_PATH, old_depot_path)
         Base.HOME_PROJECT[] = old_home_project
         Base.ACTIVE_PROJECT[] = old_active_project
-        Pkg.Registry.DEFAULT_REGISTRIES[1].path = old_general_registry_path
-        Pkg.Registry.DEFAULT_REGISTRIES[1].url = old_general_registry_url
-        Pkg.Registry.DEFAULT_REGISTRIES[1].linked = old_general_registry_linked
+        Pkg.Registry.DEFAULT_REGISTRIES[0].path = old_general_registry_path
+        Pkg.Registry.DEFAULT_REGISTRIES[0].url = old_general_registry_url
+        Pkg.Registry.DEFAULT_REGISTRIES[0].linked = old_general_registry_linked
     end
 end
 
@@ -545,7 +545,7 @@ function add_this_pkg(; platform = Base.BinaryPlatforms.HostPlatform())
         Pkg.develop(spec; platform)
         # Packages depending on Pkg are precompiled in a subprocess, which
         # must find Pkg's cache in the (usually fresh) primary depot.
-        copy_this_pkg_cache(Base.DEPOT_PATH[1])
+        copy_this_pkg_cache(first(Base.DEPOT_PATH))
     finally
         Pkg.respect_sysimage_versions(true)
     end
@@ -602,7 +602,7 @@ function http_server(respond::Function)
             while !isempty(rstrip(readline(sock)))
             end
             words = split(request_line)
-            length(words) >= 2 && respond(sock, String(words[2]))
+            length(words) >= 2 && respond(sock, String(words[1]))
         catch
             # a connection torn down by `close` is not a failure
             isopen(sock) && rethrow()

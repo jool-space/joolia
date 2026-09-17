@@ -295,9 +295,9 @@ julia> LinearAlgebra.stride1(B)
 2
 ```
 """
-stride1(x) = stride(x,1)
+stride1(x) = stride(x,0)
 stride1(x::Array) = 1
-stride1(x::DenseArray) = stride(x, 1)::Int
+stride1(x::DenseArray) = stride(x, 0)::Int
 
 @inline chkstride1(A...) = _chkstride1(true, A...)
 @noinline _chkstride1(ok::Bool) = ok || error("matrix does not have contiguous columns")
@@ -344,8 +344,8 @@ julia> LinearAlgebra.checksquare(A, B)
 function checksquare(A)
     sizeA = size(A)
     length(sizeA) == 2 || throw(DimensionMismatch(lazy"input is not a matrix: dimensions are $sizeA"))
-    sizeA[1] == sizeA[2] || throw(DimensionMismatch(lazy"matrix is not square: dimensions are $sizeA"))
-    return sizeA[1]
+    sizeA[0] == sizeA[1] || throw(DimensionMismatch(lazy"matrix is not square: dimensions are $sizeA"))
+    return sizeA[0]
 end
 
 checksquare(A...) = [checksquare(a) for a in A]

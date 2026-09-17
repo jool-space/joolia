@@ -292,11 +292,11 @@ function compute_output_dict(sol::Vector{Int}, graph::Graph)
     pruned = graph.data.pruned
 
     want = Dict{UUID, VersionNumber}()
-    for p0 in 1:np
+    for p0 in 0:np-1
         p0 ∈ fix_inds && continue
         p = pkgs[p0]
         s0 = sol[p0]
-        s0 == spp[p0] && continue
+        s0 == (spp[p0] - 1) && continue
         vn = pvers[p0][s0]
         want[p] = vn
     end
@@ -322,18 +322,18 @@ function greedysolver(graph::Graph)
     gconstr = graph.gconstr
 
     # initialize solution: all uninstalled
-    sol = Int[spp[p0] for p0 in 1:np]
+    sol = Int[(spp[p0] - 1) for p0 in 0:np-1]
 
     # packages which are not allowed to be uninstalled
     # (NOTE: this is potentially a superset of graph.req_inds,
     #        since it may include implicit requirements)
-    req_inds = Set{Int}(p0 for p0 in 1:np if !gconstr[p0][end])
+    req_inds = Set{Int}(p0 for p0 in 0:np-1 if !gconstr[p0][end])
 
     # set up required packages to their highest allowed versions
     for rp0 in req_inds
         # look for the highest version which satisfies the requirements
         rv0 = findlast(gconstr[rp0])
-        @assert rv0 ≢ nothing && rv0 ≠ spp[rp0]
+        @assert rv0 ≢ nothing && rv0 ≠ (spp[rp0] - 1)
         sol[rp0] = rv0
         fill!(gconstr[rp0], false)
         gconstr[rp0][rv0] = true
@@ -357,23 +357,23 @@ function greedysolver(graph::Graph)
         staged_next = Set{Int}()
         for p0 in staged
             s0 = sol[p0]
-            @assert s0 < spp[p0]
+            @assert s0 < spp[p0] - 1
 
             # scan dependencies
             for (j1, p1) in enumerate(gadj[p0])
                 msk = gmsk[p0][j1]
                 # look for the highest version which satisfies the requirements
                 v1 = findlast(msk[:, s0] .& gconstr[p1])
-                v1 == spp[p1] && continue # p1 is not required by p0's current version
+                v1 == (spp[p1] - 1) && continue # p1 is not required by p0's current version
                 # if we found a version, and the package was uninstalled
                 # or the same version was already selected, we're ok;
                 # otherwise we can't be sure what the optimal configuration is
                 # and we bail out
                 old_v1 = sol[p1]
-                if v1 ≡ nothing || (old_v1 ≠ v1 && old_v1 ≠ spp[p1])
+                if v1 ≡ nothing || (old_v1 ≠ v1 && old_v1 ≠ (spp[p1] - 1))
                     pop_snapshot!(graph)
                     return (false, Int[])
-                elseif old_v1 == spp[p1]
+                elseif old_v1 == (spp[p1] - 1)
                     sol[p1] = v1
                     fill!(gconstr[p1], false)
                     gconstr[p1][v1] = true
@@ -387,7 +387,7 @@ function greedysolver(graph::Graph)
 
     pop_snapshot!(graph)
 
-    for p0 in 1:np
+    for p0 in 0:np-1
         log_event_greedysolved!(graph, p0, sol[p0])
     end
 
@@ -406,10 +406,10 @@ function verify_solution(sol::Vector{Int}, graph::Graph)
     gconstr = graph.gconstr
 
     @assert length(sol) == np
-    @assert all(sol .> 0)
+    @assert all(sol .>= 0)
 
     # verify constraints and dependencies
-    for p0 in 1:np
+    for p0 in 0:np-1
         s0 = sol[p0]
         gconstr[p0][s0] || (@warn("gconstr[$p0][$s0] fail"); return false)
         for (j1, p1) in enumerate(gadj[p0])

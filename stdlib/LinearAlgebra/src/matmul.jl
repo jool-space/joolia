@@ -54,7 +54,7 @@ function (*)(A::StridedMaybeAdjOrTransMat{T}, x::StridedVector{S}) where {T<:Bla
     matmul_size_check(size(A), size(x))
     TS = promote_op(matprod, T, S)
     y = isconcretetype(TS) ? convert(AbstractVector{TS}, x) : x
-    mul!(similar(x, TS, size(A,1)), A, y)
+    mul!(similar(x, TS, size(A, 0)), A, y)
 end
 function (*)(A::AbstractMatrix, x::AbstractVector)
     matmul_size_check(size(A), size(x))
@@ -132,8 +132,8 @@ where `op` is one of `*`, `/`, or `\\`.
 """
 matop_dest(::typeof(\), A, B) = similar(B, promote_op(\, eltype(A), eltype(B)), size(B))
 matop_dest(::typeof(/), A, B) = similar(A, promote_op(/, eltype(A), eltype(B)), size(A))
-matop_dest(::typeof(*), A, B) = similar(B, promote_op(matprod, eltype(A), eltype(B)), (size(A, 1), size(B, 2)))
-matop_dest(::typeof(*), A, b::AbstractVector) = similar(b, promote_op(matprod, eltype(A), eltype(b)), axes(A, 1))
+matop_dest(::typeof(*), A, B) = similar(B, promote_op(matprod, eltype(A), eltype(B)), (size(A, 0), size(B, 1)))
+matop_dest(::typeof(*), A, b::AbstractVector) = similar(b, promote_op(matprod, eltype(A), eltype(b)), axes(A, 0))
 
 const MulOrDiv = Union{typeof(*), typeof(\), typeof(/)}
 
@@ -149,13 +149,13 @@ postop_proc(::MulOrDiv, C, _, _) = C
 # which is better handled by reinterpreting rather than promotion
 function (*)(A::StridedMaybeAdjOrTransMat{<:BlasReal}, B::StridedMaybeAdjOrTransMat{<:BlasReal})
     TS = promote_type(eltype(A), eltype(B))
-    mul!(similar(B, TS, (size(A, 1), size(B, 2))),
+    mul!(similar(B, TS, (size(A, 0), size(B, 1))),
          _wrapperop(A)(convert(AbstractArray{TS}, _unwrap(A))),
          _wrapperop(B)(convert(AbstractArray{TS}, _unwrap(B))))
 end
 function (*)(A::StridedMaybeAdjOrTransMat{<:BlasComplex}, B::StridedMaybeAdjOrTransMat{<:BlasComplex})
     TS = promote_type(eltype(A), eltype(B))
-    mul!(similar(B, TS, (size(A, 1), size(B, 2))),
+    mul!(similar(B, TS, (size(A, 0), size(B, 1))),
          _wrapperop(A)(convert(AbstractArray{TS}, _unwrap(A))),
          _wrapperop(B)(convert(AbstractArray{TS}, _unwrap(B))))
 end
@@ -164,13 +164,13 @@ end
 # first matrix as a real matrix and carry out real matrix matrix multiply
 function (*)(A::StridedMatrix{<:BlasComplex}, B::StridedMaybeAdjOrTransMat{<:BlasReal})
     TS = promote_type(eltype(A), eltype(B))
-    mul!(similar(B, TS, (size(A, 1), size(B, 2))),
+    mul!(similar(B, TS, (size(A, 0), size(B, 1))),
          convert(AbstractArray{TS}, A),
          _wrapperop(B)(convert(AbstractArray{real(TS)}, _unwrap(B))))
 end
 function (*)(A::AdjOrTransStridedMat{<:BlasComplex}, B::StridedMaybeAdjOrTransMat{<:BlasReal})
     TS = promote_type(eltype(A), eltype(B))
-    mul!(similar(B, TS, (size(A, 1), size(B, 2))),
+    mul!(similar(B, TS, (size(A, 0), size(B, 1))),
          copymutable_oftype(A, TS), # remove AdjOrTrans to use reinterpret trick below
          _wrapperop(B)(convert(AbstractArray{real(TS)}, _unwrap(B))))
 end
@@ -219,7 +219,7 @@ function Base.muladd(A::AbstractMatrix, y::AbstractVecOrMat, z::Union{Number, Ab
 end
 
 function Base.muladd(u::AbstractVector, v::AdjOrTransAbsVec, z::Union{Number, AbstractArray})
-    if size(z,1) > length(u) || size(z,2) > length(v)
+    if size(z, 0) > length(u) || size(z, 1) > length(v)
         # Same error as (u*v) .+= z:
         throw(DimensionMismatch("array could not be broadcast to match destination"))
     end
@@ -238,14 +238,14 @@ Base.muladd(x::TransposeAbsVec, A::AbstractMatrix, z::Union{Number, AbstractVecO
 
 function Base.muladd(A::StridedMaybeAdjOrTransMat{<:Number}, y::AbstractVector{<:Number}, z::Union{Number, AbstractVector})
     T = promote_type(eltype(A), eltype(y), eltype(z))
-    C = similar(A, T, axes(A,1))
+    C = similar(A, T, axes(A, 0))
     C .= z
     mul!(C, A, y, true, true)
 end
 
 function Base.muladd(A::StridedMaybeAdjOrTransMat{<:Number}, B::StridedMaybeAdjOrTransMat{<:Number}, z::Union{Number, AbstractVecOrMat})
     T = promote_type(eltype(A), eltype(B), eltype(z))
-    C = similar(A, T, axes(A,1), axes(B,2))
+    C = similar(A, T, axes(A, 0), axes(B, 1))
     C .= z
     mul!(C, A, B, true, true)
 end
@@ -426,8 +426,8 @@ lmul!(A, B)
 _vec_or_mat_str(s::Tuple{Any}) = "vector"
 _vec_or_mat_str(s::Tuple{Any,Any}) = "matrix"
 function matmul_size_check(sizeA::Tuple{Integer,Vararg{Integer}}, sizeB::Tuple{Integer,Vararg{Integer}})
-    szA2 = get(sizeA, 2, 1)
-    if szA2 != sizeB[1]
+    szA2 = get(sizeA, 1, 1)
+    if szA2 != sizeB[0]
         matmul_size_check_error(sizeA, sizeB)
     end
     return nothing
@@ -435,8 +435,8 @@ end
 @noinline function matmul_size_check_error(sizeA::Tuple{Integer,Vararg{Integer}}, sizeB::Tuple{Integer,Vararg{Integer}})
     strA = _vec_or_mat_str(sizeA)
     strB = _vec_or_mat_str(sizeB)
-    szA2 = get(sizeA, 2, 1)
-    B_size_len = length(sizeB) == 1 ? sizeB[1] : sizeB
+    szA2 = get(sizeA, 1, 1)
+    B_size_len = length(sizeB) == 1 ? sizeB[0] : sizeB
     size_or_len_str_B = B_size_len isa Integer ? "length" : "size"
     dim_or_len_str_B = B_size_len isa Integer ? "length" : "first dimension"
     pos_str_A = LazyString(length(sizeA) == length(sizeB) ? "first " : "", strA)
@@ -445,16 +445,16 @@ end
         LazyString(
             "incompatible dimensions for matrix multiplication: ",
             lazy"tried to multiply a $strA of size $sizeA with a $strB of $size_or_len_str_B $B_size_len. ",
-            lazy"The second dimension of the $pos_str_A: $szA2, does not match the $dim_or_len_str_B of the $pos_str_B: $(sizeB[1])."
+            lazy"The second dimension of the $pos_str_A: $szA2, does not match the $dim_or_len_str_B of the $pos_str_B: $(sizeB[0])."
         )
         )
     )
 end
 function matmul_size_check(sizeC::Tuple{Integer,Vararg{Integer}}, sizeA::Tuple{Integer,Vararg{Integer}}, sizeB::Tuple{Integer,Vararg{Integer}})
     matmul_size_check(sizeA, sizeB)
-    szB2 = get(sizeB, 2, 1)
-    szC2 = get(sizeC, 2, 1)
-    if sizeC[1] != sizeA[1] || szC2 != szB2
+    szB2 = get(sizeB, 1, 1)
+    szC2 = get(sizeC, 1, 1)
+    if sizeC[0] != sizeA[0] || szC2 != szB2
         matmul_size_check_error(sizeC, sizeA, sizeB)
     end
     return nothing
@@ -463,12 +463,12 @@ end
     strA = _vec_or_mat_str(sizeA)
     strB = _vec_or_mat_str(sizeB)
     strC = _vec_or_mat_str(sizeC)
-    szB2 = get(sizeB, 2, 1)
-    C_size_len = length(sizeC) == 1 ? sizeC[1] : sizeC
+    szB2 = get(sizeB, 1, 1)
+    C_size_len = length(sizeC) == 1 ? sizeC[0] : sizeC
     size_or_len_str_C = C_size_len isa Integer ? "length" : "size"
-    B_size_len = length(sizeB) == 1 ? sizeB[1] : sizeB
+    B_size_len = length(sizeB) == 1 ? sizeB[0] : sizeB
     size_or_len_str_B = B_size_len isa Integer ? "length" : "size"
-    destsize = length(sizeB) == length(sizeC) == 1 ? sizeA[1] : (sizeA[1], szB2)
+    destsize = length(sizeB) == length(sizeC) == 1 ? sizeA[0] : (sizeA[0], szB2)
     size_or_len_str_dest = destsize isa Integer ? "length" : "size"
     throw(DimensionMismatch(
             LazyString(
@@ -607,7 +607,7 @@ If `conjugate` is true computes herk, i.e., ``A A' α + C β`` if `aat` is true,
 function generic_syrk!(C::StridedMatrix{T}, A::StridedVecOrMat{T}, conjugate::Bool, aat::Bool, α, β) where {T<:Number}
     require_one_based_indexing(C, A)
     nC = checksquare(C)
-    m, n = size(A, 1), size(A, 2)
+    m, n = size(A, 0), size(A, 1)
     mA = aat ? m : n
     if nC != mA
         throw(DimensionMismatch(lazy"output matrix has size: $(size(C)), but should have size $((mA, mA))"))
@@ -616,22 +616,24 @@ function generic_syrk!(C::StridedMatrix{T}, A::StridedVecOrMat{T}, conjugate::Bo
     if (!iszero(β) || isempty(A)) # return C*beta
         _rmul_or_fill!(C, β)
     else # iszero(β) && A is non-empty
-        aA_11 = abs2(A[1,1])
-        fill!(UpperTriangular(C), zero(aA_11 + aA_11))
+        aA_11 = abs2(A[0,0])
+        for j in axes(C, 1), i in firstindex(C, 0):j
+            C[i,j] = zero(aA_11 + aA_11)
+        end
     end
     (iszero(α) || isempty(A)) && return C
     @inbounds if !conjugate
         if aat
-            for k ∈ 1:n, j ∈ 1:m
+            for k ∈ 0:n-1, j ∈ 0:m-1
                 αA_jk = @stable_muladdmul MulAddMul(α, false)(A[j, k])
-                for i ∈ 1:j
+                for i ∈ 0:j
                     C[i, j] = muladd(A[i, k], αA_jk, C[i, j])
                 end
             end
         else
-            for j ∈ 1:n, i ∈ 1:j
-                temp = A[1, i] * A[1, j]
-                for k ∈ 2:m
+            for j ∈ 0:n-1, i ∈ 0:j
+                temp = A[0, i] * A[0, j]
+                for k ∈ 1:m-1
                     temp = muladd(A[k, i], A[k, j], temp)
                 end
                 C[i, j] += @stable_muladdmul MulAddMul(α, false)(temp)
@@ -639,24 +641,24 @@ function generic_syrk!(C::StridedMatrix{T}, A::StridedVecOrMat{T}, conjugate::Bo
         end
     else
         if aat
-            for k ∈ 1:n, j ∈ 1:m
+            for k ∈ 0:n-1, j ∈ 0:m-1
                 αA_jk_bar = @stable_muladdmul MulAddMul(α, false)(conj(A[j, k]))
-                for i ∈ 1:j-1
+                for i ∈ 0:j-1
                     C[i, j] = muladd(A[i, k], αA_jk_bar, C[i, j])
                 end
                 C[j, j] += @stable_muladdmul MulAddMul(α, false)(abs2(A[j, k]))
             end
         else
-            for j ∈ 1:n
-                for i ∈ 1:j-1
-                    temp = conj(A[1, i]) * A[1, j]
-                    for k ∈ 2:m
+            for j ∈ 0:n-1
+                for i ∈ 0:j-1
+                    temp = conj(A[0, i]) * A[0, j]
+                    for k ∈ 1:m-1
                         temp = muladd(conj(A[k, i]), A[k, j], temp)
                     end
                     C[i, j] += @stable_muladdmul MulAddMul(α, false)(temp)
                 end
-                temp = abs2(A[1, j])
-                for k ∈ 2:m
+                temp = abs2(A[0, j])
+                for k ∈ 1:m-1
                     temp += abs2(A[k, j])
                 end
                 C[j, j] += @stable_muladdmul MulAddMul(α, false)(temp)
@@ -683,11 +685,11 @@ Base.@constprop :aggressive generic_matmatmul!(C::StridedVecOrMat{Complex{T}}, t
     n = checksquare(A)
     off = diag ? 0 : 1
     if uplo == 'U'
-        for i = 1:n, j = (i+off):n
+        for i = 0:n-1, j = (i+off):n-1
             A[j,i] = conjugate ? adjoint(A[i,j]) : transpose(A[i,j])
         end
     elseif uplo == 'L'
-        for i = 1:n, j = (i+off):n
+        for i = 0:n-1, j = (i+off):n-1
             A[i,j] = conjugate ? adjoint(A[j,i]) : transpose(A[j,i])
         end
     else
@@ -696,7 +698,7 @@ Base.@constprop :aggressive generic_matmatmul!(C::StridedVecOrMat{Complex{T}}, t
     A
 end
 
-_fullstride2(A, f=identity) = f(stride(A, 2)) >= size(A, 1)
+_fullstride2(A, f=identity) = f(stride(A, 1)) >= size(A, 0)
 # for some standard StridedArrays, the _fullstride2 condition is known to hold at compile-time
 # We specialize the function for certain StridedArray subtypes
 _fullstride2(A::StridedArrayStdSubArray, ::typeof(abs)) = true
@@ -712,8 +714,8 @@ Base.@constprop :aggressive function gemv!(y::StridedVector{T}, tA::AbstractChar
     alpha, beta = promote(α, β, zero(T))
     tA_uc = _uppercase(tA) # potentially convert a WrapperChar to a Char
     if alpha isa Union{Bool,T} && beta isa Union{Bool,T} &&
-        stride(A, 1) == 1 && _fullstride2(A, abs) &&
-        !iszero(stride(x, 1)) && # We only check input's stride here.
+        stride(A, 0) == 1 && _fullstride2(A, abs) &&
+        !iszero(stride(x, 0)) && # We only check input's stride here.
         if tA_uc in ('N', 'T', 'C')
             return BLAS.gemv!(tA, alpha, A, x, beta, y)
         elseif tA_uc == 'S'
@@ -740,9 +742,9 @@ Base.@constprop :aggressive function gemv!(y::StridedVector{Complex{T}}, tA::Abs
     alpha, beta = promote(α, β, zero(T))
     tA_uc = _uppercase(tA) # potentially convert a WrapperChar to a Char
     if alpha isa Union{Bool,T} && beta isa Union{Bool,T} &&
-            stride(A, 1) == 1 && _fullstride2(A, abs) &&
-            stride(y, 1) == 1 && tA_uc == 'N' && # reinterpret-based optimization is valid only for contiguous `y`
-            !iszero(stride(x, 1))
+            stride(A, 0) == 1 && _fullstride2(A, abs) &&
+            stride(y, 0) == 1 && tA_uc == 'N' && # reinterpret-based optimization is valid only for contiguous `y`
+            !iszero(stride(x, 0))
         BLAS.gemv!(tA, alpha, reinterpret(T, A), x, beta, reinterpret(T, y))
         return y
     else
@@ -761,12 +763,12 @@ Base.@constprop :aggressive function gemv!(y::StridedVector{Complex{T}}, tA::Abs
     alpha, beta = promote(α, β, zero(T))
     tA_uc = _uppercase(tA) # potentially convert a WrapperChar to a Char
     @views if alpha isa Union{Bool,T} && beta isa Union{Bool,T} &&
-            stride(A, 1) == 1 && _fullstride2(A, abs) &&
-            !iszero(stride(x, 1)) && tA_uc in ('N', 'T', 'C')
+            stride(A, 0) == 1 && _fullstride2(A, abs) &&
+            !iszero(stride(x, 0)) && tA_uc in ('N', 'T', 'C')
         xfl = reinterpret(reshape, T, x) # Use reshape here.
         yfl = reinterpret(reshape, T, y)
+        BLAS.gemv!(tA, alpha, A, xfl[0, :], beta, yfl[0, :])
         BLAS.gemv!(tA, alpha, A, xfl[1, :], beta, yfl[1, :])
-        BLAS.gemv!(tA, alpha, A, xfl[2, :], beta, yfl[2, :])
         return y
     elseif tA_uc in ('S', 'H')
         # re-wrap again and use plain ('N') matvec mul algorithm,
@@ -784,10 +786,10 @@ Base.@constprop :aggressive function syrk_wrapper!(C::StridedMatrix{T}, tA::Abst
     nC = checksquare(C)
     tA_uc = _uppercase(tA) # potentially convert a WrapperChar to a Char
     if tA_uc == 'T'
-        (nA, mA) = size(A,1), size(A,2)
+        (nA, mA) = size(A, 0), size(A, 1)
         tAt = 'N'
     else
-        (mA, nA) = size(A,1), size(A,2)
+        (mA, nA) = size(A, 0), size(A, 1)
         tAt = 'T'
     end
     if nC != mA
@@ -800,7 +802,7 @@ Base.@constprop :aggressive function syrk_wrapper!(C::StridedMatrix{T}, tA::Abst
         alpha, beta = promote(α, β, zero(T))
         if (alpha isa Union{Bool,T} &&
                 beta isa Union{Bool,T} &&
-                stride(A, 1) == stride(C, 1) == 1 &&
+                stride(A, 0) == stride(C, 0) == 1 &&
                 _fullstride2(A) && _fullstride2(C)) &&
                 max(nA, mA) ≥ 4
             BLAS.syrk!('U', tA, alpha, A, beta, C)
@@ -837,10 +839,10 @@ Base.@constprop :aggressive function herk_wrapper!(C::StridedMatrix{TC}, tA::Abs
     nC = checksquare(C)
     tA_uc = _uppercase(tA) # potentially convert a WrapperChar to a Char
     if tA_uc == 'C'
-        (nA, mA) = size(A,1), size(A,2)
+        (nA, mA) = size(A, 0), size(A, 1)
         tAt = 'N'
     else
-        (mA, nA) = size(A,1), size(A,2)
+        (mA, nA) = size(A, 0), size(A, 1)
         tAt = 'C'
     end
     if nC != mA
@@ -851,7 +853,7 @@ Base.@constprop :aggressive function herk_wrapper!(C::StridedMatrix{TC}, tA::Abs
     if isreal(α) && isreal(β) && (iszero(β) || ishermitian(C))
         alpha, beta = promote(α, β, zero(T))
         if (alpha isa T && beta isa T &&
-                stride(A, 1) == stride(C, 1) == 1 &&
+                stride(A, 0) == stride(C, 0) == 1 &&
                 _fullstride2(A) && _fullstride2(C)) &&
                 max(nA, mA) ≥ 4
             BLAS.herk!('U', tA, alpha, A, beta, C)
@@ -918,7 +920,7 @@ Base.@constprop :aggressive function gemm_wrapper!(C::StridedVecOrMat{T}, tA::Ab
     alpha, beta = promote(α, β, zero(T))
     if (alpha isa Union{Bool,T} &&
             beta isa Union{Bool,T} &&
-            stride(A, 1) == stride(B, 1) == stride(C, 1) == 1 &&
+            stride(A, 0) == stride(B, 0) == stride(C, 0) == 1 &&
             _fullstride2(A) && _fullstride2(B) && _fullstride2(C))
         return BLAS.gemm!(tA, tB, alpha, A, B, beta, C)
     end
@@ -957,7 +959,7 @@ Base.@constprop :aggressive function gemm_wrapper!(C::StridedVecOrMat{Complex{T}
     # Make-sure reinterpret-based optimization is BLAS-compatible.
     if (alpha isa Union{Bool,T} &&
             beta isa Union{Bool,T} &&
-            stride(A, 1) == stride(B, 1) == stride(C, 1) == 1 &&
+            stride(A, 0) == stride(B, 0) == stride(C, 0) == 1 &&
             _fullstride2(A) && _fullstride2(B) && _fullstride2(C) && tA_uc == 'N')
         BLAS.gemm!(tA, tB, alpha, reinterpret(T, A), B, beta, reinterpret(T, C))
         return C
@@ -972,7 +974,7 @@ gemm_wrapper!(C::StridedVecOrMat{Complex{T}}, tA::AbstractChar, tB::AbstractChar
 # blas.jl defines matmul for floats; other integer and mixed precision
 # cases are handled here
 
-lapack_size(t::AbstractChar, M::AbstractVecOrMat) = (size(M, t=='N' ? 1 : 2), size(M, t=='N' ? 2 : 1))
+lapack_size(t::AbstractChar, M::AbstractVecOrMat) = (size(M, t=='N' ? 0 : 1), size(M, t=='N' ? 1 : 0))
 
 """
     copyto!(B::AbstractMatrix, ir_dest::AbstractUnitRange, jr_dest::AbstractUnitRange,
@@ -1079,7 +1081,7 @@ _generic_matvecmul!(C::AbstractVector, tA, A::AbstractVecOrMat, B::AbstractVecto
     _generic_matvecmul!(C, tA, A, B, _add.alpha, _add.beta)
 function __generic_matvecmul!(f::F, C::AbstractVector, A::AbstractVecOrMat, B::AbstractVector,
                             alpha::Number, beta::Number) where {F}
-    Astride = size(A, 1)
+    Astride = size(A, 0)
     @inbounds begin
         if length(B) == 0
             for k = eachindex(C)
@@ -1087,8 +1089,8 @@ function __generic_matvecmul!(f::F, C::AbstractVector, A::AbstractVecOrMat, B::A
             end
         else
             for k = eachindex(C)
-                aoffs = (k-1)*Astride
-                firstterm = f(A[aoffs + 1]) * B[1]
+                aoffs = k*Astride
+                firstterm = f(A[aoffs]) * B[0]
                 z = zero(firstterm + firstterm)
                 s = convert(promote_type(eltype(C), typeof(z)), z)
                 for i in nonzeroinds(B)
@@ -1101,7 +1103,7 @@ function __generic_matvecmul!(f::F, C::AbstractVector, A::AbstractVecOrMat, B::A
 end
 function __generic_matvecmul!(::typeof(identity), C::AbstractVector, A::AbstractVecOrMat, B::AbstractVector,
                             alpha::Number, beta::Number)
-    Astride = size(A, 1)
+    Astride = size(A, 0)
     @inbounds begin
         for i = eachindex(C)
             if !iszero(beta)
@@ -1109,13 +1111,13 @@ function __generic_matvecmul!(::typeof(identity), C::AbstractVector, A::Abstract
             elseif length(B) == 0
                 C[i] = zero(eltype(C))
             else
-                ci   = @stable_muladdmul MulAddMul(alpha,false)(A[i]*B[1])
+                ci   = @stable_muladdmul MulAddMul(alpha,false)(A[i]*B[0])
                 C[i] = zero(ci + ci)
             end
         end
         if !iszero(alpha)
             for k in nonzeroinds(B)
-                aoffs = (k-1)*Astride
+                aoffs = k*Astride
                 b = @stable_muladdmul MulAddMul(alpha,false)(B[k])
                 for i = eachindex(C)
                     C[i] = muladd(A[aoffs + i], b, C[i])
@@ -1197,9 +1199,9 @@ function _generic_matmatmul_nonadjtrans!(C, A, B, alpha, beta)
     if (!iszero(beta) || isempty(A) || isempty(B)) # return C*beta
         _rmul_or_fill!(C, beta)
     else # iszero(beta) && A and B are non-empty
-        a1 = firstindex(A, 2)
-        b1 = firstindex(B, 1)
-        for j in axes(C, 2)
+        a1 = firstindex(A, 1)
+        b1 = firstindex(B, 0)
+        for j in axes(C, 1)
             B_1j = B[b1, j]
             for i in nzrows(C, j)
                 C_ij = @stable_muladdmul MulAddMul(alpha, false)(A[i, a1] * B_1j)
@@ -1208,7 +1210,7 @@ function _generic_matmatmul_nonadjtrans!(C, A, B, alpha, beta)
         end
     end
     (iszero(alpha) || isempty(A) || isempty(B)) && return C
-    @inbounds for n in axes(B, 2), k in nzrows(B, n)
+    @inbounds for n in axes(B, 1), k in nzrows(B, n)
         # Balpha = B[k,n] * alpha, but we skip the multiplication in case isone(alpha)
         Balpha = @stable_muladdmul MulAddMul(alpha, false)(B[k,n])
         !ismissing(Balpha) && iszero(Balpha) && continue
@@ -1225,26 +1227,26 @@ function _generic_matmatmul_adjtrans!(C, A, B, alpha, beta)
     if (!iszero(beta) || isempty(A) || isempty(B))
         _rmul_or_fill!(C, beta)
     else # iszero(beta) && A and B are non-empty
-        a1 = firstindex(pA, 1)
-        b1 = firstindex(pB, 2)
-        for j in axes(C, 2)
+        a1 = firstindex(pA, 0)
+        b1 = firstindex(pB, 1)
+        for j in axes(C, 1)
             tB_1j = t(pB[j, b1])
-            for i in axes(C, 1)
+            for i in axes(C, 0)
                 C_ij = @stable_muladdmul MulAddMul(alpha, false)(t(pA[a1, i]) * tB_1j)
                 C[i,j] = zero(C_ij + C_ij)
             end
         end
     end
     (iszero(alpha) || isempty(A) || isempty(B)) && return C
-    tmp = similar(C, promote_op(matprod, typeof(first(A)), typeof(first(B))), axes(C, 2))
+    tmp = similar(C, promote_op(matprod, typeof(first(A)), typeof(first(B))), axes(C, 1))
     ta = t(alpha)
     if isone(ta)
-        for ci in axes(C, 1)
+        for ci in axes(C, 0)
             mul!(tmp, pB, view(pA, :, ci))
             @views C[ci,:] .+= t.(tmp)
         end
     else
-        for ci in axes(C, 1)
+        for ci in axes(C, 0)
             mul!(tmp, pB, view(pA, :, ci))
             @views C[ci,:] .+= t.(ta .* tmp)
         end
@@ -1255,9 +1257,9 @@ function _generic_matmatmul_generic!(C, A, B, alpha, beta)
     if iszero(alpha) || isempty(A) || isempty(B)
         return _rmul_or_fill!(C, beta)
     end
-    a1 = firstindex(A, 2)
-    b1 = firstindex(B, 1)
-    @inbounds for i in axes(A, 1), j in axes(B, 2)
+    a1 = firstindex(A, 1)
+    b1 = firstindex(B, 0)
+    @inbounds for i in axes(A, 0), j in axes(B, 1)
         z2 = zero(A[i, a1]*B[b1, j] + A[i, a1]*B[b1, j])
         Ctmp = convert(promote_type(eltype(C), typeof(z2)), z2)
         @simd for k in intersect(nzcols(A, i), nzrows(B, j))
@@ -1292,30 +1294,30 @@ function __matmul2x2_elements(tA, A::AbstractMatrix)
     @inbounds begin
     tA_uc = _uppercase(tA) # possibly unwrap a WrapperChar
     if tA_uc == 'N'
-        A11 = A[1,1]; A12 = A[1,2]; A21 = A[2,1]; A22 = A[2,2]
+        A11 = A[0,0]; A12 = A[0,1]; A21 = A[1,0]; A22 = A[1,1]
     elseif tA_uc == 'T'
         # TODO making these lazy could improve perf
-        A11 = copy(transpose(A[1,1])); A12 = copy(transpose(A[2,1]))
-        A21 = copy(transpose(A[1,2])); A22 = copy(transpose(A[2,2]))
+        A11 = copy(transpose(A[0,0])); A12 = copy(transpose(A[1,0]))
+        A21 = copy(transpose(A[0,1])); A22 = copy(transpose(A[1,1]))
     elseif tA_uc == 'C'
         # TODO making these lazy could improve perf
-        A11 = copy(A[1,1]'); A12 = copy(A[2,1]')
-        A21 = copy(A[1,2]'); A22 = copy(A[2,2]')
+        A11 = copy(A[0,0]'); A12 = copy(A[1,0]')
+        A21 = copy(A[0,1]'); A22 = copy(A[1,1]')
     elseif tA_uc == 'S'
         if _isuppercase(tA) # tA == 'S'
-            A11 = symmetric(A[1,1], :U); A12 = A[1,2]
-            A21 = copy(transpose(A[1,2])); A22 = symmetric(A[2,2], :U)
+            A11 = symmetric(A[0,0], :U); A12 = A[0,1]
+            A21 = copy(transpose(A[0,1])); A22 = symmetric(A[1,1], :U)
         else
-            A11 = symmetric(A[1,1], :L); A12 = copy(transpose(A[2,1]))
-            A21 = A[2,1]; A22 = symmetric(A[2,2], :L)
+            A11 = symmetric(A[0,0], :L); A12 = copy(transpose(A[1,0]))
+            A21 = A[1,0]; A22 = symmetric(A[1,1], :L)
         end
     elseif tA_uc == 'H'
         if _isuppercase(tA) # tA == 'H'
-            A11 = hermitian(A[1,1], :U); A12 = A[1,2]
-            A21 = copy(adjoint(A[1,2])); A22 = hermitian(A[2,2], :U)
+            A11 = hermitian(A[0,0], :U); A12 = A[0,1]
+            A21 = copy(adjoint(A[0,1])); A22 = hermitian(A[1,1], :U)
         else # if tA == 'h'
-            A11 = hermitian(A[1,1], :L); A12 = copy(adjoint(A[2,1]))
-            A21 = A[2,1]; A22 = hermitian(A[2,2], :L)
+            A11 = hermitian(A[0,0], :L); A12 = copy(adjoint(A[1,0]))
+            A21 = A[1,0]; A22 = hermitian(A[1,1], :L)
         end
     end
     end # inbounds
@@ -1326,10 +1328,10 @@ __matmul2x2_elements(tA, tB, A, B) = __matmul2x2_elements(tA, A), __matmul2x2_el
 function _modify2x2!(Aelements, Belements, C, _add)
     (A11, A12, A21, A22), (B11, B12, B21, B22) = Aelements, Belements
     @inbounds begin
-    _modify!(_add, A11*B11 + A12*B21, C, (1,1))
-    _modify!(_add, A21*B11 + A22*B21, C, (2,1))
-    _modify!(_add, A11*B12 + A12*B22, C, (1,2))
-    _modify!(_add, A21*B12 + A22*B22, C, (2,2))
+    _modify!(_add, A11*B11 + A12*B21, C, (0,0))
+    _modify!(_add, A21*B11 + A22*B21, C, (1,0))
+    _modify!(_add, A11*B12 + A12*B22, C, (0,1))
+    _modify!(_add, A21*B12 + A22*B22, C, (1,1))
     end # inbounds
     C
 end
@@ -1351,38 +1353,38 @@ function __matmul3x3_elements(tA, A::AbstractMatrix)
     @inbounds begin
     tA_uc = _uppercase(tA) # possibly unwrap a WrapperChar
     if tA_uc == 'N'
-        A11 = A[1,1]; A12 = A[1,2]; A13 = A[1,3]
-        A21 = A[2,1]; A22 = A[2,2]; A23 = A[2,3]
-        A31 = A[3,1]; A32 = A[3,2]; A33 = A[3,3]
+        A11 = A[0,0]; A12 = A[0,1]; A13 = A[0,2]
+        A21 = A[1,0]; A22 = A[1,1]; A23 = A[1,2]
+        A31 = A[2,0]; A32 = A[2,1]; A33 = A[2,2]
     elseif tA_uc == 'T'
         # TODO making these lazy could improve perf
-        A11 = copy(transpose(A[1,1])); A12 = copy(transpose(A[2,1])); A13 = copy(transpose(A[3,1]))
-        A21 = copy(transpose(A[1,2])); A22 = copy(transpose(A[2,2])); A23 = copy(transpose(A[3,2]))
-        A31 = copy(transpose(A[1,3])); A32 = copy(transpose(A[2,3])); A33 = copy(transpose(A[3,3]))
+        A11 = copy(transpose(A[0,0])); A12 = copy(transpose(A[1,0])); A13 = copy(transpose(A[2,0]))
+        A21 = copy(transpose(A[0,1])); A22 = copy(transpose(A[1,1])); A23 = copy(transpose(A[2,1]))
+        A31 = copy(transpose(A[0,2])); A32 = copy(transpose(A[1,2])); A33 = copy(transpose(A[2,2]))
     elseif tA_uc == 'C'
         # TODO making these lazy could improve perf
-        A11 = copy(A[1,1]'); A12 = copy(A[2,1]'); A13 = copy(A[3,1]')
-        A21 = copy(A[1,2]'); A22 = copy(A[2,2]'); A23 = copy(A[3,2]')
-        A31 = copy(A[1,3]'); A32 = copy(A[2,3]'); A33 = copy(A[3,3]')
+        A11 = copy(A[0,0]'); A12 = copy(A[1,0]'); A13 = copy(A[2,0]')
+        A21 = copy(A[0,1]'); A22 = copy(A[1,1]'); A23 = copy(A[2,1]')
+        A31 = copy(A[0,2]'); A32 = copy(A[1,2]'); A33 = copy(A[2,2]')
     elseif tA_uc == 'S'
         if _isuppercase(tA) # tA == 'S'
-            A11 = symmetric(A[1,1], :U); A12 = A[1,2]; A13 = A[1,3]
-            A21 = copy(transpose(A[1,2])); A22 = symmetric(A[2,2], :U); A23 = A[2,3]
-            A31 = copy(transpose(A[1,3])); A32 = copy(transpose(A[2,3])); A33 = symmetric(A[3,3], :U)
+            A11 = symmetric(A[0,0], :U); A12 = A[0,1]; A13 = A[0,2]
+            A21 = copy(transpose(A[0,1])); A22 = symmetric(A[1,1], :U); A23 = A[1,2]
+            A31 = copy(transpose(A[0,2])); A32 = copy(transpose(A[1,2])); A33 = symmetric(A[2,2], :U)
         else
-            A11 = symmetric(A[1,1], :L); A12 = copy(transpose(A[2,1])); A13 = copy(transpose(A[3,1]))
-            A21 = A[2,1]; A22 = symmetric(A[2,2], :L); A23 = copy(transpose(A[3,2]))
-            A31 = A[3,1]; A32 = A[3,2]; A33 = symmetric(A[3,3], :L)
+            A11 = symmetric(A[0,0], :L); A12 = copy(transpose(A[1,0])); A13 = copy(transpose(A[2,0]))
+            A21 = A[1,0]; A22 = symmetric(A[1,1], :L); A23 = copy(transpose(A[2,1]))
+            A31 = A[2,0]; A32 = A[2,1]; A33 = symmetric(A[2,2], :L)
         end
     elseif tA_uc == 'H'
         if _isuppercase(tA) # tA == 'H'
-            A11 = hermitian(A[1,1], :U); A12 = A[1,2]; A13 = A[1,3]
-            A21 = copy(adjoint(A[1,2])); A22 = hermitian(A[2,2], :U); A23 = A[2,3]
-            A31 = copy(adjoint(A[1,3])); A32 = copy(adjoint(A[2,3])); A33 = hermitian(A[3,3], :U)
+            A11 = hermitian(A[0,0], :U); A12 = A[0,1]; A13 = A[0,2]
+            A21 = copy(adjoint(A[0,1])); A22 = hermitian(A[1,1], :U); A23 = A[1,2]
+            A31 = copy(adjoint(A[0,2])); A32 = copy(adjoint(A[1,2])); A33 = hermitian(A[2,2], :U)
         else # if tA == 'h'
-            A11 = hermitian(A[1,1], :L); A12 = copy(adjoint(A[2,1])); A13 = copy(adjoint(A[3,1]))
-            A21 = A[2,1]; A22 = hermitian(A[2,2], :L); A23 = copy(adjoint(A[3,2]))
-            A31 = A[3,1]; A32 = A[3,2]; A33 = hermitian(A[3,3], :L)
+            A11 = hermitian(A[0,0], :L); A12 = copy(adjoint(A[1,0])); A13 = copy(adjoint(A[2,0]))
+            A21 = A[1,0]; A22 = hermitian(A[1,1], :L); A23 = copy(adjoint(A[2,1]))
+            A31 = A[2,0]; A32 = A[2,1]; A33 = hermitian(A[2,2], :L)
         end
     end
     end # inbounds
@@ -1394,17 +1396,17 @@ function _modify3x3!(Aelements, Belements, C, _add)
     (A11, A12, A13, A21, A22, A23, A31, A32, A33),
         (B11, B12, B13, B21, B22, B23, B31, B32, B33) = Aelements, Belements
     @inbounds begin
-    _modify!(_add, A11*B11 + A12*B21 + A13*B31, C, (1,1))
-    _modify!(_add, A21*B11 + A22*B21 + A23*B31, C, (2,1))
-    _modify!(_add, A31*B11 + A32*B21 + A33*B31, C, (3,1))
+    _modify!(_add, A11*B11 + A12*B21 + A13*B31, C, (0,0))
+    _modify!(_add, A21*B11 + A22*B21 + A23*B31, C, (1,0))
+    _modify!(_add, A31*B11 + A32*B21 + A33*B31, C, (2,0))
 
-    _modify!(_add, A11*B12 + A12*B22 + A13*B32, C, (1,2))
-    _modify!(_add, A21*B12 + A22*B22 + A23*B32, C, (2,2))
-    _modify!(_add, A31*B12 + A32*B22 + A33*B32, C, (3,2))
+    _modify!(_add, A11*B12 + A12*B22 + A13*B32, C, (0,1))
+    _modify!(_add, A21*B12 + A22*B22 + A23*B32, C, (1,1))
+    _modify!(_add, A31*B12 + A32*B22 + A33*B32, C, (2,1))
 
-    _modify!(_add, A11*B13 + A12*B23 + A13*B33, C, (1,3))
-    _modify!(_add, A21*B13 + A22*B23 + A23*B33, C, (2,3))
-    _modify!(_add, A31*B13 + A32*B23 + A33*B33, C, (3,3))
+    _modify!(_add, A11*B13 + A12*B23 + A13*B33, C, (0,2))
+    _modify!(_add, A21*B13 + A22*B23 + A23*B33, C, (1,2))
+    _modify!(_add, A31*B13 + A32*B23 + A33*B33, C, (2,2))
     end # inbounds
     C
 end
@@ -1485,7 +1487,7 @@ mat_vec_scalar(A::AdjOrTransAbsVec, x::StridedVector, γ) = (A * x) * γ
 
 function _mat_vec_scalar(A, x, γ)
     T = promote_op(*, promote_op(matprod, eltype(A), eltype(x)), typeof(γ))
-    C = similar(A, T, axes(A,1))
+    C = similar(A, T, axes(A, 0))
     mul!(C, A, x, γ, false)
 end
 
@@ -1499,7 +1501,7 @@ mat_mat_scalar(A::StridedMatrix{Complex{T}}, B::StridedMaybeAdjOrTransMat{T}, γ
 
 function _mat_mat_scalar(A, B, γ)
     T = promote_op(*, promote_op(matprod, eltype(A), eltype(B)), typeof(γ))
-    C = similar(A, T, axes(A,1), axes(B,2))
+    C = similar(A, T, axes(A, 0), axes(B, 1))
     mul!(C, A, B, γ, false)
 end
 

@@ -93,7 +93,7 @@ mutable struct WorkerConfig
 
     function WorkerConfig()
         wc = new()
-        for n in 1:fieldcount(WorkerConfig)
+        for n in 0:fieldcount(WorkerConfig)-1
             setfield!(wc, n, nothing)
         end
         wc
@@ -450,7 +450,7 @@ end
 function parse_connection_info(str)
     m = match(r"^julia_worker:(\d+)#(.*)", str)
     if m !== nothing
-        (String(m.captures[2]), parse(UInt16, m.captures[1]))
+        (String(m.captures[1]), parse(UInt16, m.captures[0]))
     else
         ("", UInt16(0))
     end
@@ -824,7 +824,7 @@ function launch_additional(np::Integer, cmd::Cmd)
     io_objs = Vector{Any}(undef, np)
     addresses = Vector{Any}(undef, np)
 
-    for i in 1:np
+    for i in 0:np-1
         io = open(detach(cmd), "r+")
         write_cookie(io)
         io_objs[i] = io.out
@@ -1372,8 +1372,8 @@ function check_same_host(pids)
         if all(p -> (p==1) || (isa(map_pid_wrkr[p].manager, LocalManager)), pids)
             return true
         else
-            first_bind_addr = notnothing(wp_bind_addr(map_pid_wrkr[pids[1]]))
-            return all(p -> notnothing(wp_bind_addr(map_pid_wrkr[p])) == first_bind_addr, pids[2:end])
+            first_bind_addr = notnothing(wp_bind_addr(map_pid_wrkr[pids[0]]))
+            return all(p -> notnothing(wp_bind_addr(map_pid_wrkr[p])) == first_bind_addr, pids[1:end])
         end
     end
 end
@@ -1429,9 +1429,9 @@ function init_bind_addr()
     opts = JLOptions()
     if opts.bindto != C_NULL
         bind_to = split(unsafe_string(opts.bindto), ":")
-        bind_addr = string(parse(IPAddr, bind_to[1]))
+        bind_addr = string(parse(IPAddr, bind_to[0]))
         if length(bind_to) > 1
-            bind_port = parse(Int,bind_to[2])
+            bind_port = parse(Int,bind_to[1])
         else
             bind_port = 0
         end
@@ -1553,8 +1553,8 @@ function load_machine_file(path::AbstractString)
         s = split(line, '*'; keepempty=false)
         map!(strip, s, s)
         if length(s) > 1
-            cnt = all(isdigit, s[1]) ? parse(Int,s[1]) : Symbol(s[1])
-            push!(machines,(s[2], cnt))
+            cnt = all(isdigit, s[0]) ? parse(Int,s[0]) : Symbol(s[0])
+            push!(machines,(s[1], cnt))
         else
             push!(machines,line)
         end

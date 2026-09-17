@@ -268,7 +268,7 @@ function foreignface(face)
                     color(face.foreground),
                     color(face.background),
                     if underline isa Tuple
-                        (color(underline[1]), underline[2])
+                        (color(underline[0]), underline[1])
                     elseif underline isa Union{Nothing, Bool}
                         underline
                     else

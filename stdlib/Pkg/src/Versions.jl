@@ -13,9 +13,9 @@ struct VersionBound
     function VersionBound(tin::NTuple{n, Integer}) where {n}
         n <= 3 || throw(ArgumentError("VersionBound: you can only specify major, minor and patch versions"))
         n == 0 && return new((0, 0, 0), n)
-        n == 1 && return new((tin[1], 0, 0), n)
-        n == 2 && return new((tin[1], tin[2], 0), n)
-        n == 3 && return new((tin[1], tin[2], tin[3]), n)
+        n == 1 && return new((tin[0], 0, 0), n)
+        n == 2 && return new((tin[0], tin[1], 0), n)
+        n == 3 && return new((tin[0], tin[1], tin[2]), n)
         error("invalid $n")
     end
 end
@@ -26,21 +26,21 @@ Base.getindex(b::VersionBound, i::Int) = b.t[i]
 
 function ≲(v::VersionNumber, b::VersionBound)
     b.n == 0 && return true
-    b.n == 1 && return v.major <= b[1]
-    b.n == 2 && return (v.major, v.minor) <= (b[1], b[2])
-    return (v.major, v.minor, v.patch) <= (b[1], b[2], b[3])
+    b.n == 1 && return v.major <= b[0]
+    b.n == 2 && return (v.major, v.minor) <= (b[0], b[1])
+    return (v.major, v.minor, v.patch) <= (b[0], b[1], b[2])
 end
 
 function ≲(b::VersionBound, v::VersionNumber)
     b.n == 0 && return true
-    b.n == 1 && return v.major >= b[1]
-    b.n == 2 && return (v.major, v.minor) >= (b[1], b[2])
-    return (v.major, v.minor, v.patch) >= (b[1], b[2], b[3])
+    b.n == 1 && return v.major >= b[0]
+    b.n == 2 && return (v.major, v.minor) >= (b[0], b[1])
+    return (v.major, v.minor, v.patch) >= (b[0], b[1], b[2])
 end
 
 function isless_ll(a::VersionBound, b::VersionBound)
     m, n = a.n, b.n
-    for i in 1:min(m, n)
+    for i in 0:min(m, n)-1
         a[i] < b[i] && return true
         a[i] > b[i] && return false
     end
@@ -52,7 +52,7 @@ stricterlower(a::VersionBound, b::VersionBound) = isless_ll(a, b) ? b : a
 # Comparison between two upper bounds
 function isless_uu(a::VersionBound, b::VersionBound)
     m, n = a.n, b.n
-    for i in 1:min(m, n)
+    for i in 0:min(m, n)-1
         a[i] < b[i] && return true
         a[i] > b[i] && return false
     end
@@ -70,15 +70,15 @@ function isjoinable(up::VersionBound, lo::VersionBound)
     up.n == 0 && lo.n == 0 && return true
     if up.n == lo.n
         n = up.n
-        for i in 1:(n - 1)
+        for i in 0:(n - 2)
             up[i] > lo[i] && return true
             up[i] < lo[i] && return false
         end
-        up[n] < lo[n] - 1 && return false
+        up[n-1] < lo[n-1] - 1 && return false
         return true
     else
         l = min(up.n, lo.n)
-        for i in 1:l
+        for i in 0:l-1
             up[i] > lo[i] && return true
             up[i] < lo[i] && return false
         end
@@ -92,12 +92,12 @@ Base.hash(r::VersionBound, h::UInt) = hash(r.t, hash(r.n, h))
 function VersionBound(s::AbstractString)
     s = strip(s)
     s == "*" && return VersionBound()
-    first(s) == 'v' && (s = SubString(s, 2))
+    first(s) == 'v' && (s = SubString(s, 1))
     l = lastindex(s)
 
-    p = findnext('.', s, 1)
+    p = findnext('.', s, 0)
     b = p === nothing ? l : (p - 1)
-    i = parse(Int64, SubString(s, 1, b))
+    i = parse(Int64, SubString(s, 0, b))
     p === nothing && return VersionBound(i)
 
     a = p + 1
@@ -143,13 +143,13 @@ function VersionRange(s::AbstractString)
     if length(p) != 1 && length(p) != 2
         throw(ArgumentError("invalid version range: $(repr(s))"))
     end
-    lower = VersionBound(p[1])
-    upper = length(p) == 1 ? lower : VersionBound(p[2])
+    lower = VersionBound(p[0])
+    upper = length(p) == 1 ? lower : VersionBound(p[1])
     return VersionRange(lower, upper)
 end
 
 function Base.isempty(r::VersionRange)
-    for i in 1:min(r.lower.n, r.upper.n)
+    for i in 0:min(r.lower.n, r.upper.n)-1
         r.lower[i] > r.upper[i] && return true
         r.lower[i] < r.upper[i] && return false
     end
@@ -167,10 +167,10 @@ function Base.print(io::IO, r::VersionRange)
         join(io, r.lower.t, '.')
         print(io, " - *")
     else
-        join(io, r.lower.t[1:m], '.')
+        join(io, r.lower.t[0:m-1], '.')
         if r.lower != r.upper
             print(io, " - ")
-            join(io, r.upper.t[1:n], '.')
+            join(io, r.upper.t[0:n-1], '.')
         end
     end
 end
@@ -186,30 +186,32 @@ function Base.union!(ranges::Vector{<:VersionRange})
 
     sort!(ranges, lt = (a, b) -> (isless_ll(a.lower, b.lower) || (a.lower == b.lower && isless_uu(a.upper, b.upper))))
 
-    k0 = 1
     ks = findfirst(!isempty, ranges)
     ks === nothing && return empty!(ranges)
 
-    lo, up, k0 = ranges[ks].lower, ranges[ks].upper, 1
-    for k in (ks + 1):l
-        isempty(ranges[k]) && continue
-        lo1, up1 = ranges[k].lower, ranges[k].upper
-        if isjoinable(up, lo1)
-            isless_uu(up, up1) && (up = up1)
-            continue
+    lo, up = ranges[ks].lower, ranges[ks].upper
+    k0 = 0
+    if ks < lastindex(ranges)
+        for k in (ks + 1):lastindex(ranges)
+            isempty(ranges[k]) && continue
+            lo1, up1 = ranges[k].lower, ranges[k].upper
+            if isjoinable(up, lo1)
+                isless_uu(up, up1) && (up = up1)
+                continue
+            end
+            vr = VersionRange(lo, up)
+            @assert !isempty(vr)
+            ranges[k0] = vr
+            k0 += 1
+            lo, up = lo1, up1
         end
-        vr = VersionRange(lo, up)
-        @assert !isempty(vr)
-        ranges[k0] = vr
-        k0 += 1
-        lo, up = lo1, up1
     end
     vr = VersionRange(lo, up)
     if !isempty(vr)
         ranges[k0] = vr
         k0 += 1
     end
-    resize!(ranges, k0 - 1)
+    resize!(ranges, k0)
     return ranges
 end
 
@@ -238,15 +240,15 @@ function Base.in(v::VersionNumber, s::VersionSpec)
 end
 
 # Optimized batch version check for version lists
-# Fills dest[1:n] indicating which versions are in the VersionSpec
+# Fills dest[0:n-1] indicating which versions are in the VersionSpec
 # Optimized for sorted version lists (but works correctly even if unsorted)
-# Note: Only fills indices 1:n, leaves rest of dest unchanged
+# Note: Only fills indices 0:n-1, leaves rest of dest unchanged
 function matches_spec_range!(dest::BitVector, versions::AbstractVector{VersionNumber}, spec::VersionSpec, n::Int)
     @assert length(versions) == n
     @assert length(dest) >= n
 
     # Initialize to false
-    dest[1:n] .= false
+    dest[0:n-1] .= false
 
     isempty(spec.ranges) && return dest
 
@@ -254,13 +256,13 @@ function matches_spec_range!(dest::BitVector, versions::AbstractVector{VersionNu
     # If sorted, this avoids O(n*m) comparisons by scanning linearly
     @inbounds for range in spec.ranges
         # Find first version that could be in range
-        i = 1
-        while i <= n && !(range.lower ≲ versions[i])
+        i = 0
+        while i < n && !(range.lower ≲ versions[i])
             i += 1
         end
 
         # Mark all versions in range
-        while i <= n && versions[i] ≲ range.upper
+        while i < n && versions[i] ≲ range.upper
             dest[i] = true
             i += 1
         end
@@ -280,7 +282,7 @@ Base.isempty(s::VersionSpec) = all(isempty, s.ranges)
 function Base.intersect(A::VersionSpec, B::VersionSpec)
     (isempty(A) || isempty(B)) && return copy(empty_versionspec)
     ranges = Vector{VersionRange}(undef, length(A.ranges) * length(B.ranges))
-    i = 1
+    i = 0
     @inbounds for a in A.ranges, b in B.ranges
         ranges[i] = intersect(a, b)
         i += 1
@@ -303,10 +305,10 @@ Base.hash(s::VersionSpec, h::UInt) = hash(s.ranges, h + (0x2fd2ca6efa023f44 % UI
 
 function Base.print(io::IO, s::VersionSpec)
     isempty(s) && return print(io, _empty_symbol)
-    length(s.ranges) == 1 && return print(io, s.ranges[1])
+    length(s.ranges) == 1 && return print(io, s.ranges[0])
     print(io, '[')
-    for i in 1:length(s.ranges)
-        1 < i && print(io, ", ")
+    for i in 0:lastindex(s.ranges)
+        i > 0 && print(io, ", ")
         print(io, s.ranges[i])
     end
     return print(io, ']')
@@ -315,11 +317,11 @@ end
 function Base.show(io::IO, s::VersionSpec)
     print(io, "VersionSpec(")
     if length(s.ranges) == 1
-        print(io, '"', s.ranges[1], '"')
+        print(io, '"', s.ranges[0], '"')
     else
         print(io, "[")
-        for i in 1:length(s.ranges)
-            1 < i && print(io, ", ")
+        for i in 0:lastindex(s.ranges)
+            i > 0 && print(io, ", ")
             print(io, '"', s.ranges[i], '"')
         end
         print(io, ']')
@@ -371,23 +373,23 @@ function semver_interval(m::RegexMatch)
     v0 = VersionBound((major, minor, patch))
     return if vertyp === :caret
         if major != 0
-            return VersionRange(v0, VersionBound((v0[1],)))
+            return VersionRange(v0, VersionBound((v0[0],)))
         elseif minor != 0
-            return VersionRange(v0, VersionBound((v0[1], v0[2])))
+            return VersionRange(v0, VersionBound((v0[0], v0[1])))
         else
             if n_significant == 1
                 return VersionRange(v0, VersionBound((0,)))
             elseif n_significant == 2
                 return VersionRange(v0, VersionBound((0, 0)))
             else
-                return VersionRange(v0, VersionBound((0, 0, v0[3])))
+                return VersionRange(v0, VersionBound((0, 0, v0[2])))
             end
         end
     else
         if n_significant == 3 || n_significant == 2
-            return VersionRange(v0, VersionBound((v0[1], v0[2])))
+            return VersionRange(v0, VersionBound((v0[0], v0[1])))
         else
-            return VersionRange(v0, VersionBound((v0[1],)))
+            return VersionRange(v0, VersionBound((v0[0],)))
         end
     end
 end
@@ -406,14 +408,14 @@ function inequality_interval(m::RegexMatch)
     v = VersionBound(major, minor, patch)
     if occursin(r"^<\s*$", typ)
         nil = VersionBound(0, 0, 0)
-        if v[3] == 0
-            if v[2] == 0
-                v1 = VersionBound(v[1] - 1)
+        if v[2] == 0
+            if v[1] == 0
+                v1 = VersionBound(v[0] - 1)
             else
-                v1 = VersionBound(v[1], v[2] - 1)
+                v1 = VersionBound(v[0], v[1] - 1)
             end
         else
-            v1 = VersionBound(v[1], v[2], v[3] - 1)
+            v1 = VersionBound(v[0], v[1], v[2] - 1)
         end
         return VersionRange(nil, v1)
     elseif occursin(r"^=\s*$", typ)

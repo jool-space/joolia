@@ -385,14 +385,14 @@ end
 
 exec_from_cache(rr::RemoteChannel, args...; kwargs...) = fetch(rr)(args...; kwargs...)
 function exec_from_cache(f_ref::Tuple{Function, RemoteChannel}, args...; kwargs...)
-    put!(f_ref[2], f_ref[1])        # Cache locally
-    f_ref[1](args...; kwargs...)
+    put!(f_ref[1], f_ref[0])        # Cache locally
+    f_ref[0](args...; kwargs...)
 end
 
 function remotecall_pool(rc_f, f, pool::CachingPool, args...; kwargs...)
     worker = take!(pool)
     f_ref = get(pool.map_obj2ref, (worker, f), (f, RemoteChannel(worker)))
-    isa(f_ref, Tuple) && (pool.map_obj2ref[(worker, f)] = f_ref[2])   # Add to tracker
+    isa(f_ref, Tuple) && (pool.map_obj2ref[(worker, f)] = f_ref[1])   # Add to tracker
 
     try
         rc_f(exec_from_cache, worker, f_ref, args...; kwargs...)
@@ -406,7 +406,7 @@ end
 function remotecall_pool(rc_f::typeof(remotecall), f, pool::CachingPool, args...; kwargs...)
     worker = take!(pool)
     f_ref = get(pool.map_obj2ref, (worker, f), (f, RemoteChannel(worker)))
-    isa(f_ref, Tuple) && (pool.map_obj2ref[(worker, f)] = f_ref[2])   # Add to tracker
+    isa(f_ref, Tuple) && (pool.map_obj2ref[(worker, f)] = f_ref[1])   # Add to tracker
 
     x = try
         rc_f(exec_from_cache, worker, f_ref, args...; kwargs...)

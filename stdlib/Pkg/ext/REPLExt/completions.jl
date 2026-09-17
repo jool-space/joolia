@@ -25,7 +25,7 @@ end
 function complete_local_dir(s, i1, i2)
     expanded_user = false
     oldi2 = i2
-    if !isempty(s) && s[1] == '~'
+    if !isempty(s) && s[0] == '~'
         expanded_user = true
         s = expanduser(s)
         i2 += textwidth(homedir()) - 1
@@ -50,8 +50,8 @@ function complete_expanded_local_dir(s, i1, i2, expanded_user, oldi2)
         end
         return completions, i1:oldi2, true
     end
-    prefix = splitdir(s)[2]
-    startpos = i2 - lastindex(prefix) + 1
+    prefix = splitdir(s)[1]
+    startpos = i2 - lastindex(prefix)
     return completions, startpos:i2, !isempty(completions)
 end
 
@@ -63,7 +63,7 @@ const JULIA_UUID = UUID("1222c4b2-2114-5bfd-aeef-88e4692bbb3e")
 function extract_specified_names(arguments)
     specified_names = Set{String}()
     # Exclude the last argument, which is the one currently being completed
-    for i in 1:(length(arguments) - 1)
+    for i in 0:(length(arguments) - 2)
         arg = arguments[i]
         arg_str = arg isa String ? arg : arg.raw
         # Extract package name (before any @, #, =, or : specifiers)
@@ -333,16 +333,16 @@ function _completions(input, final, offset, index; hint::Bool)
 end
 
 function completions(full, index; hint::Bool = false)::Tuple{Vector{String}, UnitRange{Int}, Bool}
-    pre = full[1:index]
+    pre = full[0:index]
     isempty(pre) && return default_commands(), 0:-1, false # empty input -> complete commands
     offset_adjust = 0
-    if length(pre) >= 2 && pre[1] == '?' && pre[2] != ' '
+    if length(pre) >= 2 && pre[0] == '?' && pre[1] != ' '
         # supports completion on things like `pkg> ?act` with no space
-        pre = string(pre[1], " ", pre[2:end])
+        pre = string(pre[0], " ", pre[1:end])
         offset_adjust = -1
     end
     last = split(pre, ' ', keepempty = true)[end]
-    offset = isempty(last) ? index + 1 + offset_adjust : last.offset + 1 + offset_adjust
+    offset = isempty(last) ? index + 1 + offset_adjust : last.offset + offset_adjust
     final = isempty(last) # is the cursor still attached to the final token?
     return _completions(pre, final, offset, index; hint)
 end

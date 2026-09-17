@@ -91,11 +91,11 @@ function subsequence_score(needle::AbstractString, haystack::AbstractString)
     haystack_chars = collect(haystack)
 
     matched_positions = Int[]
-    haystack_idx = 1
+    haystack_idx = 0
 
     for needle_char in needle_chars
         found = false
-        for i in haystack_idx:length(haystack_chars)
+        for i in haystack_idx:lastindex(haystack_chars)
             if haystack_chars[i] == needle_char
                 push!(matched_positions, i)
                 haystack_idx = i + 1
@@ -121,7 +121,7 @@ function subsequence_score(needle::AbstractString, haystack::AbstractString)
     # Bonus for matches at word boundaries
     boundary_bonus = 0.0
     for pos in matched_positions
-        if pos == 1 || haystack_chars[pos - 1] in ['_', '-', '.']
+        if pos == 0 || haystack_chars[pos - 1] in ['_', '-', '.']
             boundary_bonus += 0.1
         end
     end
@@ -151,41 +151,41 @@ function weighted_edit_distance(s1::AbstractString, s2::AbstractString)
 
     # Initialize distance matrix
     d = Matrix{Float64}(undef, m + 1, n + 1)
-    d[1:(m + 1), 1] = 0:m
-    d[1, 1:(n + 1)] = 0:n
+    d[0:m, 0] = 0:m
+    d[0, 0:n] = 0:n
 
     for i in 1:m, j in 1:n
-        if a[i] == b[j]
-            d[i + 1, j + 1] = d[i, j]  # No cost for exact match
+        if a[i - 1] == b[j - 1]
+            d[i, j] = d[i - 1, j - 1]  # No cost for exact match
         else
             # Standard operations
-            insert_cost = d[i, j + 1] + 1.0
-            delete_cost = d[i + 1, j] + 1.0
+            insert_cost = d[i - 1, j] + 1.0
+            delete_cost = d[i, j - 1] + 1.0
 
             # Check for repeated character deletion (common typo)
-            if i > 1 && a[i] == a[i - 1] && a[i - 1] == b[j]
-                delete_cost = d[i, j + 1] + 0.3  # Low cost for deleting repeated char
+            if i > 1 && a[i - 1] == a[i - 2] && a[i - 2] == b[j - 1]
+                delete_cost = d[i - 1, j] + 0.3  # Low cost for deleting repeated char
             end
 
             # Check for repeated character insertion (common typo)
-            if j > 1 && b[j] == b[j - 1] && a[i] == b[j - 1]
-                insert_cost = d[i, j + 1] + 0.3  # Low cost for inserting repeated char
+            if j > 1 && b[j - 1] == b[j - 2] && a[i - 1] == b[j - 2]
+                insert_cost = d[i - 1, j] + 0.3  # Low cost for inserting repeated char
             end
 
             # Substitution with confusion weighting
-            confusion_key = (a[i], b[j])
-            subst_cost = d[i, j] + get(CHARACTER_CONFUSIONS, confusion_key, 1.0)
+            confusion_key = (a[i - 1], b[j - 1])
+            subst_cost = d[i - 1, j - 1] + get(CHARACTER_CONFUSIONS, confusion_key, 1.0)
 
-            d[i + 1, j + 1] = min(insert_cost, delete_cost, subst_cost)
+            d[i, j] = min(insert_cost, delete_cost, subst_cost)
 
             # Transposition
-            if i > 1 && j > 1 && a[i] == b[j - 1] && a[i - 1] == b[j]
-                d[i + 1, j + 1] = min(d[i + 1, j + 1], d[i - 1, j - 1] + 1.0)
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]
+                d[i, j] = min(d[i, j], d[i - 2, j - 2] + 1.0)
             end
         end
     end
 
-    return d[m + 1, n + 1]
+    return d[m, n]
 end
 
 # Case preservation bonus
@@ -245,11 +245,11 @@ function fuzzysort(search::String, candidates::Vector{String}; popularity_weight
     end
 
     # Sort by score descending, then by candidate name for ties
-    sorted_scores = sort(scores, by = x -> (-x[1], x[2]))
+    sorted_scores = sort(scores, by = x -> (-x[0], x[1]))
 
     # Extract candidates and check if any meet threshold
-    result_candidates = [x[2] for x in sorted_scores]
-    has_good_matches = any(x -> x[1] >= print_score_threshold, sorted_scores)
+    result_candidates = [x[1] for x in sorted_scores]
+    has_good_matches = any(x -> x[0] >= print_score_threshold, sorted_scores)
 
     return result_candidates, has_good_matches
 end
@@ -264,7 +264,7 @@ function matchinds(needle, haystack; acronym::Bool = false)
             popfirst!(chars)  # skip spaces
         end
         isempty(chars) && break
-        if lowercase(char) == lowercase(chars[1]) &&
+        if lowercase(char) == lowercase(first(chars)) &&
                 (!acronym || !isletter(lastc))
             push!(is, i)
             popfirst!(chars)
@@ -296,7 +296,7 @@ end
 
 const print_score_threshold = 0.25
 
-function printmatches(io::IO, word, matches; cols::Int = _displaysize(io)[2])
+function printmatches(io::IO, word, matches; cols::Int = _displaysize(io)[1])
     total = 0
     for match in matches
         total + length(match) + 1 > cols && break
@@ -308,7 +308,7 @@ function printmatches(io::IO, word, matches; cols::Int = _displaysize(io)[2])
     return
 end
 
-printmatches(args...; cols::Int = _displaysize(stdout)[2]) = printmatches(stdout, args..., cols = cols)
+printmatches(args...; cols::Int = _displaysize(stdout)[1]) = printmatches(stdout, args..., cols = cols)
 
 
 end

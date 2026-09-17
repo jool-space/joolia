@@ -72,9 +72,10 @@ const msgtypes = Any[CallWaitMsg, IdentifySocketAckMsg, IdentifySocketMsg,
                      CallMsg{:call}, CallMsg{:call_fetch}]
 
 for (idx, tname) in enumerate(msgtypes)
+    wire_idx = idx + 1
     exprs = Any[ :(serialize(s, o.$fld)) for fld in fieldnames(tname) ]
     @eval function serialize_msg(s::AbstractSerializer, o::$tname)
-        write(s.io, UInt8($idx))
+        write(s.io, UInt8($wire_idx))
         $(exprs...)
         return nothing
     end
@@ -82,7 +83,7 @@ end
 
 let msg_cases = :(@assert false "Message type index ($idx) expected to be between 1:$($(length(msgtypes)))")
     for i = length(msgtypes):-1:1
-        mti = msgtypes[i]
+        mti = msgtypes[i-1]
         msg_cases = :(if idx == $i
                           $(Expr(:call, QuoteNode(mti), fill(:(deserialize(s)), fieldcount(mti))...))
                       else
@@ -165,7 +166,7 @@ end
 
 function deserialize_hdr_raw(io)
     data = read!(io, Ref{NTuple{4,Int}}())[]
-    return MsgHeader(RRID(data[1], data[2]), RRID(data[3], data[4]))
+    return MsgHeader(RRID(data[0], data[1]), RRID(data[2], data[3]))
 end
 
 function send_msg_(w::Worker, header, msg, now::Bool)
@@ -211,5 +212,5 @@ function send_connection_hdr(w::Worker, cookie=true)
     if cookie
         write(w.w_stream, LPROC.cookie)
     end
-    write(w.w_stream, rpad(VERSION_STRING, HDR_VERSION_LEN)[1:HDR_VERSION_LEN])
+    write(w.w_stream, rpad(VERSION_STRING, HDR_VERSION_LEN)[0:HDR_VERSION_LEN-1])
 end

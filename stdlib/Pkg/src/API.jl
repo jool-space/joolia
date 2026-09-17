@@ -516,7 +516,7 @@ function pin(ctx::Context, pkgs::Vector{PackageSpec}; all_pkgs::Bool = false, wo
         end
         version = pkg.version
         if version isa VersionSpec
-            if version.ranges[1].lower != version.ranges[1].upper # TODO test this
+            if first(version.ranges).lower != first(version.ranges).upper # TODO test this
                 pkgerror("pinning a package requires a single version, not a versionrange")
             end
         end

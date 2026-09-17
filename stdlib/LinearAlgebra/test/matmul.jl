@@ -14,6 +14,72 @@ isdefined(Main, :LinearAlgebraTestHelpers) || Base.include(Main, TESTHELPERS)
 
 using Main.LinearAlgebraTestHelpers.SizedArrays
 
+# Dense products agree with scalar sums for zero-origin dimensions and coordinates.
+@testset "zero-origin dense products" begin
+    function reference_product(A, B)
+        T = promote_type(eltype(A), eltype(B))
+        C = zeros(T, size(A, 0), size(B, 1))
+        for j in axes(C, 1), i in axes(C, 0), k in axes(A, 1)
+            C[i,j] += A[i,k] * B[k,j]
+        end
+        C
+    end
+    function check_product(A, B)
+        expected = reference_product(A, B)
+        actual = A * B
+        @test size(actual) == size(expected)
+        @test all(isapprox(actual[i], expected[i]) for i in eachindex(expected))
+        C = fill(one(eltype(actual)), size(expected))
+        @test mul!(C, A, B, 2, 3) === C
+        @test all(isapprox(C[i], 2*expected[i]+3) for i in eachindex(expected))
+        fill!(C, zero(eltype(C)))
+        @test mul!(C, A, B) === C
+        @test all(isapprox(C[i], expected[i]) for i in eachindex(expected))
+    end
+    for T in (Float32, Float64, ComplexF32, ComplexF64, Int), (m,k,n) in
+            ((3,4,5), (2,2,2), (3,3,3), (1,1,1), (0,4,5), (3,0,5), (3,4,0))
+        A = reshape(T[mod(i,7)-3 for i in 0:m*k-1], m,k)
+        B = reshape(T[mod(i,5)-2 for i in 0:k*n-1], k,n)
+        if T <: Complex
+            A .+= T(im)
+            B .-= T(im)
+        end
+        check_product(A, B)
+    end
+    for T in (Float64, ComplexF64, Int)
+        A = reshape(T.(0:23), 6,4)
+        B = reshape(T.(0:19), 4,5)
+        check_product(view(A, 0:2:4, :), B)
+        check_product(transpose(A), reshape(T.(0:17),6,3))
+        check_product(adjoint(A), reshape(T.(0:17),6,3))
+        x = T.(0:3)
+        expected = [sum(A[i,k]*x[k] for k in 0:3) for i in 0:5]
+        actual = A*x
+        @test size(actual) == (6,)
+        @test all(isapprox(actual[i],expected[i]) for i in eachindex(expected))
+    end
+    for T in (Float64, ComplexF64, Int), (m,n) in ((2,3), (5,4))
+        A = reshape(T.(0:m*n-1), m,n)
+        T <: Complex && (A .+= T(im))
+        check_product(A, transpose(A))
+        check_product(A, adjoint(A))
+        check_product(transpose(A), A)
+        check_product(adjoint(A), A)
+    end
+    A = reshape(Float64.(0:11),3,4)
+    B = reshape(ComplexF64.(0:19),4,5) .+ im
+    check_product(A,B)
+    check_product(complex.(A) .+ im, real.(B))
+    for (M,x) in ((A, ComplexF64.(0:3) .+ im), (complex.(A) .+ im, Float64.(0:3)))
+        y = M*x
+        @test all(isapprox(y[i],sum(M[i,k]*x[k] for k in 0:3)) for i in 0:2)
+    end
+    @test size(rand(3,4)*rand(4,5)) == (3,5)
+    @test_throws DimensionMismatch ones(3,4)*ones(3,5)
+    @test_throws DimensionMismatch mul!(zeros(4,5), ones(3,4), ones(4,5))
+    @test_throws DimensionMismatch ones(3,4)*ones(3)
+end
+
 ## Test Julia fallbacks to BLAS routines
 
 mul_wrappers = [

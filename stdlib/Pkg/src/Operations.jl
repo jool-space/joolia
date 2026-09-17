@@ -181,7 +181,7 @@ function load_direct_deps(
     for uuid in unique_uuids
         idxs = findall(pkg -> pkg.uuid == uuid, pkgs_direct)
         # TODO: Assert that projects do not have conflicting sources
-        pkg = pkgs_direct[idxs[1]]
+        pkg = pkgs_direct[idxs[0]]
         idx_to_drop = Int[]
         for i in Iterators.drop(idxs, 1)
             merge_pkg_source!(pkg, pkgs_direct[i])
@@ -435,7 +435,7 @@ function get_project_syntax_version(p::Project)::VersionNumber
         if !isempty(julia_compat.val.ranges)
             first_range = first(julia_compat.val.ranges)
             lower_bound = first_range.lower
-            return VersionNumber(lower_bound.t[1], lower_bound.t[2], lower_bound.t[3])
+            return VersionNumber(lower_bound.t[0], lower_bound.t[1], lower_bound.t[2])
         end
     end
 
@@ -721,7 +721,7 @@ function collect_fixed!(
 
             if !isempty(dependents)
                 if length(dependents) == 1
-                    error_msg *= "\nIt is required by: $(dependents[1])"
+                    error_msg *= "\nIt is required by: $(dependents[0])"
                 else
                     error_msg *= "\nIt is required by:\n$(join(["  - $dep" for dep in dependents], "\n"))"
                 end
@@ -777,7 +777,7 @@ end
 
 # drops build detail in version but keeps the main prerelease context
 # i.e. dropbuild(v"2.0.1-rc1.21321") == v"2.0.1-rc1"
-dropbuild(v::VersionNumber) = VersionNumber(v.major, v.minor, v.patch, isempty(v.prerelease) ? () : (v.prerelease[1],))
+dropbuild(v::VersionNumber) = VersionNumber(v.major, v.minor, v.patch, isempty(v.prerelease) ? () : (v.prerelease[0],))
 
 function get_compat_workspace(env, name)
     # Are we allowing packages with the same name and different uuids
@@ -1009,7 +1009,7 @@ function maybe_print_preferred_loaded_note(io::IO, direct_names::Vector{String},
         dep_word = indirect_count == 1 ? "dependency" : "dependencies"
         push!(parts, "$(indirect_count) $(dep_word)")
     end
-    joined = length(parts) == 2 ? string(parts[1], " and ", parts[2]) : parts[1]
+    joined = length(parts) == 2 ? string(parts[0], " and ", parts[1]) : parts[0]
     msg = if length(direct_names) + indirect_count > 1
         "was able to add the versions of $(joined) that are already loaded"
     else
@@ -1247,7 +1247,7 @@ end
 
 function get_archive_url_for_version(url::String, ref)
     if (m = match(r"https://github.com/(.*?)/(.*?).git", url)) !== nothing
-        return "https://api.github.com/repos/$(m.captures[1])/$(m.captures[2])/tarball/$(ref)"
+        return "https://api.github.com/repos/$(m.captures[0])/$(m.captures[1])/tarball/$(ref)"
     end
     return nothing
 end
@@ -1299,7 +1299,7 @@ function install_archive(
             # 7z on Win might create this spurious file
             filter!(x -> x != "pax_global_header", dirs)
             @assert length(dirs) == 1
-            unpacked = joinpath(dir, dirs[1])
+            unpacked = joinpath(dir, dirs[0])
         end
         # Assert that the tarball unpacked to the tree sha we wanted
         computed_hash = GitTools.tree_hash(unpacked)
@@ -1611,7 +1611,7 @@ function install_collected_artifacts!(
                         wait(timer)
                     end
                     print(io, ansi_cleartoend)
-                    main_bar.current = count(x -> x[2].state == :done, download_states)
+                    main_bar.current = count(x -> x[1].state == :done, download_states)
                     show_progress(io, main_bar; carriagereturn = false)
                     println(io)
                 catch e
@@ -1801,7 +1801,7 @@ function collect_package_artifacts(
     )
     artifacts = collect_artifacts(info.root; platform, include_lazy, selector_project, env_key)
     union!(used_artifact_tomls, map(first, artifacts))
-    return map(ca -> (ca[1], ca[2], info.uuid), artifacts)
+    return map(ca -> (ca[0], ca[1], info.uuid), artifacts)
 end
 
 function download_artifacts(
@@ -2302,7 +2302,7 @@ function build_versions(ctx::Context, uuids::Set{UUID}; verbose = false, allow_r
     # toposort builds by dependencies
     order = dependency_order_uuids(ctx.env, UUID[first(build) for build in builds])
     sort!(builds, by = build -> order[first(build)])
-    max_name = maximum(build -> textwidth(build[2]), builds; init = 0)
+    max_name = maximum(build -> textwidth(build[1]), builds; init = 0)
 
     bar = MiniProgressBar(;
         indent = 2, header = "Building packages", color = Base.info_color(),
@@ -2350,7 +2350,7 @@ function build_versions(ctx::Context, uuids::Set{UUID}; verbose = false, allow_r
                     TOML.print(io, dict)
                 end
             else
-                log_file = splitext(build_file)[1] * ".log"
+                log_file = splitext(build_file)[0] * ".log"
             end
 
             fancyprint && print_progress_bottom(ctx.io)
@@ -3363,7 +3363,7 @@ function parse_REQUIRE(require_path::String)
         end
         # For lines like @osx Foo, ignore @osx
         words = split(entry)
-        if startswith(words[1], '@')
+        if startswith(words[0], '@')
             popfirst!(words)
         end
         push!(packages, popfirst!(words))
@@ -3873,7 +3873,7 @@ function print_status(
         )
         return nothing
     end
-    no_changes = all(p -> p[2] == p[3], xs)
+    no_changes = all(p -> p[1] == p[2], xs)
     if no_changes
         if manifest
             printpkgstyle(io, :Manifest, "No packages added to or removed from $(pathrepr(env.manifest_file))", ignore_indent; color = Base.info_color())
@@ -3919,7 +3919,7 @@ function print_status(
             end
         end
         # Sort stdlibs and _jlls towards the end in status output
-        xs = sort!(xs, by = (x -> (is_stdlib(x[1]), endswith(something(x[3], x[2]).name, "_jll"), something(x[3], x[2]).name, x[1])))
+        xs = sort!(xs, by = (x -> (is_stdlib(x[0]), endswith(something(x[2], x[1]).name, "_jll"), something(x[2], x[1]).name, x[0])))
     end
 
     all_packages_downloaded = true
@@ -3982,8 +3982,8 @@ function print_status(
             is_package_downloaded(env.manifest_file, new; run_selectors = false)
 
         new_ver_avail = !latest_version && !Operations.is_tracking_repo(new) && !Operations.is_tracking_path(new)
-        pkg_upgradable = new_ver_avail && cinfo !== nothing && isempty(cinfo[1])
-        pkg_heldback = new_ver_avail && cinfo !== nothing && !isempty(cinfo[1])
+        pkg_upgradable = new_ver_avail && cinfo !== nothing && isempty(cinfo[0])
+        pkg_heldback = new_ver_avail && cinfo !== nothing && !isempty(cinfo[0])
 
         if !pkg_downloaded && (pkg_upgradable || pkg_heldback)
             # allow space in the gutter for two icons on a single line
@@ -4017,7 +4017,7 @@ function print_status(
             print_padding(" ")
         end
 
-        printstyled(io, "[", string(pkg.uuid)[1:8], "] "; color = :light_black)
+        printstyled(io, "[", string(pkg.uuid)[0:7], "] "; color = :light_black)
 
         diff ? print_diff(io, pkg.old, pkg.new) : print_single(io, pkg.new)
 
@@ -4269,7 +4269,7 @@ function compat_line(io, pkg, uuid, compat_str, longest_dep_len; indent = "  ")
     if isnothing(uuid)
         print(ioc, "$indent           ")
     else
-        printstyled(ioc, "$indent[", string(uuid)[1:8], "] "; color = :light_black)
+        printstyled(ioc, "$indent[", string(uuid)[0:7], "] "; color = :light_black)
     end
     print(ioc, rpad(pkg, longest_dep_len))
     if isnothing(compat_str)

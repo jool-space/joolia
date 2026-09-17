@@ -546,7 +546,7 @@ end
 function RegistryInstance(path::AbstractString)
     compressed_file = nothing
     if isfile(path)
-        @assert splitext(path)[2] == ".toml"
+        @assert splitext(path)[1] == ".toml"
         d_reg_info = parsefile(nothing, dirname(path), basename(path))
         compressed_file = d_reg_info["path"]::String
         tree_info = Base.SHA1(d_reg_info["git-tree-sha1"]::String)
@@ -638,7 +638,7 @@ function reachable_registries(; depots::Union{String, Vector{String}} = Base.DEP
             compressed_registries = filter(endswith(".toml"), reg_paths)
             # if we are reading compressed registries, ignore compressed registries
             # with the same name
-            compressed_registry_names = Set([splitext(basename(file))[1] for file in compressed_registries])
+            compressed_registry_names = Set([splitext(basename(file))[0] for file in compressed_registries])
             filter!(x -> !(basename(x) in compressed_registry_names), candidate_registries)
             for compressed_registry in compressed_registries
                 if verify_compressed_registry_toml(compressed_registry)

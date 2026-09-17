@@ -1,31 +1,31 @@
 @inline function keccak_theta(state::NTuple{25,UInt64})
     C = ntuple(i -> state[i] ⊻ state[i + 5] ⊻ state[i + 10] ⊻ state[i + 15] ⊻ state[i + 20], Val(5))
-    D = ntuple(i -> C[rem(i + 3, 5) + 1] ⊻ L64(1, C[rem(i, 5) + 1]), Val(5))
-    return ntuple(k -> state[k] ⊻ D[rem(k - 1, 5) + 1], Val(25))
+    D = ntuple(i -> C[rem(i + 4, 5)] ⊻ L64(1, C[rem(i + 1, 5)]), Val(5))
+    return ntuple(k -> state[k] ⊻ D[rem(k, 5)], Val(25))
 end
 
 @inline keccak_rho(state::NTuple{25,UInt64}) =
     ntuple(k -> bitrotate(state[k], SHA3_ROTC[k]), Val(25))
 
 @inline keccak_pi(state::NTuple{25,UInt64}) =
-    ntuple(k -> state[SHA3_PILN[k]], Val(25))
+    ntuple(k -> state[SHA3_PILN[k]-1], Val(25))
 
 @inline function keccak_chi(state::NTuple{25,UInt64})
     return ntuple(
-        k -> let j = k - rem(k - 1, 5)
-            state[k] ⊻ (~state[rem(k, 5) + j] & state[rem(k + 1, 5) + j])
+        k -> let j = k - rem(k, 5)
+            state[k] ⊻ (~state[rem(k + 1, 5) + j] & state[rem(k + 2, 5) + j])
         end,
         Val(25)
     )
 end
 
 @inline keccak_iota(round, state::NTuple{25,UInt64}) =
-    (state[1] ⊻ SHA3_ROUND_CONSTS[round+1], state[2:end]...)
+    (state[0] ⊻ SHA3_ROUND_CONSTS[round], state[1:end]...)
 
 function transform!(context::T) where {T<:SHA3_CTX}
     # First, update state with buffer
     pbuf = Ptr{eltype(context.state)}(pointer(context.buffer))
-    for idx in 1:div(blocklen(T),8)
+    for idx in 0:Int(div(blocklen(T),8))-1
         context.state[idx] = context.state[idx] ⊻ unsafe_load(pbuf, idx)
     end
 
@@ -40,7 +40,7 @@ function transform!(context::T) where {T<:SHA3_CTX}
         state = keccak_iota(round, state)
     end
 
-    for k in 1:25
+    for k in 0:24
         context.state[k] = state[k]
     end
 
@@ -56,9 +56,9 @@ function digest!(context::T) where {T<:SHA3_CTX}
         # If we have anything in the buffer still, pad and transform that data
         if usedspace < blocklen(T) - 1
             # Begin padding with a 0x06
-            context.buffer[usedspace+1] = 0x06
+            context.buffer[usedspace] = 0x06
             # Fill with zeros up until the last byte
-            context.buffer[usedspace+2:end-1] .= 0x00
+            context.buffer[usedspace+1:end-1] .= 0x00
             # Finish it off with a 0x80
             context.buffer[end] = 0x80
         else
@@ -73,5 +73,5 @@ function digest!(context::T) where {T<:SHA3_CTX}
     end
 
     # Return the digest
-    return reinterpret(UInt8, context.state)[1:digestlen(T)]
+    return reinterpret(UInt8, context.state)[0:digestlen(T)-1]
 end

@@ -98,7 +98,7 @@ is_windows_drive_colon(str::String) = occursin(r"^[a-zA-Z]:", str)
 function is_windows_drive_colon(input::String, colon_pos::Int)
     # Windows drive letters are single letters followed by colon at beginning
     # Examples: "C:", "D:", etc.
-    if colon_pos == 2 && length(input) >= 2
+    if colon_pos == 1 && length(input) >= 2
         return is_windows_drive_colon(input)
     end
     return false
@@ -117,7 +117,7 @@ function extract_subdir(input::String)
     end
 
     subdir_part = input[nextind(input, colon_pos):end]
-    remaining = input[1:prevind(input, colon_pos)]
+    remaining = input[0:prevind(input, colon_pos)]
     return remaining, subdir_part
 end
 
@@ -129,7 +129,7 @@ function extract_revision(input::String)
     end
 
     rev_part = input[nextind(input, hash_pos):end]
-    remaining = input[1:prevind(input, hash_pos)]
+    remaining = input[0:prevind(input, hash_pos)]
     return remaining, rev_part
 end
 
@@ -141,17 +141,17 @@ function extract_version(input::String)
     end
 
     version_part = input[nextind(input, at_pos):end]
-    remaining = input[1:prevind(input, at_pos)]
+    remaining = input[0:prevind(input, at_pos)]
     return remaining, version_part
 end
 
 function preprocess_github_url(input::String)
     # Handle GitHub tree/commit URLs
     if (m = match(r"https://github.com/(.*?)/(.*?)/(?:tree|commit)/(.*?)$", input)) !== nothing
-        return [PackageIdentifier("https://github.com/$(m.captures[1])/$(m.captures[2])"), Rev(m.captures[3])]
+        return [PackageIdentifier("https://github.com/$(m.captures[0])/$(m.captures[1])"), Rev(m.captures[2])]
         # Handle GitHub pull request URLs
     elseif (m = match(r"https://github.com/(.*?)/(.*?)/pull/(\d+)$", input)) !== nothing
-        return [PackageIdentifier("https://github.com/$(m.captures[1])/$(m.captures[2])"), Rev("pull/$(m.captures[3])/head")]
+        return [PackageIdentifier("https://github.com/$(m.captures[0])/$(m.captures[1])"), Rev("pull/$(m.captures[2])/head")]
     else
         return nothing
     end
@@ -184,7 +184,7 @@ function is_url_structure_colon(input::String, colon_pos::Int)
     if contains(after_colon, '@')
         at_in_after = findfirst('@', after_colon)
         if at_in_after !== nothing
-            text_before_at = after_colon[1:prevind(after_colon, at_in_after)]
+            text_before_at = after_colon[0:prevind(after_colon, at_in_after)]
             if !contains(text_before_at, '/')
                 return true
             end
@@ -212,7 +212,7 @@ function extract_url_subdir(input::String)
     end
 
     after_colon = input[nextind(input, colon_pos):end]
-    before_colon = input[1:prevind(input, colon_pos)]
+    before_colon = input[0:prevind(input, colon_pos)]
 
     # Only treat as subdir if it looks like one and the part before looks like a URL
     if (contains(after_colon, '/') || (!contains(after_colon, '@') && !contains(after_colon, '#'))) &&
@@ -230,7 +230,7 @@ function extract_url_revision(input::String)
         return input, nothing
     end
 
-    before_hash = input[1:prevind(input, hash_pos)]
+    before_hash = input[0:prevind(input, hash_pos)]
     after_hash = input[nextind(input, hash_pos):end]
 
     if looks_like_complete_url(before_hash)
@@ -326,7 +326,7 @@ function parse_package_spec_new(input::String)
     # Handle quoted strings
     if (startswith(input, '"') && endswith(input, '"')) ||
             (startswith(input, '\'') && endswith(input, '\''))
-        input = input[2:(end - 1)]
+        input = input[1:(end - 1)]
     end
 
     # Handle GitHub tree/commit URLs first (special case)
@@ -339,8 +339,8 @@ function parse_package_spec_new(input::String)
     if contains(input, '=')
         parts = split(input, '=', limit = 2)
         if length(parts) == 2
-            name = String(strip(parts[1]))
-            uuid_str = String(strip(parts[2]))
+            name = String(strip(parts[0]))
+            uuid_str = String(strip(parts[1]))
             if is_valid_uuid(uuid_str)
                 return [PackageIdentifier("$name=$uuid_str")]
             end
@@ -360,20 +360,18 @@ end
 function parse_package(args::Vector{QString}, options; add_or_dev = false)::Vector{PackageSpec}
     tokens = PackageToken[]
 
-    i = 1
-    while i <= length(args)
-        arg = args[i]
+    for arg in args
         input = arg.isquoted ? arg.raw : arg.raw
 
         # Check if this argument is a standalone modifier (like #dev, @v1.0, :subdir)
         if !arg.isquoted && (startswith(input, '#') || startswith(input, '@') || startswith(input, ':'))
             # This is a standalone modifier - it should be treated as a token
             if startswith(input, '#')
-                push!(tokens, Rev(input[2:end]))
+                push!(tokens, Rev(input[1:end]))
             elseif startswith(input, '@')
-                push!(tokens, VersionToken(input[2:end]))
+                push!(tokens, VersionToken(input[1:end]))
             elseif startswith(input, ':')
-                push!(tokens, Subdir(input[2:end]))
+                push!(tokens, Subdir(input[1:end]))
             end
         else
             # Parse this argument normally
@@ -386,7 +384,6 @@ function parse_package(args::Vector{QString}, options; add_or_dev = false)::Vect
             append!(tokens, arg_tokens)
         end
 
-        i += 1
     end
 
     return parse_package_args(tokens; add_or_dev = add_or_dev)
@@ -396,7 +393,7 @@ end
 function parse_package_args(args::Vector{PackageToken}; add_or_dev = false)::Vector{PackageSpec}
     # check for and apply PackageSpec modifier (e.g. `#foo` or `@v1.0.2`)
     function apply_modifier!(pkg::PackageSpec, args::Vector{PackageToken})
-        (isempty(args) || args[1] isa PackageIdentifier) && return
+        (isempty(args) || first(args) isa PackageIdentifier) && return
         parsed_subdir = false
         parsed_version = false
         parsed_rev = false
@@ -411,7 +408,7 @@ function parse_package_args(args::Vector{PackageToken}; add_or_dev = false)::Vec
                 end
                 pkg.subdir = modifier.dir
                 parsed_subdir = true
-                (isempty(args) || args[1] isa PackageIdentifier) && return
+                (isempty(args) || first(args) isa PackageIdentifier) && return
             elseif modifier isa VersionToken
                 if parsed_version
                     pkgerror("Multiple version specifiers `$args` found.")
@@ -474,10 +471,10 @@ function parse_package_identifier(pkg_id::PackageIdentifier; add_or_develop = fa
         return PackageSpec(; uuid = UUID(word))
     elseif occursin(name_re, word)
         m = match(name_re, word)
-        return PackageSpec(String(something(m.captures[1])))
+        return PackageSpec(String(something(m.captures[0])))
     elseif occursin(name_uuid_re, word)
         m = match(name_uuid_re, word)
-        return PackageSpec(String(something(m.captures[1])), UUID(something(m.captures[2])))
+        return PackageSpec(String(something(m.captures[0])), UUID(something(m.captures[1])))
     else
         pkgerror("Unable to parse `$word` as a package.")
     end
@@ -507,11 +504,11 @@ function parse_registry(word::AbstractString; add = false)::RegistrySpec
         registry.uuid = UUID(word)
     elseif occursin(name_re, word)
         m = match(name_re, word)
-        registry.name = String(something(m.captures[1]))
+        registry.name = String(something(m.captures[0]))
     elseif occursin(name_uuid_re, word)
         m = match(name_uuid_re, word)
-        registry.name = String(something(m.captures[1]))
-        registry.uuid = UUID(something(m.captures[2]))
+        registry.name = String(something(m.captures[0]))
+        registry.uuid = UUID(something(m.captures[1]))
     elseif add
         # Guess it is a url then
         registry.url = String(word)
@@ -545,7 +542,7 @@ function parse_activate(args::Vector{QString}, options)
             return []
         elseif first(x) == '@'
             options[:shared] = true
-            return [x[2:end]]
+            return [x[1:end]]
         else
             return [expanduser(x)]
         end

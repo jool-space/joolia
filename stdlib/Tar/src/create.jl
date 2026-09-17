@@ -178,7 +178,7 @@ function write_header(
                 i = findprev('/', path, 100)
                 if i !== nothing
                     # try splitting into prefix and name
-                    prefix = path[1:prevind(path, i)]
+                    prefix = path[0:prevind(path, i)]
                     name   = path[nextind(path, i):end]
                 end
             end
@@ -230,11 +230,11 @@ function write_extended_header(
     w += write_data(tar, seekstart(d), size=hdr.size, buf=buf)
 end
 
-# write the bytes of `s` into `buf` at 1-based offset `off`
+# write the bytes of `s` into `buf` at zero-based offset `off`
 put_data!(buf::Vector{UInt8}, off::Int, s::String) =
-    copyto!(buf, off, codeunits(s), 1, ncodeunits(s))
+    isempty(s) || copyto!(buf, off, codeunits(s), 0, ncodeunits(s))
 
-# write `n` as `pad` zero-padded octal digits at 1-based offset `off` (must fit)
+# write `n` as `pad` zero-padded octal digits at zero-based offset `off` (must fit)
 function put_octal!(buf::Vector{UInt8}, off::Int, n::Integer, pad::Int)
     for i in 0:pad-1
         buf[off + pad - 1 - i] = UInt8('0') + ((n >> 3i) % UInt8 & 0x07)
@@ -265,43 +265,43 @@ function write_standard_header(
     isascii(type) ||
         throw(ArgumentError("non-ASCII type flag value: $(repr(type))"))
 
-    # construct header block in buf; offsets are 1-based (see HEADER_FIELDS)
-    fill!(view(buf, 1:512), 0x00)
-    put_data!(buf, 1, name)             # name
-    put_octal!(buf, 101, hdr.mode, 6)   # mode (UInt16 always fits in 6 digits)
-    buf[107] = UInt8(' ')
-    put_data!(buf, 109, "000000 ")      # uid
-    put_data!(buf, 117, "000000 ")      # gid
+    # construct header block in buf; offsets are zero-based (see HEADER_FIELDS)
+    fill!(view(buf, 0:511), 0x00)
+    put_data!(buf, 0, name)             # name
+    put_octal!(buf, 100, hdr.mode, 6)   # mode (UInt16 always fits in 6 digits)
+    buf[106] = UInt8(' ')
+    put_data!(buf, 108, "000000 ")      # uid
+    put_data!(buf, 116, "000000 ")      # gid
     if hdr.size < 8589934592            # 8^11: 11 octal digits and a space
-        put_octal!(buf, 125, hdr.size, 11)
-        buf[136] = UInt8(' ')
+        put_octal!(buf, 124, hdr.size, 11)
+        buf[135] = UInt8(' ')
     elseif hdr.size < 68719476736       # 8^12: 12 octal digits, no space
-        put_octal!(buf, 125, hdr.size, 12)
+        put_octal!(buf, 124, hdr.size, 12)
     else
         # emulate GNU tar: write binary size with leading bit set
         # can encode up to 2^95; Int64 size field only up to 2^63-1
-        buf[125] = 0x80 | ((hdr.size >> (8*11)) % UInt8)
+        buf[124] = 0x80 | ((hdr.size >> (8*11)) % UInt8)
         for i = 10:-1:0
-            buf[136 - i] = (hdr.size >> 8i) % UInt8
+            buf[135 - i] = (hdr.size >> 8i) % UInt8
         end
     end
-    put_data!(buf, 137, "00000000000 ") # mtime
+    put_data!(buf, 136, "00000000000 ") # mtime
     # chksum @ 149-156: computed once the rest is written
-    buf[157] = UInt8(type)              # typeflag
-    put_data!(buf, 158, link)           # linkname
-    put_data!(buf, 258, "ustar")        # magic (NUL-terminated by fill!)
-    put_data!(buf, 264, "00")           # version
+    buf[156] = UInt8(type)              # typeflag
+    put_data!(buf, 157, link)           # linkname
+    put_data!(buf, 257, "ustar")        # magic (NUL-terminated by fill!)
+    put_data!(buf, 263, "00")           # version
     # uname & gname: NULs from fill!
-    put_data!(buf, 330, "000000 ")      # devmajor
-    put_data!(buf, 338, "000000 ")      # devminor
-    put_data!(buf, 346, prefix)         # prefix
+    put_data!(buf, 329, "000000 ")      # devmajor
+    put_data!(buf, 337, "000000 ")      # devminor
+    put_data!(buf, 345, prefix)         # prefix
 
     # header block checksum: computed as if chksum field were spaces
-    b = view(buf, 1:512)
+    b = view(buf, 0:511)
     chksum = sum(b) + UInt32(' ') * 8
-    put_octal!(buf, 149, chksum, 6)     # ≤ 512×0xff, always fits in 6 digits
-    buf[155] = 0x00
-    buf[156] = UInt8(' ')
+    put_octal!(buf, 148, chksum, 6)     # ≤ 512×0xff, always fits in 6 digits
+    buf[154] = 0x00
+    buf[155] = UInt8(' ')
 
     # write header block
     w = write(tar, b)
@@ -322,13 +322,13 @@ function write_data(
         b = Int(min(size, length(buf)))::Int
         n = Int(readbytes!(data, buf, b))::Int
         n < b && eof(data) && throw(EOFError())
-        w += write(tar, view(buf, 1:n))
+        w += write(tar, view(buf, 0:n-1))
         size -= n
         t -= n
     end
     @assert size == 0
     @assert 0 ≤ t < 512
-    t > 0 && (w += write(tar, fill!(view(buf, 1:t), 0)))
+    t > 0 && (w += write(tar, fill!(view(buf, 0:t-1), 0)))
     return w
 end
 

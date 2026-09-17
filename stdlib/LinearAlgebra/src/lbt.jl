@@ -127,7 +127,7 @@ struct LBTConfig
 
         # Load all exported symbol names
         exported_symbols = String[]
-        for sym_idx in 1:config.num_exported_symbols
+        for sym_idx in 0:Int(config.num_exported_symbols)-1
             str_ptr = unsafe_load(config.exported_symbols, sym_idx)
             if str_ptr != C_NULL
                 push!(exported_symbols, unsafe_string(str_ptr))
@@ -138,7 +138,7 @@ struct LBTConfig
 
         # Unpack library info structures
         libs = LBTLibraryInfo[]
-        idx = 1
+        idx = 0
         lib_ptr = unsafe_load(config.loaded_libs, idx)
         while lib_ptr != C_NULL
             push!(libs, LBTLibraryInfo(unsafe_load(lib_ptr), config.num_exported_symbols))
@@ -179,7 +179,7 @@ function Base.show(io::IO, mime::MIME{Symbol("text/plain")}, lbt::LBTConfig)
     summary(io, lbt); println(io)
     println(io, "Libraries: ")
     for (i,l) in enumerate(lbt.loaded_libs)
-        char = i == length(lbt.loaded_libs) ? "└" : "├"
+        char = i == lastindex(lbt.loaded_libs) ? "└" : "├"
         interface_str = if l.interface === :ilp64
             "ILP64"
         elseif l.interface === :lp64
@@ -188,7 +188,7 @@ function Base.show(io::IO, mime::MIME{Symbol("text/plain")}, lbt::LBTConfig)
             "UNKWN"
         end
         print(io, char, " [", interface_str,"] ", basename(l.libname))
-        i !== length(lbt.loaded_libs) && println(io)
+        i !== lastindex(lbt.loaded_libs) && println(io)
     end
 end
 
@@ -253,13 +253,11 @@ function lbt_find_backing_library(symbol_name, interface::Symbol;
     if symbol_idx === nothing
         throw(ArgumentError(lazy"Invalid exported symbol name '$(symbol_name)'"))
     end
-    # Convert to zero-indexed
-    symbol_idx -= 1
 
     forward_byte_offset = div(symbol_idx, 8)
     forward_byte_mask = 1 << mod(symbol_idx, 8)
     for lib in filter(l -> l.interface == interface, config.loaded_libs)
-        if lib.active_forwards[forward_byte_offset+1] & forward_byte_mask != 0x00
+        if lib.active_forwards[forward_byte_offset] & forward_byte_mask != 0x00
             return lib
         end
     end
@@ -278,9 +276,9 @@ forwarded to that library, as a vector of `String`s.
 function lbt_forwarded_funcs(config::LBTConfig, lib::LBTLibraryInfo)
     forwarded_funcs = String[]
     for (symbol_idx, symbol) in enumerate(config.exported_symbols)
-        forward_byte_offset = div(symbol_idx - 1, 8)
-        forward_byte_mask = 1 << mod(symbol_idx - 1, 8)
-        if lib.active_forwards[forward_byte_offset+1] & forward_byte_mask != 0x00
+        forward_byte_offset = div(symbol_idx, 8)
+        forward_byte_mask = 1 << mod(symbol_idx, 8)
+        if lib.active_forwards[forward_byte_offset] & forward_byte_mask != 0x00
             push!(forwarded_funcs, symbol)
         end
     end
