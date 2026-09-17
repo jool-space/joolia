@@ -296,3 +296,13 @@ No source, patches or tests were changed by this audit. The report is an
 identification/triage result, not a new passing-suite claim. All three Luna
 agents completed their bounded tasks. The main agent reproduced the primary
 findings, corrected the diagm attribution, and checked the Pkg upstream origin.
+
+## Subsequent integration finding: integer byte hashing
+
+The subtree/upstream integration's full hashing run passed 8,520 assertions
+before failing `hash(1//6) == hash(big(1)//big(6))` (`test/hashing.jl:69`).
+`base/hashing.jl`'s `IntegerCodeUnits` accessors still use `i - 1` / `idx - 1`,
+although their AbstractVector axes are zero-origin. The same expressions are
+present in the pre-integration checkpoint. `collect(codeunits(3))` gives
+`UInt8[0x00]`; `GMP.UnsafeLimbView(big(3), 0, 1)` gives `UInt8[0x03]`.
+Confirmed with `--compile=min`; not fixed by this integration.

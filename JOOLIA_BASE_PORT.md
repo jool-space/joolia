@@ -10,7 +10,32 @@ superseded by [stdlib/VENDORED.md](stdlib/VENDORED.md).
 The upstream merge includes all 26 commits through `272aa7e2a0`. New compiler
 global-binding transformations retain internal one-origin SSA identifiers but
 use zero-origin accesses for Julia storage. Incoming loader offsets and test
-fixtures were adapted as part of the merge. Verification results follow below.
+fixtures were adapted as part of the merge.
+
+Verification: full build and 108 bundled precompile configurations passed;
+4,253 focused assertions passed in both normal compilation and `--compile=min`
+(the 12 retired patch-helper assertions were removed from the former 4,265).
+The new compiler global-binding tests passed 70 assertions, incoming loader
+and sorting checks passed 19, the full binaryplatforms suite passed 1,845,
+and the full rebinding suite passed 159. Pkg completion-region checks passed
+56 assertions, and an actual styled PTY rendered the `stat` → `status` hint,
+completed with Tab, executed status, and exited cleanly.
+
+Static analysis passed for the nine affected runtime/codegen C/C++ sources.
+The dynamic-index LLVM regression passed. LMDB compiled from source with
+`CFLAGS=-O2`, retaining `-fPIC`; unrelated Fortran dependencies used their
+binary packages because no Fortran compiler is installed.
+
+All 16 vendored libraries installed and cleaned in an isolated build prefix
+without downloads or source changes. A standard no-op subtree pull recognized
+Pkg's imported baseline, and a normal Git archive included all 16 sources.
+
+Broader hashing testing stopped after 8,520 passes at rational/BigInt hash
+equality. The unchanged `IntegerCodeUnits` accessors still subtract one from
+zero-origin positions: `collect(codeunits(3)) == UInt8[0]`, unlike the BigInt
+limb view's `UInt8[3]`. This remains a porting issue. Required Revise testing
+was attempted and remains blocked by JuliaInterpreter/LoweredCodeUtils.
+Logs: `/tmp/joolia-subtree-migration/`.
 
 
 This is a staged port, not a declaration that every Base method is zero-based.

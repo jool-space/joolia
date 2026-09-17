@@ -46,6 +46,10 @@ else
 
 read -p "Git SHA1 hash of commit: " SHA1
 
+# Import before staging the build metadata: subtree requires a clean worktree.
+git -C "$ROOT/.." subtree add --prefix="stdlib/$NAME" --squash \
+    "https://github.com/$USER/$NAME.jl.git" "$SHA1"
+
 UNAME=$(echo "$NAME" | tr [a-z] [A-Z])
 
 sed -e "/^STDLIBS_EXT =/,/^\$/s!^\$!\\
