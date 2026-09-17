@@ -1,0 +1,55 @@
+name: CI
+on:
+  pull_request:
+    branches:
+      - master
+      - release-*
+  push:
+    branches:
+      - master
+      - release-*
+    tags: '*'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '1.10'
+          - '1' # automatically expands to the latest stable 1.x release of Julia.
+          - 'nightly'
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        arch:
+          - default
+          - x86
+        # 32-bit Julia binaries are not available on macOS
+        exclude:
+          - os: macOS-latest
+            arch: x86
+          - os: windows-latest
+            version: '1.3' # `curl_easy_setopt: 48` error on github CI
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
+      - uses: julia-actions/cache@v3
+      - run: julia --color=yes .ci/test_and_change_uuid.jl
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+      - uses: julia-actions/julia-processcoverage@v1
+      - uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
