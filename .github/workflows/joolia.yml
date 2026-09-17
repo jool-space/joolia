@@ -1,0 +1,55 @@
+name: Joolia CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: joolia-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and test (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["ubuntu-24.04", "ubuntu-24.04-arm"]' || '["ubuntu-24.04"]') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libatomic1 python3 gfortran perl wget m4 cmake pkg-config curl git patchelf
+      - name: Cache dependency downloads only
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            deps/srccache/*.tar.gz
+            deps/srccache/*.tar.xz
+            deps/srccache/*.tar.bz2
+            deps/srccache/*.zip
+          key: joolia-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Make.inc', 'deps/*.mk', 'deps/*.version', 'deps/checksums/**', 'deps/patches/**') }}
+      - name: Build and run required checks
+        run: python3 contrib/ci/run.py --jobs 4
+      - name: Upload logs and coverage inventory
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joolia-ci-${{ matrix.runner }}
+          path: ci-results/
+          if-no-files-found: warn
+          retention-days: 14

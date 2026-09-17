@@ -73,10 +73,10 @@ compiler-foundation:
 	@printf '\nend # module Base\nCore.include(Core.Main, "$(JULIAHOME)/Compiler/test/datastructures.jl")\n' >> $(build_private_libdir)/compiler-foundation-test.jl
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=min \
-		--output-ji $(build_private_libdir)/compiler-test-unused.ji $(build_private_libdir)/compiler-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/compiler-test-unused.ji $(build_private_libdir)/compiler-foundation-test.jl --dataroot $(build_datarootdir)/
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=all \
-		--output-ji $(build_private_libdir)/compiler-test-unused.ji $(build_private_libdir)/compiler-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/compiler-test-unused.ji $(build_private_libdir)/compiler-foundation-test.jl --dataroot $(build_datarootdir)/
 
 .PHONY: strings-foundation
 strings-foundation:
@@ -85,10 +85,10 @@ strings-foundation:
 	@printf '\nend # module Base\nCore.include(Core.Main, "$(SRCDIR)/strings/basic.jl")\n' >> $(build_private_libdir)/strings-foundation-test.jl
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=min \
-		--output-ji $(build_private_libdir)/strings-test-unused.ji $(build_private_libdir)/strings-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/strings-test-unused.ji $(build_private_libdir)/strings-foundation-test.jl --dataroot $(build_datarootdir)/
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=all \
-		--output-ji $(build_private_libdir)/strings-test-unused.ji $(build_private_libdir)/strings-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/strings-test-unused.ji $(build_private_libdir)/strings-foundation-test.jl --dataroot $(build_datarootdir)/
 
 # Test the Dict implementation with the compiler prefix, before full Base is loaded.
 .PHONY: dict-foundation
@@ -98,10 +98,10 @@ dict-foundation:
 	@printf '\nend # module Base\nCore.include(Core.Main, "$(SRCDIR)/dict.jl")\n' >> $(build_private_libdir)/dict-foundation-test.jl
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=min \
-		--output-ji $(build_private_libdir)/dict-test-unused.ji $(build_private_libdir)/dict-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/dict-test-unused.ji $(build_private_libdir)/dict-foundation-test.jl --dataroot $(build_datarootdir)/
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=all \
-		--output-ji $(build_private_libdir)/dict-test-unused.ji $(build_private_libdir)/dict-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/dict-test-unused.ji $(build_private_libdir)/dict-foundation-test.jl --dataroot $(build_datarootdir)/
 
 # Test Broadcast axes, tuple positions, and materialization before the compiler is loaded.
 .PHONY: broadcast-foundation
@@ -111,10 +111,10 @@ broadcast-foundation:
 	@printf '\nend # module Base\nCore.include(Core.Main, "$(SRCDIR)/broadcast.jl")\n' >> $(build_private_libdir)/broadcast-foundation-test.jl
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=min \
-		--output-ji $(build_private_libdir)/broadcast-test-unused.ji $(build_private_libdir)/broadcast-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/broadcast-test-unused.ji $(build_private_libdir)/broadcast-foundation-test.jl --dataroot $(build_datarootdir)/
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=all \
-		--output-ji $(build_private_libdir)/broadcast-test-unused.ji $(build_private_libdir)/broadcast-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/broadcast-test-unused.ji $(build_private_libdir)/broadcast-foundation-test.jl --dataroot $(build_datarootdir)/
 
 # Test the IOBuffer and generic IO byte-position contract before the compiler is loaded.
 .PHONY: io-foundation
@@ -124,10 +124,10 @@ io-foundation:
 	@printf '\nend # module Base\nCore.include(Base, "$(JULIAHOME)/base/multimedia.jl")\nCore.eval(Base, :(using .Multimedia))\nCore.include(Core.Main, "$(SRCDIR)/iobuffer.jl")\n' >> $(build_private_libdir)/io-foundation-test.jl
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=min \
-		--output-ji $(build_private_libdir)/io-test-unused.ji $(build_private_libdir)/io-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/io-test-unused.ji $(build_private_libdir)/io-foundation-test.jl --dataroot $(build_datarootdir)/
 	@cd $(JULIAHOME)/base && JULIA_NUM_THREADS=1 JULIA_TEST_FAILFAST=1 \
 	$(call spawn,$(JULIA_EXECUTABLE)) --startup-file=no --check-bounds=yes --compile=all \
-		--output-ji $(build_private_libdir)/io-test-unused.ji $(build_private_libdir)/io-foundation-test.jl --dataroot $(JULIAHOME)/../
+		--output-ji $(build_private_libdir)/io-test-unused.ji $(build_private_libdir)/io-foundation-test.jl --dataroot $(build_datarootdir)/
 
 .PHONY: install-revise-deps
 install-revise-deps:

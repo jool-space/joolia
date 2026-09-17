@@ -43,6 +43,14 @@ function check_whitespace()
         end
     end
 
+    # Vendored subtrees retain their upstream formatting conventions.
+    if "--exclude-vendored" in ARGS
+        stdlibdir = joinpath(@__DIR__, "..", "stdlib")
+        prefixes = ["stdlib/" * chop(name; tail=length(".version")) * "/"
+                    for name in readdir(stdlibdir) if endswith(name, ".version")]
+        filter!(path -> !any(prefix -> startswith(path, prefix), prefixes), files_to_check)
+    end
+
     files_fixed = 0
     if "--fix" in ARGS
         for path in files_to_check
