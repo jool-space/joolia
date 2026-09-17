@@ -12,10 +12,12 @@ default global project is `~/.joolia/environments/v1.14/Project.toml`.
 `JULIA_DEPOT_PATH` still overrides the depot; bundled system depots retain
 their existing paths. Existing `~/.julia` contents are not migrated.
 
-After editing REPL sources, run `make -j8` before checking an interactive
-launch. Interactive startup loads the bundled REPL cache without source
-staleness checks; `using REPL` in a script can load a different, updated cache
-and does not verify the interactive banner.
+After editing REPL or Pkg sources, run `make -j8` before checking an interactive
+launch. Interactive startup and package mode use `Base.require_stdlib` to load
+bundled REPL/Pkg caches without source staleness checks. `using REPL` or `using Pkg`
+in a script can load a different, updated cache and does not verify the interactive
+path. Restart existing REPL sessions after rebuilding, and test package commands
+through `pkg>` as well as the scripting API.
 
 
 This worktree changes collection positions and dimension arguments to zero origin,
@@ -174,6 +176,14 @@ have not been changed here. The source-file extension is still undecided.
 
 `make -C test dict-foundation` additionally passes 17 persistent checks per
 mode for zero-origin hash storage, UInt8 keys, collisions, and deletion. Set reuse and UInt8 key coverage are included; WeakKeyDict still needs concurrency dependencies.
+
+## Continuous integration
+
+Run `python3 contrib/ci/run.py --jobs 4` to build and execute the required CI
+gate. This includes bootstrap foundations, the established stdlib suites, Pkg
+lifecycle tests and a real package REPL with a local versioned registry. See
+[the CI guide](contrib/ci/README.md) for coverage, logs and diagnostic subsets.
+GitHub Actions runs this gate on PRs/pushes and daily on x86-64 and ARM64.
 
 ## Running tests
 
