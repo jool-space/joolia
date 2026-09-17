@@ -1302,6 +1302,15 @@ Base.unsafe_write(io::CapturedIO, p::Ptr{UInt8}, n::UInt) = @lock io.lock unsafe
 Base.take!(io::CapturedIO) = @lock io.lock take!(io.buf)
 Pkg.can_fancyprint(io::CapturedIO) = io.fancy
 
+# Progress-bar layout uses zero-origin tuple and vector positions, including on
+# the terminal path used by registry and artifact downloads.
+@testset "zero-origin progress bar layout" begin
+    io = IOBuffer()
+    bar = Pkg.MiniProgressBars.MiniProgressBar(header = "Downloading", max = 100, current = 50)
+    @test_nowarn Pkg.MiniProgressBars.show_progress(io, bar)
+    @test occursin("Downloading", String(take!(io)))
+end
+
 @testset "interrupting artifact installation" begin
     ansi_enablecursor = "\e[?25h"
     @testset "fancyprint = $fancy" for fancy in (false, true)
