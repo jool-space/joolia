@@ -14,7 +14,7 @@ using Main: samepath
     end
     if Sys.iswindows()
         @testset "issue #38491" begin
-            pwd_drive = uppercase(splitdrive(pwd())[1])
+            pwd_drive = uppercase(splitdrive(pwd())[0])
             drive = (pwd_drive == "X:") ? "Y:" : "X:"
             @test abspath("$(lowercase(drive))a\\b\\c") == "$(lowercase(drive))\\a\\b\\c"
             @test abspath("$(uppercase(drive))a\\b\\c") == "$(uppercase(drive))\\a\\b\\c"
@@ -477,7 +477,7 @@ end
     var = Sys.iswindows() ? "USERPROFILE" : "HOME"
     AVG_PATH = Base.Filesystem.AVG_PATH - 1 # null-termination character
     for i = 0:9
-        local home = " "^AVG_PATH * "123456789"[1:i]
+        local home = " "^AVG_PATH * (i == 0 ? "" : "123456789"[0:i-1])
         @test withenv(var => home) do
             homedir()
         end == home
@@ -492,4 +492,14 @@ end
     # non-existent user returns nothing
     nouser = "nouser_" * randstring(12)
     @test homedir(nouser) === nothing
+end
+
+@testset "zero-origin path collections" begin
+    dirfile = splitdir("a/b")
+    @test dirfile[0] == "a"
+    @test dirfile[1] == "b"
+    components = splitpath("/a/b")
+    @test components[firstindex(components)] == "/"
+    @test components[lastindex(components)] == "b"
+    @test joinpath(("a", "b")) == "a/b"
 end

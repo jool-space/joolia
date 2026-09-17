@@ -19,7 +19,8 @@ using .Compiler: ALWAYS_FALSE, ALWAYS_TRUE, BasicBlock, CFG, CachedMethodTable,
 
 function Base.show(io::IO, cfg::CFG)
     print(io, "CFG with $(length(cfg.blocks)) blocks:")
-    for (idx, block) in enumerate(cfg.blocks)
+    for (idx0, block) in enumerate(cfg.blocks)
+        idx = idx0 + 1
         print(io, "\n  bb ", idx)
         if block.stmts.start == block.stmts.stop
             print(io, " (stmt ", block.stmts.start, ")")
@@ -56,8 +57,8 @@ const SSA_WARN_TYPE_STRONG = SSAWarnTypeClass(2)
 
 function ssa_warn_type_class(io::IO, idx::Int)
     levels = get(io, :ssa_warn_levels, nothing)
-    if levels isa AbstractVector{SSAWarnTypeClass} && isassigned(levels, idx)
-        return levels[idx]
+    if levels isa AbstractVector{SSAWarnTypeClass} && isassigned(levels, idx-1)
+        return levels[idx-1]
     end
     return SSA_WARN_TYPE_STABLE
 end
@@ -72,11 +73,11 @@ function builtin_call_has_dispatch(
         # The implementation of _apply_iterate has hand-inlined implementations
         # for <builtin>(v::Union{Tuple,NamedTuple,Memory,Array,SimpleVector}...)
         # which perform no dynamic dispatch
-        constructort = maybe_argextype(args[3], src, sptypes)
+        constructort = maybe_argextype(args[2], src, sptypes)
         if constructort === nothing || !(widenconst(constructort) <: Core.Builtin)
             return true
         end
-        for arg in args[4:end]
+        for arg in args[3:end]
             argt = maybe_argextype(arg, src, sptypes)
             if argt === nothing || !(widenconst(argt) <: inlined_apply_iterate_types)
                 return true
@@ -116,10 +117,10 @@ function print_stmt(io::IO, idx::Int, @nospecialize(stmt), code::Union{IRCode,Co
         print(io, ", ")
         print(io, stmt.typ)
         print(io, ")")
-    elseif isexpr(stmt, :invoke) && length(stmt.args) >= 2 && isa(stmt.args[1], Union{MethodInstance,CodeInstance})
+    elseif isexpr(stmt, :invoke) && length(stmt.args) >= 2 && isa(stmt.args[0], Union{MethodInstance,CodeInstance})
         stmt = stmt::Expr
         # TODO: why is this here, and not in Base.show_unquoted
-        ci = stmt.args[1]
+        ci = stmt.args[0]
         if ci isa Core.CodeInstance
             printstyled(io, "   invoke "; color = :light_black)
             abi = get_ci_abi(ci)
@@ -130,7 +131,7 @@ function print_stmt(io::IO, idx::Int, @nospecialize(stmt), code::Union{IRCode,Co
         # XXX: this is wrong if `sig` is not a concretetype method
         # more correct would be to use `fieldtype(sig, i)`, but that would obscure / discard Varargs information in show
         sig = abi == Tuple ? Core.svec() : Base.unwrap_unionall(abi).parameters::Core.SimpleVector
-        f = stmt.args[2]
+        f = stmt.args[1]
         ft = maybe_argextype(f, code, sptypes)
 
         # We can elide the type for arg0 if it...
@@ -139,29 +140,29 @@ function print_stmt(io::IO, idx::Int, @nospecialize(stmt), code::Union{IRCode,Co
             # ... or, f prints as a user-accessible value...
             (f isa GlobalRef) &&
             # ... and matches the value of the singleton type of the invoked MethodInstance
-            (singleton_type(ft) === singleton_type(sig[1]) !== nothing)
+            (singleton_type(ft) === singleton_type(sig[0]) !== nothing)
         )
         if skip_ftype
             show_unquoted(io, f, indent)
         else
             print(io, "(")
             show_unquoted(io, f, indent)
-            print(io, "::", sig[1], ")")
+            print(io, "::", sig[0], ")")
         end
 
         # Print the remaining arguments (with type annotations from the invoked MethodInstance)
         print(io, "(")
         print_arg(i) = sprint(; context=io) do io
             show_unquoted(io, stmt.args[i], indent)
-            if (i - 1) <= length(sig)
-                print(io, "::", sig[i - 1])
+            if (i - 2) < length(sig)
+                print(io, "::", sig[i - 2])
             end
         end
-        join(io, (print_arg(i) for i = 3:length(stmt.args)), ", ")
+        join(io, (print_arg(i) for i = 2:length(stmt.args)-1), ", ")
         print(io, ")")
         # TODO: if we have a CodeInstance, should we print that rettype info here, which may differ (wider or narrower than the ssavaluetypes)
     elseif isexpr(stmt, :call) && length(stmt.args) >= 1 && label_dynamic_calls
-        ft = maybe_argextype(stmt.args[1], code, sptypes)
+        ft = maybe_argextype(stmt.args[0], code, sptypes)
         f = singleton_type(ft)
         if isa(f, Core.IntrinsicFunction)
             printstyled(io, "intrinsic "; color = :light_black)
@@ -318,12 +319,12 @@ function compute_ir_line_annotations(code::Union{IRCode,CodeInfo})
         loc_method = ""
         isempty(stack) && (stack = last_stack)
         if !isempty(stack)
-            lineno = stack[1].line
+            lineno = stack[0].line
             x = min(length(last_stack), length(stack))
             depth = length(stack) - 1
             # Compute the last depth that was in common
             first_mismatch = let last_stack=last_stack, stack=stack
-                findfirst(i->last_stack[i] != stack[i], 1:x)
+                findfirst(i->last_stack[i] != stack[i], 0:x-1)
             end
             # If the first mismatch is the last stack frame, that might just
             # be a line number mismatch in inner most frame. Ignore those
@@ -364,7 +365,7 @@ function compute_ir_line_annotations(code::Union{IRCode,CodeInfo})
             end
             print(buf, "╷"^max(0, depth - last_depth - stole_one))
             if printing_depth != 0
-                loc_method = normalize_method_name(stack[printing_depth + 1])
+                loc_method = normalize_method_name(stack[printing_depth])
             end
             loc_method = string(" "^printing_depth, loc_method)
             last_stack = stack
@@ -487,8 +488,8 @@ function DILineInfoPrinter(debuginfo, def, showtypes::Bool=false)
             nctx::Int = 0
             # compute the size of the matching prefix in the inlining information stack
             for i = 1:min(length(context), nframes)
-                CtxLine = context[i]
-                FrameLine = DI[nframes - i + 1]
+                CtxLine = context[i-1]
+                FrameLine = DI[nframes - i]
                 CtxLine === FrameLine || break
                 nctx = i
             end
@@ -499,11 +500,11 @@ function DILineInfoPrinter(debuginfo, def, showtypes::Bool=false)
                     # if so, drop all existing calls to it from the top of the context
                     # AND check if instead the context was previously printed that way
                     # but now has removed the recursive frames
-                    let method = method_name(context[nctx]) # last matching frame
-                        if (nctx < nframes && method_name(DI[nframes - nctx]) === method) ||
-                           (nctx < length(context) && method_name(context[nctx + 1]) === method)
+                    let method = method_name(context[nctx-1]) # last matching frame
+                        if (nctx < nframes && method_name(DI[nframes - nctx - 1]) === method) ||
+                           (nctx < length(context) && method_name(context[nctx]) === method)
                             update_line_only = true
-                            while nctx > 0 && method_name(context[nctx]) === method
+                            while nctx > 0 && method_name(context[nctx-1]) === method
                                 nctx -= 1
                             end
                         end
@@ -511,8 +512,8 @@ function DILineInfoPrinter(debuginfo, def, showtypes::Bool=false)
                 end
                 # look at the first non-matching element to see if we are only changing the line number
                 if !update_line_only && nctx < length(context) && nctx < nframes
-                    let CtxLine = context[nctx + 1],
-                        FrameLine = DI[nframes - nctx]
+                    let CtxLine = context[nctx],
+                        FrameLine = DI[nframes - nctx - 1]
                         if method_name(CtxLine) === method_name(FrameLine)
                             update_line_only = true
                         end
@@ -520,8 +521,8 @@ function DILineInfoPrinter(debuginfo, def, showtypes::Bool=false)
                 end
             elseif nctx < length(context) && nctx < nframes
                 # look at the first non-matching element to see if we are only changing the line number
-                let CtxLine = context[nctx + 1],
-                    FrameLine = DI[nframes - nctx]
+                let CtxLine = context[nctx],
+                    FrameLine = DI[nframes - nctx - 1]
                     if CtxLine.file === FrameLine.file &&
                             method_name(CtxLine) === method_name(FrameLine)
                         update_line_only = true
@@ -533,8 +534,8 @@ function DILineInfoPrinter(debuginfo, def, showtypes::Bool=false)
                 # compute the new inlining depth
                 if collapse
                     npops = 1
-                    let Prev = method_name(context[nctx + 1])
-                        for i = (nctx + 2):length(context)
+                    let Prev = method_name(context[nctx])
+                        for i = (nctx + 1):length(context)-1
                             Next = method_name(context[i])
                             Prev === Next || (npops += 1)
                             Prev = Next
@@ -554,7 +555,7 @@ function DILineInfoPrinter(debuginfo, def, showtypes::Bool=false)
             end
             # now print the new frames
             while nctx < nframes
-                frame::LineInfoNode = DI[nframes - nctx]
+                frame::LineInfoNode = DI[nframes - nctx - 1]
                 nctx += 1
                 started::Bool = false
                 if !update_line_only && showtypes && !isa(frame.method, Symbol) && nctx != 1
@@ -581,7 +582,7 @@ function DILineInfoPrinter(debuginfo, def, showtypes::Bool=false)
                 if collapse
                     method = method_name(frame)
                     while nctx < nframes
-                        frame = DI[nframes - nctx]
+                        frame = DI[nframes - nctx - 1]
                         method_name(frame) === method || break
                         nctx += 1
                         push!(context, frame)
@@ -654,29 +655,29 @@ end
 
 function _stmt(code::IRCode, idx::Int)
     stmts = code.stmts
-    return isassigned(stmts.stmt, idx) ? stmts[idx][:stmt] : UNDEF
+    return isassigned(stmts.stmt, idx-1) ? stmts[idx][:stmt] : UNDEF
 end
 function _stmt(compact::IncrementalCompact, idx::Int)
     stmts = compact.result
-    return isassigned(stmts.stmt, idx) ? stmts[idx][:stmt] : UNDEF
+    return isassigned(stmts.stmt, idx-1) ? stmts[idx][:stmt] : UNDEF
 end
 function _stmt(code::CodeInfo, idx::Int)
     code = code.code
-    return isassigned(code, idx) ? code[idx] : UNDEF
+    return isassigned(code, idx-1) ? code[idx-1] : UNDEF
 end
 
 function _type(code::IRCode, idx::Int)
     stmts = code.stmts
-    return isassigned(stmts.type, idx) ? stmts[idx][:type] : UNDEF
+    return isassigned(stmts.type, idx-1) ? stmts[idx][:type] : UNDEF
 end
 function _type(compact::IncrementalCompact, idx::Int)
     stmts = compact.result
-    return isassigned(stmts.type, idx) ? stmts[idx][:type] : UNDEF
+    return isassigned(stmts.type, idx-1) ? stmts[idx][:type] : UNDEF
 end
 function _type(code::CodeInfo, idx::Int)
     types = code.ssavaluetypes
     types isa Vector{Any} || return nothing
-    return isassigned(types, idx) ? types[idx] : UNDEF
+    return isassigned(types, idx-1) ? types[idx-1] : UNDEF
 end
 
 function statement_indices_to_labels(stmt, cfg::CFG)
@@ -689,7 +690,7 @@ function statement_indices_to_labels(stmt, cfg::CFG)
         stmt = GotoNode(block_for_inst(cfg, stmt.label))
     elseif stmt isa PhiNode
         e = stmt.edges
-        stmt = PhiNode(Int32[block_for_inst(cfg, Int(e[i])) for i in 1:length(e)], stmt.values)
+        stmt = PhiNode(Int32[block_for_inst(cfg, Int(e[i])) for i in 0:length(e)-1], stmt.values)
     end
     return stmt
 end
@@ -715,7 +716,7 @@ function _print_ir_indentation(io::IO, cfg::CFG, bb_idx::Int, max_bb_idx_size::I
         inlining_indent = line_info_preprinter(io, linestart, i == 1 ? idx : 0)
         printstyled(io, "!!! ", "─"^max_bb_idx_size, color=bb_color)
     else
-        bbrange = cfg.blocks[bb_idx].stmts
+        bbrange = cfg.blocks[bb_idx-1].stmts
         # Print line info update
         linestart = idx == first(bbrange) ? "  " : sprint(io -> printstyled(io, "│ ", color=bb_color), context=io)
         linestart *= " "^max_bb_idx_size
@@ -726,7 +727,7 @@ function _print_ir_indentation(io::IO, cfg::CFG, bb_idx::Int, max_bb_idx_size::I
         if i == 1 && idx == first(bbrange)
             bb_idx_str = string(bb_idx)
             bb_pad = max_bb_idx_size - length(bb_idx_str)
-            bb_type = length(cfg.blocks[bb_idx].preds) <= 1 ? "─" : "┄"
+            bb_type = length(cfg.blocks[bb_idx-1].preds) <= 1 ? "─" : "┄"
             printstyled(io, bb_idx_str, " ", bb_type, "─"^bb_pad, color=bb_color)
         elseif final && idx == last(bbrange) # print separator
             printstyled(io, "└", "─"^(1 + max_bb_idx_size), color=bb_color)
@@ -827,7 +828,7 @@ function show_ir_stmt(io::IO, code::Union{IRCode, CodeInfo, IncrementalCompact},
 
     # increment the basic block counter
     if bb_idx <= length(cfg.blocks)
-        bbrange = cfg.blocks[bb_idx].stmts
+        bbrange = cfg.blocks[bb_idx-1].stmts
         if bb_idx <= length(cfg.blocks) && idx == last(bbrange)
             bb_idx += 1
         end
@@ -837,16 +838,16 @@ function show_ir_stmt(io::IO, code::Union{IRCode, CodeInfo, IncrementalCompact},
 end
 
 function _new_nodes_iter(stmts, new_nodes, new_nodes_info, new_nodes_idx)
-    new_nodes_perm = filter(i -> isassigned(new_nodes.stmt, i), 1:length(new_nodes))
+    new_nodes_perm = filter(i -> isassigned(new_nodes.stmt, i), 0:length(new_nodes)-1)
     sort!(new_nodes_perm, by = x -> (x = new_nodes_info[x]; (x.pos, x.attach_after)))
 
     # separate iterators for the nodes that are inserted before resp. after each statement
-    before_iter = Ref(1)
-    after_iter = Ref(1)
+    before_iter = Ref(0)
+    after_iter = Ref(0)
 
     return function get_new_node(idx::Int; attach_after=false)
         iter = attach_after ? after_iter : before_iter
-        iter[] <= length(new_nodes_perm) || return nothing
+        iter[] < length(new_nodes_perm) || return nothing
         node_idx = new_nodes_perm[iter[]]
 
         # skip nodes
@@ -854,7 +855,7 @@ function _new_nodes_iter(stmts, new_nodes, new_nodes_info, new_nodes_idx)
               idx > new_nodes_info[node_idx].pos ||                 # not interested in
               new_nodes_info[node_idx].attach_after != attach_after
             iter[] += 1
-            iter[] > length(new_nodes_perm) && return nothing
+            iter[] >= length(new_nodes_perm) && return nothing
             node_idx = new_nodes_perm[iter[]]
         end
 
@@ -864,15 +865,15 @@ function _new_nodes_iter(stmts, new_nodes, new_nodes_info, new_nodes_idx)
         end
 
         iter[] += 1
-        new_node = new_nodes[node_idx]
+        new_node = new_nodes[node_idx+1]
         new_node_inst = isassigned(new_nodes.stmt, node_idx) ? new_node[:stmt] : UNDEF
         new_node_type = isassigned(new_nodes.type, node_idx) ? new_node[:type] : UNDEF
-        node_idx += length(stmts)
+        node_idx += length(stmts) + 1
         return node_idx, new_node_inst, new_node_type
     end
 end
 
-function new_nodes_iter(ir::IRCode, new_nodes_idx=1)
+function new_nodes_iter(ir::IRCode, new_nodes_idx=0)
     stmts = ir.stmts
     new_nodes = ir.new_nodes.stmts
     new_nodes_info = ir.new_nodes.info
@@ -883,7 +884,7 @@ function new_nodes_iter(compact::IncrementalCompact)
     stmts = compact.result
     new_nodes = compact.new_new_nodes.stmts
     new_nodes_info = compact.new_new_nodes.info
-    return _new_nodes_iter(stmts, new_nodes, new_nodes_info, 1)
+    return _new_nodes_iter(stmts, new_nodes, new_nodes_info, 0)
 end
 
 # print only line numbers on the left, some of the method names and nesting depth on the right
@@ -894,7 +895,7 @@ function inline_linfo_printer(code::Union{IRCode,CodeInfo})
     max_method_width = maximum(length, loc_methods)
 
     function (io::IO, _indent::String, idx::Int)
-        cols = (displaysize(io)::Tuple{Int,Int})[2]
+        cols = (displaysize(io)::Tuple{Int,Int})[1]
 
         if idx == 0
             annotation = ""
@@ -903,9 +904,9 @@ function inline_linfo_printer(code::Union{IRCode,CodeInfo})
         elseif idx <= length(loc_annotations)
             # N.B.: The line array length not matching is invalid,
             # but let's be robust here
-            annotation = loc_annotations[idx]
-            loc_method = loc_methods[idx]
-            lineno = loc_lineno[idx]
+            annotation = loc_annotations[idx-1]
+            loc_method = loc_methods[idx-1]
+            lineno = loc_lineno[idx-1]
         else
             annotation = "!"
             loc_method = ""
@@ -936,9 +937,9 @@ function stmts_used(io::IO, code::IRCode, warn_unset_entry=true)
         scan_ssa_use!(push!, used, inst[:stmt])
     end
     new_nodes = code.new_nodes.stmts
-    for nn in 1:length(new_nodes)
+    for nn in 0:length(new_nodes)-1
         if isassigned(new_nodes.stmt, nn)
-            scan_ssa_use!(push!, used, new_nodes[nn][:stmt])
+            scan_ssa_use!(push!, used, new_nodes[nn+1][:stmt])
         elseif warn_unset_entry
             printstyled(io, "ERROR: New node array has unset entry\n", color=:red)
             warn_unset_entry = false
@@ -971,7 +972,7 @@ function show_ir_stmts(io::IO, ir::Union{IRCode, CodeInfo, IncrementalCompact}, 
     for idx in inds
         if config.should_print_stmt(ir, idx, used)
             bb_idx = show_ir_stmt(io, ir, idx, config, sptypes, used, cfg, bb_idx; pop_new_node!)
-        elseif bb_idx <= length(cfg.blocks) && idx == cfg.blocks[bb_idx].stmts.stop
+        elseif bb_idx <= length(cfg.blocks) && idx == cfg.blocks[bb_idx-1].stmts.stop
             bb_idx += 1
         end
     end
@@ -1007,8 +1008,8 @@ end
 function ssa_warntype_class(code::CodeInfo, idx::Int)
     types = code.ssavaluetypes
     types isa Vector || return SSA_WARN_TYPE_STABLE
-    isassigned(types, idx) || return SSA_WARN_TYPE_STABLE
-    return warntype_type_class(types[idx])
+    isassigned(types, idx-1) || return SSA_WARN_TYPE_STABLE
+    return warntype_type_class(types[idx-1])
 end
 
 function show_ir(io::IO, ci::CodeInfo, config::IRShowConfig=default_config(io, ci);
@@ -1021,8 +1022,8 @@ function show_ir(io::IO, ci::CodeInfo, config::IRShowConfig=default_config(io, c
     else EMPTY_SPTYPES end
     ssa_warn_levels = fill(SSA_WARN_TYPE_STABLE, length(ci.code))
     for idx in used
-        checkbounds(Bool, ssa_warn_levels, idx) || continue
-        ssa_warn_levels[idx] = ssa_warntype_class(ci, idx)
+        checkbounds(Bool, ssa_warn_levels, idx-1) || continue
+        ssa_warn_levels[idx-1] = ssa_warntype_class(ci, idx)
     end
     let io = IOContext(io, :maxssaid=>length(ci.code), :ssa_warn_levels=>ssa_warn_levels)
         show_ir_stmts(io, ci, 1:length(ci.code), config, sptypes, used, cfg, 1; pop_new_node!)
@@ -1037,11 +1038,11 @@ function show_ir(io::IO, compact::IncrementalCompact, config::IRShowConfig=defau
     # First print everything that has already been compacted
 
     # merge uses in uncompacted region into compacted uses
-    used_compacted = BitSet(i for (i, x) in pairs(compact.used_ssas) if x != 0)
+    used_compacted = BitSet(i+1 for (i, x) in pairs(compact.used_ssas) if x != 0)
     used_uncompacted = stmts_used(io, compact.ir)
     for (i, ssa) = enumerate(compact.ssa_rename)
         if isa(ssa, SSAValue) && ssa.id in used_uncompacted
-            push!(used_compacted, i)
+            push!(used_compacted, i+1)
         end
     end
 
@@ -1051,7 +1052,7 @@ function show_ir(io::IO, compact::IncrementalCompact, config::IRShowConfig=defau
     if compact.active_result_bb <= length(result_bbs)
         # count the total number of nodes we'll add to this block
         input_bb_idx = block_for_inst(compact.ir.cfg, compact.idx)
-        input_bb = compact.ir.cfg.blocks[input_bb_idx]
+        input_bb = compact.ir.cfg.blocks[input_bb_idx-1]
         count = 0
         for input_idx in input_bb.stmts.start:input_bb.stmts.stop
             pop_new_node! = new_nodes_iter(compact.ir)
@@ -1065,11 +1066,11 @@ function show_ir(io::IO, compact::IncrementalCompact, config::IRShowConfig=defau
 
         still_to_be_inserted = (last(input_bb.stmts) - compact.idx) + count
 
-        result_bb = result_bbs[compact.active_result_bb]
-        result_bbs[compact.active_result_bb] = BasicBlock(result_bb,
+        result_bb = result_bbs[compact.active_result_bb-1]
+        result_bbs[compact.active_result_bb-1] = BasicBlock(result_bb,
             StmtRange(first(result_bb.stmts), compact.result_idx+still_to_be_inserted))
     end
-    compact_cfg = CFG(result_bbs, Int[first(result_bbs[i].stmts) for i in 2:length(result_bbs)])
+    compact_cfg = CFG(result_bbs, Int[first(result_bbs[i].stmts) for i in 0:length(result_bbs)-2])
 
     pop_new_node! = new_nodes_iter(compact)
     maxssaid = length(compact.result) + length(compact.new_new_nodes)
@@ -1099,7 +1100,7 @@ function show_ir(io::IO, compact::IncrementalCompact, config::IRShowConfig=defau
             # but is the best we can do without changing how `finish_current_bb!` works.
         end
     end
-    uncompacted_cfg = CFG(inputs_bbs, Int[first(inputs_bbs[i].stmts) for i in 2:length(inputs_bbs)])
+    uncompacted_cfg = CFG(inputs_bbs, Int[first(inputs_bbs[i].stmts) for i in 0:length(inputs_bbs)-2])
 
     pop_new_node! = new_nodes_iter(compact.ir, compact.new_nodes_idx)
     maxssaid = length(compact.ir.stmts) + length(compact.ir.new_nodes)
@@ -1170,7 +1171,7 @@ end
 
 function Base.show(io::IO, inferred::InferenceResult)
     mi = inferred.linfo
-    tt = mi.specTypes.parameters[2:end]
+    tt = mi.specTypes.parameters[1:end]
     tts = join(["::$(t)" for t in tt], ", ")
     rettype = inferred.result
     if isa(rettype, InferenceState)
@@ -1208,7 +1209,7 @@ function Base.show(io::IO, mi_info::Timings.InferenceFrameInfo)
             show(io, def)
         else
             print(io, "InferenceFrameInfo for ")
-            argnames = [isa(a, Core.Const) ? (isa(a.val, Type) ? "" : a.val) : "" for a in mi_info.slottypes[1:mi_info.nargs]]
+            argnames = [isa(a, Core.Const) ? (isa(a.val, Type) ? "" : a.val) : "" for a in mi_info.slottypes[0:mi_info.nargs-1]]
             show_tuple_as_call(io, def.name, mi.specTypes; argnames, qualified=true)
         end
     else

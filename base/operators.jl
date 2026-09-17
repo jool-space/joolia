@@ -243,7 +243,7 @@ isless(x::AbstractFloat, y::Real         ) = (!isnan(x) & (isnan(y) | signless(x
 # TODO: remove this when the compiler can optimize the generic version better
 # See #48724 and #48753
 isless(a::Tuple{BitInteger, BitInteger}, b::Tuple{BitInteger, BitInteger}) =
-    isless(a[1], b[1]) | (isequal(a[1], b[1]) & isless(a[2], b[2]))
+    isless(a[0], b[0]) | (isequal(a[0], b[0]) & isless(a[1], b[1]))
 
 """
     isgreater(x, y)
@@ -621,40 +621,40 @@ function afoldl(op, a, bs...)
     @_terminates_locally_meta
     l = length(bs)
     i =  0; y = a;            l == i && return y
-    #@nexprs 31 i -> (y = op(y, bs[i]); l == i && return y)
-    i =  1; y = op(y, bs[i]); l == i && return y
-    i =  2; y = op(y, bs[i]); l == i && return y
-    i =  3; y = op(y, bs[i]); l == i && return y
-    i =  4; y = op(y, bs[i]); l == i && return y
-    i =  5; y = op(y, bs[i]); l == i && return y
-    i =  6; y = op(y, bs[i]); l == i && return y
-    i =  7; y = op(y, bs[i]); l == i && return y
-    i =  8; y = op(y, bs[i]); l == i && return y
-    i =  9; y = op(y, bs[i]); l == i && return y
-    i = 10; y = op(y, bs[i]); l == i && return y
-    i = 11; y = op(y, bs[i]); l == i && return y
-    i = 12; y = op(y, bs[i]); l == i && return y
-    i = 13; y = op(y, bs[i]); l == i && return y
-    i = 14; y = op(y, bs[i]); l == i && return y
-    i = 15; y = op(y, bs[i]); l == i && return y
-    i = 16; y = op(y, bs[i]); l == i && return y
-    i = 17; y = op(y, bs[i]); l == i && return y
-    i = 18; y = op(y, bs[i]); l == i && return y
-    i = 19; y = op(y, bs[i]); l == i && return y
-    i = 20; y = op(y, bs[i]); l == i && return y
-    i = 21; y = op(y, bs[i]); l == i && return y
-    i = 22; y = op(y, bs[i]); l == i && return y
-    i = 23; y = op(y, bs[i]); l == i && return y
-    i = 24; y = op(y, bs[i]); l == i && return y
-    i = 25; y = op(y, bs[i]); l == i && return y
-    i = 26; y = op(y, bs[i]); l == i && return y
-    i = 27; y = op(y, bs[i]); l == i && return y
-    i = 28; y = op(y, bs[i]); l == i && return y
-    i = 29; y = op(y, bs[i]); l == i && return y
-    i = 30; y = op(y, bs[i]); l == i && return y
-    i = 31; y = op(y, bs[i]); l == i && return y
+    #@nexprs 31 i -> (y = op(y, bs[i-1]); l == i && return y)
+    i =  1; y = op(y, bs[i-1]); l == i && return y
+    i =  2; y = op(y, bs[i-1]); l == i && return y
+    i =  3; y = op(y, bs[i-1]); l == i && return y
+    i =  4; y = op(y, bs[i-1]); l == i && return y
+    i =  5; y = op(y, bs[i-1]); l == i && return y
+    i =  6; y = op(y, bs[i-1]); l == i && return y
+    i =  7; y = op(y, bs[i-1]); l == i && return y
+    i =  8; y = op(y, bs[i-1]); l == i && return y
+    i =  9; y = op(y, bs[i-1]); l == i && return y
+    i = 10; y = op(y, bs[i-1]); l == i && return y
+    i = 11; y = op(y, bs[i-1]); l == i && return y
+    i = 12; y = op(y, bs[i-1]); l == i && return y
+    i = 13; y = op(y, bs[i-1]); l == i && return y
+    i = 14; y = op(y, bs[i-1]); l == i && return y
+    i = 15; y = op(y, bs[i-1]); l == i && return y
+    i = 16; y = op(y, bs[i-1]); l == i && return y
+    i = 17; y = op(y, bs[i-1]); l == i && return y
+    i = 18; y = op(y, bs[i-1]); l == i && return y
+    i = 19; y = op(y, bs[i-1]); l == i && return y
+    i = 20; y = op(y, bs[i-1]); l == i && return y
+    i = 21; y = op(y, bs[i-1]); l == i && return y
+    i = 22; y = op(y, bs[i-1]); l == i && return y
+    i = 23; y = op(y, bs[i-1]); l == i && return y
+    i = 24; y = op(y, bs[i-1]); l == i && return y
+    i = 25; y = op(y, bs[i-1]); l == i && return y
+    i = 26; y = op(y, bs[i-1]); l == i && return y
+    i = 27; y = op(y, bs[i-1]); l == i && return y
+    i = 28; y = op(y, bs[i-1]); l == i && return y
+    i = 29; y = op(y, bs[i-1]); l == i && return y
+    i = 30; y = op(y, bs[i-1]); l == i && return y
+    i = 31; y = op(y, bs[i-1]); l == i && return y
     for i in (i + 1):l
-        y = op(y, bs[i])
+        y = op(y, bs[i-1])
     end
     return y
 end
@@ -1122,8 +1122,8 @@ end
 (c::ComposedFunction)(x...; kw...) = call_composed(unwrap_composed(c), x, kw)
 unwrap_composed(c::ComposedFunction) = (unwrap_composed(c.outer)..., unwrap_composed(c.inner)...)
 unwrap_composed(c) = (maybeconstructor(c),)
-call_composed(fs, x, kw) = (@inline; fs[1](call_composed(tail(fs), x, kw)))
-call_composed(fs::Tuple{Any}, x, kw) = fs[1](x...; kw...)
+call_composed(fs, x, kw) = (@inline; fs[0](call_composed(tail(fs), x, kw)))
+call_composed(fs::Tuple{Any}, x, kw) = fs[0](x...; kw...)
 
 struct Constructor{F} <: Function end
 (::Constructor{F})(args...; kw...) where {F} = (@inline; F(args...; kw...))
@@ -1183,7 +1183,7 @@ julia> filter(!isletter, str)
     Fix{N}(f, x)
 
 A type representing a partially-applied version of a function `f`, with the argument
-`x` fixed at position `N::Int`. In other words, `Fix{3}(f, x)` behaves similarly to
+`x` fixed at zero-based position `N::Int`. In other words, `Fix{2}(f, x)` behaves similarly to
 `(y1, y2, y3...; kws...) -> f(y1, y2, x, y3...; kws...)`.
 
 !!! compat "Julia 1.12"
@@ -1193,7 +1193,7 @@ A type representing a partially-applied version of a function `f`, with the argu
 !!! note
     When nesting multiple `Fix`, note that the `N` in `Fix{N}` is _relative_ to the current
     available arguments, rather than an absolute ordering on the target function. For example,
-    `Fix{1}(Fix{2}(f, 4), 4)` fixes the first and second arg, while `Fix{2}(Fix{1}(f, 4), 4)`
+    `Fix{0}(Fix{1}(f, 4), 4)` fixes the first and second arg, while `Fix{1}(Fix{0}(f, 4), 4)`
     fixes the first and third arg.
 """
 struct Fix{N,F,T} <: Function
@@ -1203,22 +1203,22 @@ struct Fix{N,F,T} <: Function
     function Fix{N}(f::F, x) where {N,F}
         if !(N isa Int)
             throw(ArgumentError(LazyString("expected type parameter in `Fix` to be `Int`, but got `", N, "::", typeof(N), "`")))
-        elseif N < 1
-            throw(ArgumentError(LazyString("expected `N` in `Fix{N}` to be integer greater than 0, but got ", N)))
+        elseif N < 0
+            throw(ArgumentError(LazyString("expected `N` in `Fix{N}` to be nonnegative integer, but got ", N)))
         end
         new{N,_stable_typeof(f),_stable_typeof(x)}(f, x)
     end
 end
 
 function (f::Fix{N})(args::Vararg{Any,M}; kws...) where {N,M}
-    M < N-1 && throw(ArgumentError(LazyString("expected at least ", N-1, " arguments to `Fix{", N, "}`, but got ", M)))
-    (left, right) = _split_tuple(args, N-1)
+    M < N && throw(ArgumentError(LazyString("expected at least ", N, " arguments to `Fix{", N, "}`, but got ", M)))
+    (left, right) = _split_tuple(args, N)
     return f.f(left..., f.x, right...; kws...)
 end
 
 # Special cases for improved constant propagation
-(f::Fix{1})(arg; kws...) = f.f(f.x, arg; kws...)
-(f::Fix{2})(arg; kws...) = f.f(arg, f.x; kws...)
+(f::Fix{0})(arg; kws...) = f.f(f.x, arg; kws...)
+(f::Fix{1})(arg; kws...) = f.f(arg, f.x; kws...)
 
 function Base.show(io::IO, fix::Fix{N}) where {N}
     constr = Fix{N}
@@ -1234,14 +1234,14 @@ function Base.show(io::IO, fix::Fix{N}) where {N}
 end
 
 """
-Alias for `Fix{1}`. See [`Fix`](@ref Base.Fix).
+Alias for `Fix{0}`. See [`Fix`](@ref Base.Fix).
 """
-const Fix1{F,T} = Fix{1,F,T}
+const Fix1{F,T} = Fix{0,F,T}
 
 """
-Alias for `Fix{2}`. See [`Fix`](@ref Base.Fix).
+Alias for `Fix{1}`. See [`Fix`](@ref Base.Fix).
 """
-const Fix2{F,T} = Fix{2,F,T}
+const Fix2{F,T} = Fix{1,F,T}
 
 
 """
@@ -1458,7 +1458,7 @@ in(x, itr::Tuple) = _in_tuple(x, itr)
 function _in_tuple(x, @nospecialize(itr::Tuple), result = false)
     @inline
     isempty(itr) && return result
-    v = (itr[1] == x)
+    v = (itr[0] == x)
     if v === true
         return true
     end

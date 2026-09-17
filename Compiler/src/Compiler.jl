@@ -19,7 +19,7 @@ end
 # the system image and simply return that copy of the compiler. If not,
 # we proceed to load/precompile this as an ordinary package.
 elseif (isdefined(Base, :generating_output) && Base.generating_output(true) &&
-        Base.samefile(joinpath(Sys.BINDIR, Base.DATAROOTDIR, Base._compiler_require_dependencies[1][2]), @eval @__FILE__) &&
+        Base.samefile(joinpath(Sys.BINDIR, Base.DATAROOTDIR, Base._compiler_require_dependencies[0][1]), @eval @__FILE__) &&
         !Base.any_includes_stale(
             map(Base.compiler_chi, Base._compiler_require_dependencies),
             "sysimg", nothing))
@@ -146,8 +146,8 @@ using ..Compiler: >, getindex, length
 
 global MAX_METHODS::Int = 3
 
-if length(ARGS) > 2 && ARGS[2] === "--buildsettings"
-    include(BuildSettings, ARGS[3])
+if length(ARGS) > 2 && ARGS[1] === "--buildsettings"
+    include(BuildSettings, ARGS[2])
 end
 end
 

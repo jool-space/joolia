@@ -61,8 +61,8 @@ function sizehint!(s::BitSet, n::Integer; first::Bool=false, shrink::Bool=true)
 end
 
 function _bits_getindex(b::Bits, n::Int, offset::Int)
-    ci = _div64(n) - offset + 1
-    1 <= ci <= length(b) || return false
+    ci = _div64(n) - offset
+    0 <= ci < length(b) || return false
     @inbounds r = (b[ci] & (one(UInt64) << _mod64(n))) != 0
     r
 end
@@ -71,16 +71,16 @@ function _bits_findnext(b::Bits, start::Int)
     # start is 0-based
     # @assert start >= 0
     _div64(start) + 1 > length(b) && return -1
-    ind = unsafe_bitfindnext(b, start+1)
-    ind === nothing ? -1 : ind - 1
+    ind = unsafe_bitfindnext(b, start)
+    ind === nothing ? -1 : ind
 end
 
 function _bits_findprev(b::Bits, start::Int)
     # start is 0-based
     # @assert start <= 64 * length(b) - 1
     start >= 0 || return -1
-    ind = unsafe_bitfindprev(b, start+1)
-    ind === nothing ? -1 : ind - 1
+    ind = unsafe_bitfindprev(b, start)
+    ind === nothing ? -1 : ind
 end
 
 # An internal function for setting the inclusion bit for a given integer
@@ -106,7 +106,7 @@ end
         s.offset += diff
         diff = 0
     end
-    _unsafe_bitsetindex!(s.bits, b, diff+1, _mod64(idx))
+    _unsafe_bitsetindex!(s.bits, b, diff, _mod64(idx))
     s
 end
 
@@ -116,14 +116,14 @@ end
 @inline function _growend0!(b::Bits, nchunks::Int)
     len = length(b)
     _growend!(b, nchunks)
-    for i in len+1:length(b)
+    for i in len:length(b)-1
         @inbounds b[i] = CHK0 # resize! gives dirty memory
     end
 end
 
 @inline function _growbeg0!(b::Bits, nchunks::Int)
     _growbeg!(b, nchunks)
-    for i in 1:nchunks
+    for i in 0:nchunks-1
         @inbounds b[i] = CHK0
     end
 end
@@ -155,12 +155,12 @@ function union!(s::BitSet, r::AbstractUnitRange{<:Integer})
     i = _mod64(a)
     j = _mod64(b)
     @inbounds if diffa == diffb
-        s.bits[diffa + 1] |= (((~CHK0) >> i) << (i+63-j)) >> (63-j)
+        s.bits[diffa] |= (((~CHK0) >> i) << (i+63-j)) >> (63-j)
     else
-        s.bits[diffa + 1] |= ((~CHK0) >> i) << i
-        s.bits[diffb + 1] |= (~CHK0  << (63-j)) >> (63-j)
+        s.bits[diffa] |= ((~CHK0) >> i) << i
+        s.bits[diffb] |= (~CHK0  << (63-j)) >> (63-j)
         for n = diffa+1:diffb-1
-            s.bits[n+1] = ~CHK0
+            s.bits[n] = ~CHK0
         end
     end
     s
@@ -194,7 +194,7 @@ function _matched_map!(f, a1::Bits, b1::Int, a2::Bits, b2::Int,
     ediff = e2 - e1
 
     # map! over the common indices
-    @inbounds for i = max(1, 1+bdiff):min(l1, l2+bdiff)
+    @inbounds for i = max(0, bdiff):min(l1-1, l2-1+bdiff)
         a1[i] = f(a1[i], a2[i-bdiff])
     end
 
@@ -204,13 +204,18 @@ function _matched_map!(f, a1::Bits, b1::Int, a2::Bits, b2::Int,
         else # @assert f(false, x) == x
             _growend!(a1, ediff)
             # if a1 and a2 are not overlapping, we infer implied "false" values from a2
-            for outer l1 = l1+1:bdiff
-                @inbounds a1[l1] = CHK0
+            if bdiff > l1
+                for i = l1:bdiff-1
+                    @inbounds a1[i] = CHK0
+                end
+                # l1 is a chunk count here; advance it past the gap to the
+                # first chunk that will receive data copied from a2.
+                l1 = bdiff
             end
             # update ediff in case l1 was updated
             ediff = e2 - l1 - b1
             # copy actual chunks from a2
-            unsafe_copyto!(a1, l1+1, a2, l2+1-ediff, ediff)
+            unsafe_copyto!(a1, l1, a2, l2-ediff, ediff)
             l1 = length(a1)
         end
     elseif ediff < 0
@@ -231,13 +236,13 @@ function _matched_map!(f, a1::Bits, b1::Int, a2::Bits, b2::Int,
         else # @assert f(false, x) == x
             _growbeg!(a1, -bdiff)
             # if a1 and a2 are not overlapping, we infer implied "false" values from a2
-            for i = l2+1:-bdiff
+            for i = l2:-bdiff-1
                 @inbounds a1[i] = CHK0
             end
             b1 += bdiff # updated return value
 
             # copy actual chunks from a2
-            unsafe_copyto!(a1, 1, a2, 1, min(-bdiff, l2))
+            unsafe_copyto!(a1, 0, a2, 0, min(-bdiff, l2))
         end
     elseif bdiff > 0
         if right_false_is_false
@@ -288,7 +293,7 @@ function empty!(s::BitSet)
     s
 end
 
-isempty(s::BitSet) = _check0(s.bits, 1, length(s.bits))
+isempty(s::BitSet) = _check0(s.bits, 0, length(s.bits)-1)
 
 # Mathematical set functions: union!, intersect!, setdiff!, symdiff!
 
@@ -330,13 +335,13 @@ filter!(f, s::BitSet) = unsafe_filter!(f, s)
 @inline in(n::Int, s::BitSet) = _bits_getindex(s.bits, n, s.offset)
 @inline in(n::Integer, s::BitSet) = _is_convertible_Int(n) ? in(Int(n), s) : false
 
-function iterate(s::BitSet, (word, idx) = (CHK0, 0))
+function iterate(s::BitSet, (word, idx) = (CHK0, -1))
     while word == 0
-        idx == length(s.bits) && return nothing
         idx += 1
+        idx >= length(s.bits) && return nothing
         word = @inbounds s.bits[idx]
     end
-    trailing_zeros(word) + (idx - 1 + s.offset) << 6, (_blsr(word), idx)
+    trailing_zeros(word) + (idx + s.offset) << 6, (_blsr(word), idx)
 end
 
 @noinline _throw_bitset_notempty_error() =
@@ -387,18 +392,18 @@ function ==(s1::BitSet, s2::BitSet)
     overlap  = included ? l2 : overlap0
 
     # Ensure non-overlap chunks are zero (unlikely)
-    _check0(a1, 1, l1-overlap0) || return false
+    _check0(a1, 0, l1-overlap0-1) || return false
     if included
-        _check0(a1, b2-b1+l2+1, l1) || return false
+        _check0(a1, b2-b1+l2, l1-1) || return false
     else
-        _check0(a2, 1+overlap, l2) || return false
+        _check0(a2, overlap, l2-1) || return false
     end
 
     # compare overlap values
     if overlap > 0
         t1 = @_gc_preserve_begin a1
         t2 = @_gc_preserve_begin a2
-        memcmp(pointer(a1, b2-b1+1), pointer(a2), overlap<<3) == 0 || return false
+        memcmp(pointer(a1, b2-b1), pointer(a2, 0), overlap<<3) == 0 || return false
         @_gc_preserve_end t2
         @_gc_preserve_end t1
     end
@@ -413,9 +418,9 @@ function issubset(a::BitSet, b::BitSet)
 
     f(a, b) = a == a & b
     return (
-        all(@inbounds iszero(a.bits[i]) for i in 1:min(n, i)) &&
-        all(@inbounds f(a.bits[i], b.bits[i - shift]) for i in max(1, i+1):min(n, j)) &&
-        all(@inbounds iszero(a.bits[i]) for i in max(1, j+1):n))
+        all(@inbounds iszero(a.bits[i]) for i in 0:min(n, i)-1) &&
+        all(@inbounds f(a.bits[i], b.bits[i - shift]) for i in max(0, i):min(n, j)-1) &&
+        all(@inbounds iszero(a.bits[i]) for i in max(0, j):n-1))
 end
 ⊊(a::BitSet, b::BitSet) = a <= b && a != b
 

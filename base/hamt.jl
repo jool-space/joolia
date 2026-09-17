@@ -30,7 +30,7 @@ export HAMT
 # At each level we use a 32bit bitmap to store which elements are occupied.
 # Since our storage is "sparse" we need to map from index in [0,31] to
 # the actual storage index. We mask the bitmap with (1 << i) - 1 and count
-# the ones in the result. The number of set ones (+1) gives us the index
+# the ones in the result. The number of set ones gives us the index
 # into the storage array.
 #
 # HAMT can be both persistent and non-persistent.
@@ -69,7 +69,7 @@ end
 Base.@assume_effects :nothrow :effect_free function init_hamt(K, V, k, v)
     # For a single element we can't have a 'hash-collision
     trie = HAMT{K,V}(Vector{Union{Leaf{K, V}, HAMT{K, V}}}(undef, 1), zero(BITMAP))
-    trie.data[1] = Leaf{K,V}(k,v)
+    trie.data[0] = Leaf{K,V}(k,v)
     return trie
 end
 
@@ -142,7 +142,7 @@ end
 
 function entry_index(trie::HAMT, bi::BitmapIndex)
     mask = (UInt32(1) << bi.x) - UInt32(1)
-    count_ones(trie.bitmap & mask) + 1
+    count_ones(trie.bitmap & mask)
 end
 
 islevel_empty(trie::HAMT) = trie.bitmap == 0
@@ -258,11 +258,11 @@ end
 # DFS
 function Base.iterate(trie::HAMT, state=nothing)
     if state === nothing
-        state = (;parent=nothing, trie, i=1)
+        state = (;parent=nothing, trie, i=0)
     end
     while state !== nothing
         i = state.i
-        if i > Base.length(state.trie.data)
+        if i >= Base.length(state.trie.data)
             state = state.parent
             continue
         end
@@ -272,7 +272,7 @@ function Base.iterate(trie::HAMT, state=nothing)
             return (trie.key => trie.val, state)
         else
             # we found a new level
-            state = (;parent=state, trie, i=1)
+            state = (;parent=state, trie, i=0)
             continue
         end
     end

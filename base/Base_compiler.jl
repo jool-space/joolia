@@ -13,7 +13,7 @@ using .Core.Intrinsics, .Core.IR
 const _included_files = Array{Tuple{Module,String},1}(Core.undef, 400)
 setfield!(_included_files, :size, (1,))
 function include(mod::Module, path::String)
-    len = getfield(_included_files.size, 1)
+    len = getfield(_included_files.size, 0)
     memlen = _included_files.ref.mem.length
     lenp1 = Core.add_int(len, 1)
     if len === memlen # by the time this is true we hopefully will have defined _growend!
@@ -21,7 +21,7 @@ function include(mod::Module, path::String)
     else
         setfield!(_included_files, :size, (lenp1,))
     end
-    Core.memoryrefset!(Core.memoryref(_included_files.ref, lenp1), (mod, ccall(:jl_prepend_cwd, Any, (Any,), path)), :not_atomic, true)
+    Core.memoryrefset!(Core.memoryref(_included_files.ref, len), (mod, ccall(:jl_prepend_cwd, Any, (Any,), path)), :not_atomic, true)
     Core.println(path)
     ccall(:jl_uv_flush, Nothing, (Ptr{Nothing},), Core.io_pointer(Core.stdout))
     Core.include(mod, path)
@@ -373,8 +373,8 @@ const DL_LOAD_PATH = String[]
 baremodule BuildSettings end
 
 function process_sysimg_args!()
-    let i = 2 # skip file name
-        while i <= length(Core.ARGS)
+    let i = 1 # skip file name
+        while i < length(Core.ARGS)
             if Core.ARGS[i] == "--buildsettings"
                 include(BuildSettings, ARGS[i+1])
             elseif Core.ARGS[i] == "--buildroot"
@@ -407,8 +407,8 @@ Core._setlowerer!(fl_lower)
 # Further definition of Base will happen in Base.jl if loaded.
 
 # Ensure this file is also tracked
-@assert !isassigned(_included_files, 1)
-_included_files[1] = (@__MODULE__, ccall(:jl_prepend_cwd, Any, (Any,), "Base_compiler.jl"))
+@assert !isassigned(_included_files, 0)
+_included_files[0] = (@__MODULE__, ccall(:jl_prepend_cwd, Any, (Any,), "Base_compiler.jl"))
 
 end # module Base
 using .Base

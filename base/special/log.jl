@@ -150,7 +150,7 @@ logbL(::Type{Float64},::Val{10}) = 1.098319650216765e-17
 
 # Procedure 1
 @inline function log_proc1(y::Float64,mf::Float64,F::Float64,f::Float64,base=Val(:ℯ))
-    jp = unsafe_trunc(Int,128.0*F)-127
+    jp = unsafe_trunc(Int,128.0*F)-128
 
     ## Steps 1 and 2
     Base.@assume_effects :nothrow :noub @inbounds hi,lo = t_log_Float64[jp]
@@ -208,7 +208,7 @@ end
 
 # Procedure 1
 @inline function log_proc1(y::Float32,mf::Float32,F::Float32,f::Float32,base=Val(:ℯ))
-    jp = unsafe_trunc(Int,128.0f0*F)-127
+    jp = unsafe_trunc(Int,128.0f0*F)-128
 
     ## Steps 1 and 2
     Base.@assume_effects :nothrow :noub @inbounds hi = t_log_Float32[jp]
@@ -560,8 +560,8 @@ function _log_ext(xu::UInt64)
     z = reinterpret(Float64, xu -% (tmp & 0xfff0000000000000))
     k = Float64(tmp >> 52)
     # log(x) = k*Ln2 + log(c) + log1p(z/c-1).
-    # N.B. :nothrow and :noub since `idx` is known to be `1 ≤ idx ≤ length(t_log_table_compact)`
-    idx = (tmp >> 45) & (length(t_log_table_compact)-1) + 1
+    # N.B. :nothrow and :noub since `idx` is known to be `0 ≤ idx < length(t_log_table_compact)`
+    idx = (tmp >> 45) & (length(t_log_table_compact)-1)
     t, logctail = Base.@assume_effects :nothrow :noub @inbounds t_log_table_compact[idx]
     invc, logc = log_tab_unpack(t)
     # Note: invc is j/N or j/N/2 where j is an integer in [N,2N) and

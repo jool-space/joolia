@@ -1,35 +1,35 @@
 @testset "SourceFile lines and column indexing" begin
-    @test source_location(SourceFile("a"), 1) == (1,1)
-    @test source_location(SourceFile("a"), 2) == (1,2)
+    @test source_location(SourceFile("a"), 0) == (1,1)
+    @test source_location(SourceFile("a"), 1) == (1,2)
 
-    @test source_location(SourceFile("a\n"), 2) == (1,2)
-    @test source_location(SourceFile("a\n"), 3) == (2,1)
+    @test source_location(SourceFile("a\n"), 1) == (1,2)
+    @test source_location(SourceFile("a\n"), 2) == (2,1)
 
-    @test source_location(SourceFile("a\nb\n"), 2) == (1,2)
-    @test source_location(SourceFile("a\nb\n"), 3) == (2,1)
-    @test source_location(SourceFile("a\nb\n"), 4) == (2,2)
-    @test source_location(SourceFile("a\nb\n"), 5) == (3,1)
+    @test source_location(SourceFile("a\nb\n"), 1) == (1,2)
+    @test source_location(SourceFile("a\nb\n"), 2) == (2,1)
+    @test source_location(SourceFile("a\nb\n"), 3) == (2,2)
+    @test source_location(SourceFile("a\nb\n"), 4) == (3,1)
 
-    @test source_location(SourceFile("\n\n"), 1) == (1,1)
-    @test source_location(SourceFile("\n\n"), 2) == (2,1)
-    @test source_location(SourceFile("\n\n"), 3) == (3,1)
+    @test source_location(SourceFile("\n\n"), 0) == (1,1)
+    @test source_location(SourceFile("\n\n"), 1) == (2,1)
+    @test source_location(SourceFile("\n\n"), 2) == (3,1)
 
-    @test source_location(SourceFile("a"; first_line=7), 1) == (7,1)
-    @test source_location(SourceFile("a"; first_line=7), 2) == (7,2)
+    @test source_location(SourceFile("a"; first_line=7), 0) == (7,1)
+    @test source_location(SourceFile("a"; first_line=7), 1) == (7,2)
 
-    @test source_location(SourceFile("a\n"; first_line=7), 2) == (7,2)
-    @test source_location(SourceFile("a\n"; first_line=7), 3) == (8,1)
+    @test source_location(SourceFile("a\n"; first_line=7), 1) == (7,2)
+    @test source_location(SourceFile("a\n"; first_line=7), 2) == (8,1)
 
-    @test source_location(SourceFile("a\nb\n"; first_line=7), 2) == (7,2)
-    @test source_location(SourceFile("a\nb\n"; first_line=7), 3) == (8,1)
-    @test source_location(SourceFile("a\nb\n"; first_line=7), 4) == (8,2)
-    @test source_location(SourceFile("a\nb\n"; first_line=7), 5) == (9,1)
+    @test source_location(SourceFile("a\nb\n"; first_line=7), 1) == (7,2)
+    @test source_location(SourceFile("a\nb\n"; first_line=7), 2) == (8,1)
+    @test source_location(SourceFile("a\nb\n"; first_line=7), 3) == (8,2)
+    @test source_location(SourceFile("a\nb\n"; first_line=7), 4) == (9,1)
 
 
     mktemp() do path, io
         write(io, "a\n")
-        @test source_location(SourceFile(; filename=path), 1) == (1,1)
-        @test source_location(SourceFile(; filename=path, first_line=7), 1) == (7,1)
+        @test source_location(SourceFile(; filename=path), 0) == (1,1)
+        @test source_location(SourceFile(; filename=path, first_line=7), 0) == (7,1)
     end
 
     # byte offset
@@ -43,17 +43,17 @@
     @test source_line_range(sf, 15) == (15,18)
 
     # source_line convenience function
-    @test source_line(SourceFile("a\nb\n"), 2) == 1
-    @test source_line(SourceFile("a\nb\n"), 3) == 2
+    @test source_line(SourceFile("a\nb\n"), 1) == 1
+    @test source_line(SourceFile("a\nb\n"), 2) == 2
 end
 
 @testset "SourceFile position indexing" begin
-    @test SourceFile("a\nb\n")[1:2] == "a\n"
-    @test SourceFile("a\nb\n")[3:end] == "b\n"
+    @test SourceFile("a\nb\n")[0:1] == "a\n"
+    @test SourceFile("a\nb\n")[2:end] == "b\n"
 
     # unicode
-    @test SourceFile("αβ")[1:2] == "α"
-    @test SourceFile("αβ")[3] == 'β'
+    @test SourceFile("αβ")[0:1] == "α"
+    @test SourceFile("αβ")[2] == 'β'
 
     # offsets
     sf = SourceFile("abcd", first_index=10)
@@ -92,84 +92,84 @@ end
         +-*/""")
 
     # Empty ranges
-    @test sprint(highlight, src, 1:0) == "abcd\n└\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 2:1) == "abcd\n#└\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 3:2) == "abcd\n# └\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 4:3) == "abcd\n#  └\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 5:4) == "abcd\n#   └\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 6:5) == "abcd\nαβγδ\n└\n+-*/"
-    @test sprint(highlight, src, 19:18) == "abcd\nαβγδ\n+-*/\n#   └"
-    @test sprint(io->highlight(io, src, 1:0, context_lines_after=0, note="hi")) ==
+    @test sprint(highlight, src, 0:-1) == "abcd\n└\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 1:0) == "abcd\n#└\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 2:1) == "abcd\n# └\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 3:2) == "abcd\n#  └\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 4:3) == "abcd\n#   └\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 5:4) == "abcd\nαβγδ\n└\n+-*/"
+    @test sprint(highlight, src, 18:17) == "abcd\nαβγδ\n+-*/\n#   └"
+    @test sprint(io->highlight(io, src, 0:-1, context_lines_after=0, note="hi")) ==
         "abcd\n└ ── hi"
 
     # Single line ranges
-    @test sprint(highlight, src, 1:4) == "abcd\n└──┘\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 2:4) == "abcd\n#└─┘\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 3:4) == "abcd\n# └┘\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 4:4) == "abcd\n#  ╙\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 5:5) == "abcd\n#   └\nαβγδ\n+-*/"
-    @test sprint(highlight, src, 6:6) == "abcd\nαβγδ\n╙\n+-*/"
-    @test sprint(highlight, src, 6:9) == "abcd\nαβγδ\n└┘\n+-*/"
-    @test sprint(highlight, src, 8:8) == "abcd\nαβγδ\n#╙\n+-*/"
+    @test sprint(highlight, src, 0:3) == "abcd\n└──┘\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 1:3) == "abcd\n#└─┘\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 2:3) == "abcd\n# └┘\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 3:3) == "abcd\n#  ╙\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 4:4) == "abcd\n#   └\nαβγδ\n+-*/"
+    @test sprint(highlight, src, 5:5) == "abcd\nαβγδ\n╙\n+-*/"
+    @test sprint(highlight, src, 5:8) == "abcd\nαβγδ\n└┘\n+-*/"
+    @test sprint(highlight, src, 7:7) == "abcd\nαβγδ\n#╙\n+-*/"
 
     # multi-byte chars
-    @test sprint(highlight, src, 8:13) == """
+    @test sprint(highlight, src, 7:12) == """
         abcd
         αβγδ
         #└─┘
         +-*/"""
     # multi-byte char at eof
-    @test sprint(highlight, SourceFile("a α"), 3:4) == "a α\n# ╙"
-    @test sprint(highlight, SourceFile("a\nα"), 1:4) == "┌\na\nα\n┘"
-    @test sprint(highlight, SourceFile("a\nb\nα"), 3:3) == "a\nb\n╙\nα"
+    @test sprint(highlight, SourceFile("a α"), 2:3) == "a α\n# ╙"
+    @test sprint(highlight, SourceFile("a\nα"), 0:3) == "┌\na\nα\n┘"
+    @test sprint(highlight, SourceFile("a\nb\nα"), 2:2) == "a\nb\n╙\nα"
 
     # empty files
-    @test sprint(highlight, SourceFile(""), 1:0) == "└"
+    @test sprint(highlight, SourceFile(""), 0:-1) == "└"
 
     # Multi-line ranges
-    @test sprint(highlight, src, 1:7) == """
+    @test sprint(highlight, src, 0:6) == """
         ┌───
         abcd
         αβγδ
         ┘
         +-*/"""
-    @test sprint(highlight, src, 2:7) == """
+    @test sprint(highlight, src, 1:6) == """
         #┌──
         abcd
         αβγδ
         ┘
         +-*/"""
-    @test sprint(highlight, src, 2:9) == """
+    @test sprint(highlight, src, 1:8) == """
         #┌──
         abcd
         αβγδ
         #┘
         +-*/"""
-    @test sprint(highlight, src, 4:9) == """
+    @test sprint(highlight, src, 3:8) == """
         #  ┌
         abcd
         αβγδ
         #┘
         +-*/"""
-    @test sprint(highlight, src, 5:9) == """
+    @test sprint(highlight, src, 4:8) == """
         #   ┌
         abcd
         αβγδ
         #┘
         +-*/"""
-    @test sprint(highlight, src, 6:15) == """
+    @test sprint(highlight, src, 5:14) == """
         abcd
         ┌───
         αβγδ
         +-*/
         ┘"""
-    @test sprint(highlight, src, 8:15) == """
+    @test sprint(highlight, src, 7:14) == """
         abcd
         #┌──
         αβγδ
         +-*/
         ┘"""
-    @test sprint(highlight, src, 1:18) == """
+    @test sprint(highlight, src, 0:17) == """
         ┌───
         abcd
         αβγδ
@@ -177,20 +177,20 @@ end
         #──┘"""
 
     # context lines
-    @test sprint(io->highlight(io, src, 8:13;
+    @test sprint(io->highlight(io, src, 7:12;
                                context_lines_before=0,
                                context_lines_after=0)) == """
         αβγδ
         #└─┘"""
-    @test sprint(io->highlight(io, src, 8:13; context_lines_after=0)) == """
+    @test sprint(io->highlight(io, src, 7:12; context_lines_after=0)) == """
         abcd
         αβγδ
         #└─┘"""
-    @test sprint(io->highlight(io, src, 8:13; context_lines_before=0)) == """
+    @test sprint(io->highlight(io, src, 7:12; context_lines_before=0)) == """
         αβγδ
         #└─┘
         +-*/"""
-    @test sprint(io->highlight(io, src, 1:18; context_lines_inner=0)) == """
+    @test sprint(io->highlight(io, src, 0:17; context_lines_inner=0)) == """
         ┌───
         abcd
         ⋮
@@ -198,18 +198,18 @@ end
         #──┘"""
 
     # annotations
-    @test sprint(io->highlight(io, src, 8:13; note="hello")) == """
+    @test sprint(io->highlight(io, src, 7:12; note="hello")) == """
         abcd
         αβγδ
         #└─┘ ── hello
         +-*/"""
-    @test sprint(io->highlight(io, src, 1:13; note="hello")) == """
+    @test sprint(io->highlight(io, src, 0:12; note="hello")) == """
         ┌───
         abcd
         αβγδ
         #──┘ ── hello
         +-*/"""
-    @test sprint(io->highlight(io, src, 8:13;
+    @test sprint(io->highlight(io, src, 7:12;
                                note=(io,indent,w)->print(io, "\n$indent$('!'^w) hello"))) == """
         abcd
         αβγδ
@@ -218,13 +218,29 @@ end
         +-*/"""
 
     # colored output
-    @test sprint(io->highlight(io, src, 8:13; context_lines_after=0, note="hello", notecolor=:light_red),
+    @test sprint(io->highlight(io, src, 7:12; context_lines_after=0, note="hello", notecolor=:light_red),
                  context=:color=>true) ==
         "abcd\nα\e[48;2;120;70;70mβγδ\e[0;0m\n\e[90m#└─┘ ── \e[0;0m\e[91mhello\e[0;0m"
-    @test sprint(io->highlight(io, src, 1:13; context_lines_after=0, note="hello", notecolor=(255,0,0)),
+    @test sprint(io->highlight(io, src, 0:12; context_lines_after=0, note="hello", notecolor=(255,0,0)),
                  context=:color=>true) ==
         "\e[90m┌───\e[0;0m\n\e[48;2;120;70;70mabcd\e[0;0m\n\e[48;2;120;70;70mαβγδ\e[0;0m\n\e[90m#──┘ ── \e[0;0m\e[38;2;255;0;0mhello\e[0;0m"
-    @test sprint(io->highlight(io, src, 1:18, context_lines_inner=0),
+    @test sprint(io->highlight(io, src, 0:17, context_lines_inner=0),
                  context=:color=>true) ==
         "\e[90m┌───\e[0;0m\n\e[48;2;120;70;70mabcd\e[0;0m\n\e[48;2;120;70;70m\e[0;0m⋮\n\e[48;2;120;70;70m+-*/\e[0;0m\n\e[90m#──┘\e[0;0m"
+end
+
+# Zero-origin byte positions include empty text, nonzero source offsets, and EOF.
+@testset "zero-origin source boundaries" begin
+    empty = SourceFile("")
+    @test firstindex(empty) == 0 && lastindex(empty) == -1
+    @test source_location(empty, 0) == (1, 1)
+    @test source_line_range(empty, 0) == (0, -1)
+    @test sprint(highlight, empty, 0:-1) == "└"
+    sf = SourceFile("α\nβ", first_index=100, first_line=7)
+    @test sf[100:101] == "α"
+    @test source_location(sf, 103) == (8, 1)
+    @test source_line_range(sf, 103) == (103, 104)
+    @test source_location(sf, 105) == (8, 2)
+    @test source_location(LineNumberNode, sf, 103) == LineNumberNode(8)
+    @test sprint(JuliaSyntax.show_diagnostic, JuliaSyntax.Diagnostic(0, 0; error="first"), SourceFile("a")) == "# Error @ line 1:1\na\n╙ ── first"
 end

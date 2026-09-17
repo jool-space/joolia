@@ -129,8 +129,8 @@ end
 function in!(x, s::Set)
     xT = convert(eltype(s), x)
     idx, sh = ht_keyindex2_shorthash!(s.dict, xT)
-    idx > 0 && return true
-    _setindex!(s.dict, nothing, xT, -idx, sh)
+    idx >= 0 && return true
+    _setindex!(s.dict, nothing, xT, -idx - 1, sh)
     return false
 end
 
@@ -139,7 +139,7 @@ push!(s::Set, x) = (s.dict[x] = nothing; s)
 function pop!(s::Set, x, default)
     dict = s.dict
     index = ht_keyindex(dict, x)
-    if index > 0
+    if index >= 0
         @inbounds key = dict.keys[index]
         _delete!(dict, index)
         return key
@@ -150,7 +150,7 @@ end
 
 function pop!(s::Set, x)
     index = ht_keyindex(s.dict, x)
-    index < 1 && throw(KeyError(x))
+    index < 0 && throw(KeyError(x))
     result = @inbounds s.dict.keys[index]
     _delete!(s.dict, index)
     result
@@ -158,7 +158,7 @@ end
 
 function pop!(s::Set)
     isempty(s) && throw(ArgumentError("set must be non-empty"))
-    return pop!(s.dict)[1]
+    return pop!(s.dict)[0]
 end
 
 delete!(s::Set, x) = (delete!(s.dict, x); s)
@@ -420,14 +420,14 @@ function _groupedunique!(A::AbstractVector)
     y = first(A)
     # We always keep the first element
     T = NTuple{2,Any} # just to eliminate `iterate(idxs)::Nothing` candidate
-    it = iterate(idxs, (iterate(idxs)::T)[2])
+    it = iterate(idxs, (iterate(idxs)::T)[1])
     count = 1
     for x in Iterators.drop(A, 1)
         if !isequal(x, y)
             it = it::T
-            y = A[it[1]] = x
+            y = A[it[0]] = x
             count += 1
-            it = iterate(idxs, it[2])
+            it = iterate(idxs, it[1])
         end
     end
     resize!(A, count)::typeof(A)
@@ -984,7 +984,7 @@ function _replace!(new::Callable, t::Dict{K,V}, A::AbstractDict, count::Int) whe
     c = 0
     news = Pair{K,V}[]
     i = skip_deleted_floor!(t)
-    @inbounds while i != 0
+    @inbounds while i >= 0
         k1, v1 = t.keys[i], t.vals[i]
         x1 = Pair{K,V}(k1, v1)
         x2 = new(x1)
@@ -1001,7 +1001,7 @@ function _replace!(new::Callable, t::Dict{K,V}, A::AbstractDict, count::Int) whe
             c += 1
             c == count && break
         end
-        i = i == typemax(Int) ? 0 : skip_deleted(t, i+1)
+        i = i == typemax(Int) ? -1 : skip_deleted(t, i+1)
     end
     for n in news
         push!(t, n)

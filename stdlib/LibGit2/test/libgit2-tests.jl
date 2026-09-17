@@ -97,7 +97,16 @@ end
     @test z == LibGit2.GitHash(rs)
     @test z == LibGit2.GitHash(pointer(rr))
 
-    @test LibGit2.GitShortHash(z, 20) == LibGit2.GitShortHash(rs[1:20])
+    @test LibGit2.GitShortHash(z, 20) == LibGit2.GitShortHash(rs[0:19])
+    hex = "0123456789abcdef0123456789abcdef01234567"
+    h = LibGit2.GitHash(hex)
+    @test string(h) == hex
+    @test LibGit2.raw(h) == [parse(UInt8, hex[i:i+1], base=16) for i in 0:2:39]
+    @test !LibGit2.iszero(h)
+    short = LibGit2.GitShortHash(h, 7)
+    @test string(short) == hex[0:6]
+    @test isempty(string(LibGit2.GitShortHash(h, 0)))
+    @test LibGit2.GitHash(LibGit2.raw(h)) == h
     @test_throws ArgumentError LibGit2.GitHash(Ptr{UInt8}(C_NULL))
     @test_throws ArgumentError LibGit2.GitHash(rand(UInt8, 2*LibGit2.OID_RAWSZ))
     @test_throws ArgumentError LibGit2.GitHash("a")

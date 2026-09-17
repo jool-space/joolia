@@ -48,12 +48,12 @@ in(@nospecialize(x), s::IdSet) = haskey(s, x)
 function push!(s::IdSet, @nospecialize(x))
     idx = ccall(:jl_idset_peek_bp, Int, (Any, Any, Any), s.list, s.idxs, x)
     if idx >= 0
-        s.list[idx + 1] = x
+        s.list[idx] = x
     else
         if s.max < length(s.list)
             idx = s.max
-            @assert !isassigned(s.list, idx + 1) "bucket is already occupied"
-            s.list[idx + 1] = x
+            @assert !isassigned(s.list, idx) "bucket is already occupied"
+            s.list[idx] = x
             s.max = idx + 1
         else
             newidx = RefValue{Int}(0)
@@ -61,7 +61,7 @@ function push!(s::IdSet, @nospecialize(x))
             idx = newidx[]
             s.max = idx < 0 ? -idx : idx + 1
         end
-        @assert s.list[s.max] === x "unexpected object in bucket"
+        @assert s.list[s.max-1] === x "unexpected object in bucket"
         setfield!(s, :idxs, ccall(:jl_idset_put_idx, Any, (Any, Any, Int), s.list, s.idxs, idx))
         s.count += 1
     end
@@ -71,7 +71,7 @@ function _pop!(s::IdSet, @nospecialize(x))
     removed = ccall(:jl_idset_pop, Int, (Any, Any, Any), s.list, s.idxs, x)
     if removed != -1
         s.count -= 1
-        while s.max > 0 && !isassigned(s.list, s.max)
+        while s.max > 0 && !isassigned(s.list, s.max-1)
             s.max -= 1
         end
     end
@@ -107,7 +107,7 @@ end
 function empty!(s::IdSet)
     _zero!(s.idxs)
     list = s.list
-    for i = 1:s.max
+    for i = 0:(s.max-1)
         unsetindex!(list, i)
     end
     s.count = 0
@@ -121,6 +121,6 @@ function iterate(s::IdSet{S}, state=0) where {S}
     while true
         state += 1
         state > s.max && return nothing
-        isassigned(s.list, state) && return s.list[state]::S, state
+        isassigned(s.list, state-1) && return s.list[state-1]::S, state
     end
 end

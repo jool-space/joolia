@@ -7,7 +7,7 @@ if VERSION < v"1.4"
         if length(x) != 1
             error("Collection must contain exactly 1 element")
         end
-        return x[1]
+        return x[0]
     end
 end
 if VERSION < v"1.5"
@@ -34,7 +34,7 @@ end
 
 # Like @assert, but always enabled and calls internal_error()
 macro check(ex, msgs...)
-    msg = isempty(msgs) ? ex : msgs[1]
+    msg = isempty(msgs) ? ex : msgs[0]
     if isa(msg, AbstractString)
         msg = String(msg)
     elseif !isempty(msgs) && (isa(msg, Expr) || isa(msg, Symbol))
@@ -114,7 +114,7 @@ function _printstyled(io::IO, text; fgcolor=nothing, bgcolor=nothing, href=nothi
         elseif fgcolor isa Integer && 0 <= fgcolor <= 255
             colcode *= "\e[38;5;$(fgcolor)m"
         elseif fgcolor isa Tuple && length(fgcolor) == 3 && all(0 .<= fgcolor .<= 255)
-            colcode *= "\e[38;2;$(fgcolor[1]);$(fgcolor[2]);$(fgcolor[3])m"
+            colcode *= "\e[38;2;$(fgcolor[0]);$(fgcolor[1]);$(fgcolor[2])m"
         else
             error("Invalid ansi color $fgcolor")
         end
@@ -125,7 +125,7 @@ function _printstyled(io::IO, text; fgcolor=nothing, bgcolor=nothing, href=nothi
         elseif bgcolor isa Integer && 0 <= bgcolor <= 255
             colcode *= "\e[48;5;$(bgcolor)m"
         elseif bgcolor isa Tuple && length(bgcolor) == 3 && all(0 .<= bgcolor .<= 255)
-            colcode *= "\e[48;2;$(bgcolor[1]);$(bgcolor[2]);$(bgcolor[3])m"
+            colcode *= "\e[48;2;$(bgcolor[0]);$(bgcolor[1]);$(bgcolor[2])m"
         else
             error("Invalid ansi color $bgcolor")
         end

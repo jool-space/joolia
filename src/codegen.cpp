@@ -4361,8 +4361,8 @@ static bool emit_f_opfield(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
         }
         else if (fld.constant && fld.typ == (jl_value_t*)jl_long_type) {
             ssize_t i = jl_unbox_long(fld.constant);
-            if (i > 0 && i <= (ssize_t)jl_datatype_nfields(uty))
-                idx = i - 1;
+            if (i >= 0 && i < (ssize_t)jl_datatype_nfields(uty))
+                idx = i;
         }
         if (idx != -1) {
             jl_value_t *ft = jl_field_type(uty, idx);
@@ -5235,7 +5235,7 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                     size_t nfields = jl_datatype_nfields(utt);
                     // integer index
                     size_t idx;
-                    if (fld.constant && (idx = jl_unbox_long(fld.constant) - 1) < nfields) {
+                    if (fld.constant && (idx = jl_unbox_long(fld.constant)) < nfields) {
                         if (!jl_has_free_typevars(jl_field_type(utt, idx))) {
                             // known index
                             *ret = emit_getfield_knownidx(ctx, obj, idx, utt, order);
@@ -5268,10 +5268,7 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                     assert(jl_is_datatype(jt));
                     // This is not necessary for correctness, but allows to omit
                     // the extra code for getting the length of the tuple
-                    if (!bounds_check_enabled(ctx, boundscheck)) {
-                        vidx = ctx.builder.CreateSub(vidx, ConstantInt::get(ctx.types().T_size, 1));
-                    }
-                    else {
+                    if (bounds_check_enabled(ctx, boundscheck)) {
                         vidx = emit_bounds_check(ctx, ptrobj, (jl_value_t*)ptrobj.typ, vidx,
                             emit_datatype_nfields(ctx, emit_typeof(ctx, ptrobj, false, false)),
                             jl_true);
@@ -5285,7 +5282,6 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                 }
 
                 // Unknown object, but field known to be integer
-                vidx = ctx.builder.CreateSub(vidx, ConstantInt::get(ctx.types().T_size, 1));
                 Value *fld_val = ctx.builder.CreateCall(prepare_call(jlgetnthfieldchecked_func), { boxed(ctx, obj), vidx }, "getfield");
                 *ret = mark_julia_type(ctx, fld_val, true, jl_any_type);
                 return true;
@@ -5307,7 +5303,7 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                             {emit_typeof(ctx, obj, false, false), boxed(ctx, fld), ConstantInt::get(getInt32Ty(ctx.builder.getContext()), 0)});
                     Value *cond = ctx.builder.CreateICmpNE(index, ConstantInt::get(getInt32Ty(ctx.builder.getContext()), -1));
                     emit_hasnofield_error_ifnot(ctx, cond, utt, fld);
-                    Value *idx2 = ctx.builder.CreateAdd(ctx.builder.CreateIntCast(index, ctx.types().T_size, false), ConstantInt::get(ctx.types().T_size, 1)); // getfield_unknown is 1 based
+                    Value *idx2 = ctx.builder.CreateIntCast(index, ctx.types().T_size, false);
                     if (emit_getfield_unknownidx(ctx, ret, obj, idx2, utt, jl_false, order))
                         return true;
                 }
@@ -5427,7 +5423,8 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                 if (nargs == 3)
                     emit_typecheck(ctx, argv[3], (jl_value_t*)jl_bool_type, "fieldtype");
                 emit_bounds_check(ctx, typ, (jl_value_t*)jl_datatype_type, idx, types_len, boundscheck);
-                Value *fieldtyp_p = ctx.builder.CreateInBoundsGEP(ctx.types().T_prjlvalue, decay_derived(ctx, types_svec), idx);
+                Value *fieldtyp_p = ctx.builder.CreateInBoundsGEP(ctx.types().T_prjlvalue, decay_derived(ctx, types_svec),
+                    ctx.builder.CreateAdd(idx, ConstantInt::get(ctx.types().T_size, 1))); // skip the SimpleVector length word
                 jl_aliasinfo_t ai = ctx.alias().constant;
                 Value *fieldtyp = ai.decorateInst(ctx.builder.CreateAlignedLoad(ctx.types().T_prjlvalue, fieldtyp_p, Align(sizeof(void*))));
                 setName(ctx.emission_context, fieldtyp, "fieldtype");
@@ -5559,14 +5556,13 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
             fieldidx = jl_field_index(stt, sym, 0);
         }
         else if (fld.constant && fld.typ == (jl_value_t*)jl_long_type) {
-            fieldidx = jl_unbox_long(fld.constant) - 1;
+            fieldidx = jl_unbox_long(fld.constant);
         }
         else {
 isdefined_unknown_idx:
             if (nargs == 3 || fld.typ != (jl_value_t*)jl_long_type)
                 return false;
             Value *vidx = emit_unbox(ctx, ctx.types().T_size, fld);
-            vidx = ctx.builder.CreateSub(vidx, ConstantInt::get(ctx.types().T_size, 1));
             Value *isd = ctx.builder.CreateCall(prepare_call(jlfieldisdefinedchecked_func), { boxed(ctx, obj), vidx });
             isd = ctx.builder.CreateTrunc(isd, getInt8Ty(ctx.builder.getContext()));
             *ret = mark_julia_type(ctx, isd, false, jl_bool_type);

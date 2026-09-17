@@ -16,6 +16,40 @@ using Random.DSFMT
 using Random: default_rng, Sampler, SamplerRangeFast, SamplerRangeInt, SamplerRangeNDL, MT_CACHE_F, MT_CACHE_I
 using Random: jump_128, jump_192, jump_128!, jump_192!, SeedHasher
 
+@testset "zero-origin collection samplers" begin
+    xrng = Xoshiro(1, 2, 3, 4, 5)
+    @test rand(xrng, (10, 20, 30)) in (10, 20, 30)
+    @test rand(xrng, [10, 20, 30]) in (10, 20, 30)
+    chars = [rand(xrng, "abc") for _ in 0:7]
+    @test all(c -> c in ('a', 'b', 'c'), chars)
+
+    p = randperm(Xoshiro(1, 2, 3, 4, 5), 8)
+    @test firstindex(p) == 0
+    @test sort(p) == collect(0:7)
+    c = randcycle(Xoshiro(1, 2, 3, 4, 5), 8)
+    @test firstindex(c) == 0
+    @test sort(c) == collect(0:7)
+
+    a = collect(10:17)
+    shuffle!(Xoshiro(1, 2, 3, 4, 5), a)
+    @test firstindex(a) == 0 && sort(a) == collect(10:17)
+    @test randsubseq(Xoshiro(1, 2, 3, 4, 5), collect(0:7), 1.0) == collect(0:7)
+    @test isempty(randperm(Xoshiro(1, 2, 3, 4, 5), 0))
+
+    m = rand(MersenneTwister(1, 2), UInt128, 8)
+    @test firstindex(m) == 0 && lastindex(m) == 7
+end
+
+@testset "integer seed repeatability" begin
+    for ctor in (Xoshiro, MersenneTwister)
+        a = ctor(123)
+        b = ctor(123)
+        @test [rand(a) for _ in 0:7] == [rand(b) for _ in 0:7]
+    end
+end
+
+
+
 import SHA
 import Future # randjump
 
@@ -152,17 +186,17 @@ function randmtzig_fill_ziggurat_tables() # Operates on the global arrays
     feb = big.(fe)
     # Ziggurat tables for the normal distribution
     x1 = ziggurat_nor_r
-    wib[256] = x1/nmantissa
-    fib[256] = exp(-0.5*x1*x1)
+    wib[255] = x1/nmantissa
+    fib[255] = exp(-0.5*x1*x1)
     # Index zero is special for tail strip, where Marsaglia and Tsang
     # defines this as
     # k_0 = 2^31 * r * f(r) / v, w_0 = 0.5^31 * v / f(r), f_0 = 1,
     # where v is the area of each strip of the ziggurat.
-    ki[1] = trunc(UInt64,x1*fib[256]/nor_section_area*nmantissa)
-    wib[1] = nor_section_area/fib[256]/nmantissa
-    fib[1] = one(BigFloat)
+    ki[0] = trunc(UInt64,x1*fib[255]/nor_section_area*nmantissa)
+    wib[0] = nor_section_area/fib[255]/nmantissa
+    fib[0] = one(BigFloat)
 
-    for i = 255:-1:2
+    for i = 254:-1:1
         # New x is given by x = f^{-1}(v/x_{i+1} + f(x_{i+1})), thus
         # need inverse operator of y = exp(-0.5*x*x) -> x = sqrt(-2*ln(y))
         x = sqrt(-2.0*log(nor_section_area/x1 + fib[i+1]))
@@ -172,22 +206,22 @@ function randmtzig_fill_ziggurat_tables() # Operates on the global arrays
         x1 = x
     end
 
-    ki[2] = UInt64(0)
+    ki[1] = UInt64(0)
 
     # Ziggurat tables for the exponential distribution
     x1 = ziggurat_exp_r
-    web[256] = x1/emantissa
-    feb[256] = exp(-x1)
+    web[255] = x1/emantissa
+    feb[255] = exp(-x1)
 
     # Index zero is special for tail strip, where Marsaglia and Tsang
     # defines this as
     # k_0 = 2^32 * r * f(r) / v, w_0 = 0.5^32 * v / f(r), f_0 = 1,
     # where v is the area of each strip of the ziggurat.
-    ke[1] = trunc(UInt64,x1*feb[256]/exp_section_area*emantissa)
-    web[1] = exp_section_area/feb[256]/emantissa
-    feb[1] = one(BigFloat)
+    ke[0] = trunc(UInt64,x1*feb[255]/exp_section_area*emantissa)
+    web[0] = exp_section_area/feb[255]/emantissa
+    feb[0] = one(BigFloat)
 
-    for i = 255:-1:2
+    for i = 254:-1:1
         # New x is given by x = f^{-1}(v/x_{i+1} + f(x_{i+1})), thus
         # need inverse operator of y = exp(-x) -> x = -ln(y)
         x = -log(exp_section_area/x1 + feb[i+1])
@@ -196,7 +230,7 @@ function randmtzig_fill_ziggurat_tables() # Operates on the global arrays
         feb[i] = exp(-x)
         x1 = x
     end
-    ke[2] = zero(UInt64)
+    ke[1] = zero(UInt64)
 
     wi[:] = wib
     fi[:] = fib
@@ -661,7 +695,7 @@ end
     # issue #21248
     seed = rand(UInt)
     for m = ([MersenneTwister(seed)], [Xoshiro(seed)], [SeedHasher(seed)], [])
-        m2 = m == [] ? default_rng() : m[1]
+        m2 = m == [] ? default_rng() : m[0]
         @test Random.seed!(m...) === m2
         @test Random.seed!(m..., rand(UInt)) === m2
         @test Random.seed!(m..., rand(UInt32, rand(1:10))) === m2
@@ -843,11 +877,11 @@ end
         rd = RandomDevice()
         @test () == rand(rd, Tuple{})
         xs = rand(rd, Tuple{Int, Int})
-        @test xs isa Tuple{Int, Int} && xs[1] != xs[2]
+        @test xs isa Tuple{Int, Int} && xs[0] != xs[1]
         xs = rand(rd, NTuple{2, Int})
-        @test xs isa Tuple{Int, Int} && xs[1] != xs[2]
+        @test xs isa Tuple{Int, Int} && xs[0] != xs[1]
         xs = rand(rd, Tuple{Int, UInt}) # not NTuple
-        @test xs isa Tuple{Int, UInt} && xs[1] != xs[2]
+        @test xs isa Tuple{Int, UInt} && xs[0] != xs[1]
         xs = rand(rd, Tuple{Bool}) # not included in the specialization
         @test xs isa Tuple{Bool}
     end
@@ -1072,10 +1106,10 @@ end
 function f42752(do_gc::Bool, cell = (()->Any[[]])())
     a = rand()
     if do_gc
-        finalizer(cell[1]) do _
+        finalizer(cell[0]) do _
             @async nothing
         end
-        cell[1] = nothing
+        cell[0] = nothing
         GC.gc()
     end
     b = rand()
@@ -1302,4 +1336,56 @@ end
 
 @testset "Docstrings" begin
     @test isempty(Docs.undocumented_names(Random))
+end
+
+# Match upstream dSFMT output across two integer cache refills.
+@testset "zero-origin MersenneTwister integer cache" begin
+    expected = Dict(
+        0 => Int64(-3880145126459652983),
+        1 => Int64(-7508461943845251099),
+        1000 => Int64(-8043774178014817469),
+        1001 => Int64(2972373672409337416),
+        1002 => Int64(-519194747402702760),
+        1003 => Int64(5665841814151018469),
+        2003 => Int64(-8137914370627023031),
+        2004 => Int64(2383892181293444926),
+    )
+    rng = MersenneTwister(123)
+    for i in 0:2004
+        x = rand(rng, Int64)
+        haskey(expected, i) && @test x == expected[i]
+    end
+end
+
+# Seeded normal/exponential arrays must match upstream Julia across scalar/vector cutovers.
+@testset "zero-origin normal and exponential references" begin
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(Xoshiro(123), 1)))) == "387160f9c6823ff524966b387def86aa5f4dba27e51129ca9d351b4a296108f9"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(Xoshiro(123), 6)))) == "bc8adbe390d982159846cd959cd1974d6f32de7825b0df055617d706054b2cf0"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(Xoshiro(123), 7)))) == "6f7cfc0f1e451d332eb9e028dfa237fad1719d1339230725f1fd53e7424838a9"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(Xoshiro(123), 12)))) == "237d6347463b2554cf0c762e56320cdd2035920d930c3fbbf784b47ac53b4f54"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(Xoshiro(123), 13)))) == "16dda5c9c8ea441786a7c39f0e5d5347e5404e788713ea8b36e008d58c2c81a5"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(Xoshiro(123), 256)))) == "29fb18679351a7fac6782cf958a7d7e1f148277cc992c4fde3a6a326b1941d1b"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(Xoshiro(123), 1024)))) == "19d994dfb649a6bc76400140d667221abd83861636bdab5ccc9f7c968dc8a6c4"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(Xoshiro(123), 1)))) == "3c96ff2daf9acde59335477be39c189f3485024519ac18577d1612593d8e7286"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(Xoshiro(123), 6)))) == "e19b5e37dc3876b98324592f4bdeb5d7b66465ff1e90e0ea009024a17bac3644"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(Xoshiro(123), 7)))) == "f3b7283e8465b42b86bc9d4ba0d6b2284cd55f27bb49b285d1e623807788cbac"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(Xoshiro(123), 12)))) == "faab748ae7d01ec378d1d373006f9ec88d5e89b6ad7919ec1de5d333d9d186cc"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(Xoshiro(123), 13)))) == "e80ee809e325569dcec31aed8929697f22909234eb72c61907272644ca043c72"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(Xoshiro(123), 256)))) == "cb2d1866280364a83cf89f0e194d168144f1c3535e26ee835a6eb63c7951095c"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(Xoshiro(123), 1024)))) == "356a0ed8d1db313c15d9884f234f574acbc6b9dcca33e3310e5b0aba06a9ddbc"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(MersenneTwister(123), 1)))) == "703dd4186d45a16a9c4a18deeb73f9486754f637e3fc8aef86a5ed2561b9e42b"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(MersenneTwister(123), 6)))) == "5e963066b6208931432ed5f0cf001bf3108cf197a9c716271e110991dd7250fa"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(MersenneTwister(123), 7)))) == "6782a919e70554e975161ec834e9aff7caf9afd77b4b07d466c69200d9ca7c96"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(MersenneTwister(123), 12)))) == "b735e4437098b87c40133efb31953cd056f6a1e08347c9fe999ea7ad58b50b17"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(MersenneTwister(123), 13)))) == "aff921f6b2239a4622ac74004f293e3d602be7c865bb989bd6bbb24c3382d195"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(MersenneTwister(123), 256)))) == "3c969c691b14c1244a31b58640f04d121ec8ecea553b3ff7658b42991a6b7736"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randn(MersenneTwister(123), 1024)))) == "f734dbe0bd5cd67f075526275f247e20cc94b69b424e7a91598b515da193028f"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(MersenneTwister(123), 1)))) == "8fb44219cf460ef2f2015132d121b292ac6587d428e62aa5df6c8d253f135cd4"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(MersenneTwister(123), 6)))) == "eb120f1ece6f02d9e9f99a4bdf8f2dddab4c9b543d93c085b18e8a36c7f4c435"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(MersenneTwister(123), 7)))) == "0874c35622a1abdda3854887a4fc5c70dd136947ae3d4c6d4d00345ceb9ef622"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(MersenneTwister(123), 12)))) == "388fb9b22d1764be0a8f6da11ebd10cdaabcd3e704120ecc711cce2bc72080a7"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(MersenneTwister(123), 13)))) == "cbf01063a87baf6299307f1ab2bdc1f3e334ee6d6645444f5e7daab886a5f6a3"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(MersenneTwister(123), 256)))) == "8d4a7e5bb6f037334696392dbf7c7f625c6467794863843ca9040d0c992e03ff"
+    @test bytes2hex(SHA.sha256(reinterpret(UInt8, randexp(MersenneTwister(123), 1024)))) == "1cc77af0f265f402ce2c44986c9d67d020483cf70ad72e8ea89f8e104ab43c0c"
+    @test rand(Xoshiro(123), Tuple{Bool,Int,Float64}) isa Tuple{Bool,Int,Float64}
 end

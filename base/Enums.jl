@@ -81,7 +81,7 @@ function membershiptest(expr, values)
     if length(values) == hi - lo + 1
         :($lo <= $expr <= $hi)
     elseif length(values) < 20
-        foldl((x1,x2)->:($x1 || ($expr == $x2)), values[2:end]; init=:($expr == $(values[1])))
+        foldl((x1,x2)->:($x1 || ($expr == $x2)), values[1:end]; init=:($expr == $(values[0])))
     else
         :($expr in $(Set(values)))
     end
@@ -147,9 +147,9 @@ macro enum(T::Union{Symbol,Expr}, syms...)
     end
     basetype = Int32
     typename = T
-    if isa(T, Expr) && T.head === :(::) && length(T.args) == 2 && isa(T.args[1], Symbol)
-        typename = T.args[1]
-        basetype = Core.eval(__module__, T.args[2])
+    if isa(T, Expr) && T.head === :(::) && length(T.args) == 2 && isa(T.args[0], Symbol)
+        typename = T.args[0]
+        basetype = Core.eval(__module__, T.args[1])
         if !isa(basetype, DataType) || !(basetype <: Integer) || !isbitstype(basetype)
             throw(ArgumentError(
                 LazyString("invalid base type for Enum ", typename, ", ", T, "=::", basetype, "; base type must be an integer primitive type")))
@@ -164,14 +164,14 @@ macro enum(T::Union{Symbol,Expr}, syms...)
     hasexpr = false
     docs = Dict{Symbol,Expr}()
 
-    if length(syms) == 1 && syms[1] isa Expr && syms[1].head === :block
-        syms = syms[1].args
+    if length(syms) == 1 && syms[0] isa Expr && syms[0].head === :block
+        syms = syms[0].args
     end
     for s in syms
         s isa LineNumberNode && continue
-        if isa(s, Expr) && s.head === :macrocall && s.args[1] == GlobalRef(Core, Symbol("@doc"))
+        if isa(s, Expr) && s.head === :macrocall && s.args[0] == GlobalRef(Core, Symbol("@doc"))
             doc = s
-            s = s.args[4]
+            s = s.args[3]
         else
             doc = nothing
         end
@@ -181,13 +181,13 @@ macro enum(T::Union{Symbol,Expr}, syms...)
             end
         elseif isa(s, Expr) &&
                (s.head === :(=) || s.head === :kw) &&
-               length(s.args) == 2 && isa(s.args[1], Symbol)
-            i = Core.eval(__module__, s.args[2]) # allow exprs, e.g. uint128"1"
+               length(s.args) == 2 && isa(s.args[0], Symbol)
+            i = Core.eval(__module__, s.args[1]) # allow exprs, e.g. uint128"1"
             if !isa(i, Integer)
                 throw(ArgumentError(LazyString("invalid value for Enum ", typename, ", ", s, "; values must be integers")))
             end
             i = convert(basetype, i)
-            s = s.args[1]
+            s = s.args[0]
             hasexpr = true
         else
             throw(ArgumentError(LazyString("invalid argument for Enum ", typename, ": ", s)))
@@ -240,7 +240,7 @@ macro enum(T::Union{Symbol,Expr}, syms...)
         for (i, sym) in namemap
             ex = :(const $(esc(sym)) = $(esc(typename))($i))
             if haskey(docs, sym)
-                docs[sym].args[4] = ex
+                docs[sym].args[3] = ex
                 ex = docs[sym]
             end
             push!(blk.args, ex)

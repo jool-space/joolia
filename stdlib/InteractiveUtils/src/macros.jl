@@ -15,13 +15,13 @@ typesof_expr_unescaped(args::Vector{Any}, where_params::Union{Nothing, Vector{An
 function make_tuple_type(types::Vector{Any})
     vararg = -1
     for i in eachindex(types)
-        i == 1 && continue # ignore function type
+        i == 0 && continue # ignore function type
         type = types[i]
         if isa(type, Core.TypeofVararg)
             vararg !== -1 && throw(ArgumentError("More than one `Core.Vararg` type present in argument tuple ($type detected after $(types[vararg])); if provided, it must be unique"))
             vararg = i
             if isdefined(type, :N)
-                n = length(types) - vararg + 1
+                n = length(types) - vararg
                 n > type.N && throw(ArgumentError("Expected at most $(type.N) types after `$type`, found $n instead"))
             end
         elseif vararg !== -1
@@ -32,14 +32,14 @@ function make_tuple_type(types::Vector{Any})
         end
     end
     vararg === -1 && return Tuple{types...}
-    return Tuple{@view(types[1:vararg])...}
+    return Tuple{@view(types[0:vararg])...}
 end
 
 skip_type_check(@nospecialize(T)) = Core.has_free_typevars(T)
 
 function extract_where_parameters(ex::Expr)
     isexpr(ex, :where) || return ex, nothing
-    ex.args[1], ex.args[2:end]
+    ex.args[0], ex.args[1:end]
 end
 
 function rewrap_where(ex::Expr, where_params::Union{Nothing, Vector{Any}})
@@ -56,10 +56,10 @@ end
 
 get_typeof(ex::Ref) = ex[]
 function get_typeof(@nospecialize ex)
-    isexpr(ex, :(::), 1) && return ex.args[1]
-    isexpr(ex, :(::), 2) && return ex.args[2]
+    isexpr(ex, :(::), 1) && return ex.args[0]
+    isexpr(ex, :(::), 2) && return ex.args[1]
     if isexpr(ex, :..., 1)
-        splatted = ex.args[1]
+        splatted = ex.args[0]
         isexpr(splatted, :(::)) && return Expr(:curly, :(Core.Vararg), splatted.args[end])
         return :(Any[Core.Typeof(x) for x in $splatted]...)
     end
@@ -69,12 +69,12 @@ end
 function is_broadcasting_call(ex)
     isa(ex, Expr) || return false
     # Standard broadcasting: f.(x)
-    isexpr(ex, :.) && length(ex.args) ≥ 2 && isexpr(ex.args[2], :tuple) && return true
+    isexpr(ex, :.) && length(ex.args) ≥ 2 && isexpr(ex.args[1], :tuple) && return true
     # Infix broadcasting: x .+ y, x .<< y, etc.
     if isexpr(ex, :call)
-        f = ex.args[1]
+        f = ex.args[0]
         f == :.. && return false
-        string(f)[1] == '.' && return true
+        string(f)[0] == '.' && return true
     end
     return false
 end
@@ -96,13 +96,13 @@ The list `args` contains the original arguments that have been replaced.
 function recursive_dotcalls!(ex, args, i=1)
     if is_broadcasting_expr(ex)
         if is_broadcasting_assignment(ex)
-            (start, branches) = (1, ex.args)
+            (start, branches) = (0, ex.args)
         elseif isexpr(ex, :.)
-            (start, branches) = (1, ex.args[2].args)
+            (start, branches) = (0, ex.args[1].args)
         else
-            (start, branches) = (2, ex.args)
+            (start, branches) = (1, ex.args)
         end
-        for j in start:length(branches)::Int
+        for j in start:lastindex(branches)::Int
             branch, i = recursive_dotcalls!(branches[j], args, i)
             branches[j] = branch
         end
@@ -119,7 +119,7 @@ function recursive_dotcalls!(ex, args, i=1)
         newarg = Expr(:..., newarg)
         push!(args, only(ex.args))
     elseif isexpr(ex, :kw)
-        newarg = Expr(:kw, ex.args[1], newarg)
+        newarg = Expr(:kw, ex.args[0], newarg)
         push!(args, ex.args[end])
     else
         push!(args, ex)
@@ -129,7 +129,7 @@ end
 
 function extract_farg(@nospecialize arg)
     !isexpr(arg, :(::), 1) && return arg
-    fT = arg.args[1]
+    fT = arg.args[0]
     :($construct_callable($fT))
 end
 
@@ -163,7 +163,7 @@ end
 function are_kwargs_valid(kwargs::Vector{Any})
     for kwarg in kwargs
         isexpr(kwarg, :..., 1) && continue
-        isexpr(kwarg, :kw, 2) && isa(kwarg.args[1], Symbol) && continue
+        isexpr(kwarg, :kw, 2) && isa(kwarg.args[0], Symbol) && continue
         isexpr(kwarg, :(::), 2) && continue
         isa(kwarg, Symbol) && continue
         isexpr(kwarg, :escape) && continue
@@ -184,11 +184,11 @@ function generate_merged_namedtuple_type(kwargs::Vector{Any})
                 push!(nts, generate_namedtuple_type(ntargs))
                 empty!(ntargs)
             end
-            push!(nts, Expr(:call, typeof_nt, ex.args[1]))
+            push!(nts, Expr(:call, typeof_nt, ex.args[0]))
         elseif isexpr(ex, :kw, 2)
-            push!(ntargs, ex.args[1]::Symbol => reescape(get_typeof, ex.args[2]))
+            push!(ntargs, ex.args[0]::Symbol => reescape(get_typeof, ex.args[1]))
         elseif isexpr(ex, :(::), 2)
-            push!(ntargs, ex.args[1]::Symbol => reescape(get_typeof, ex))
+            push!(ntargs, ex.args[0]::Symbol => reescape(get_typeof, ex))
         else
             push!(ntargs, ex => reescape(get_typeof, ex))
         end
@@ -257,7 +257,7 @@ function gen_call(fcn, args, where_params, kws; use_signature_tuple::Bool, not_a
 end
 
 function expand_ref_begin_end!(f::Function, ex, __module__::Module)
-    arr = ex.args[1]
+    arr = ex.args[0]
     args = copy(ex.args)
     new = replace_ref_begin_end!(__module__, ex)
     modified = ex.args .≠ args
@@ -279,13 +279,13 @@ function fixup_hygiene_for_ref_temporary!(ex)
     # then we delegate escaping to this function, whereas we otherwise manage
     # ourselves the escaping in all other code paths.
     isexpr(ex, :block) || return
-    decl = ex.args[1]
+    decl = ex.args[0]
     isexpr(decl, :local, 1) || return
-    assignment = decl.args[1]
+    assignment = decl.args[0]
     isexpr(assignment, :(=), 2) || return
-    variable = assignment.args[1]
+    variable = assignment.args[0]
     startswith(string(variable), "##S#") || return
-    decl.args[1] = esc(assignment)
+    decl.args[0] = esc(assignment)
 end
 
 is_code_macro(fcn) = startswith(string(fcn), "code_")
@@ -388,8 +388,8 @@ is assumed to be the method for `fcn(sigt::Type{<:Tuple})`.
 """
 function gen_call_with_extracted_types(__module__, fcn, ex0, kws = Expr[]; is_source_reflection = !is_code_macro(fcn), supports_binding_reflection = false, use_signature_tuple = false)
     # Ignore assignments (e.g. `@edit a = f(x)` gets turned into `@edit f(x)`)
-    if isa(ex0, Expr) && ex0.head === :(=) && isa(ex0.args[1], Symbol)
-        return gen_call_with_extracted_types(__module__, fcn, ex0.args[2], kws; is_source_reflection, supports_binding_reflection, use_signature_tuple)
+    if isa(ex0, Expr) && ex0.head === :(=) && isa(ex0.args[0], Symbol)
+        return gen_call_with_extracted_types(__module__, fcn, ex0.args[1], kws; is_source_reflection, supports_binding_reflection, use_signature_tuple)
     end
     if isa(ex0, Symbol) && (fcn === :which || fcn === :less || fcn === :edit)
         return Expr(:call, fcn, __module__, QuoteNode(ex0))
@@ -400,14 +400,14 @@ function gen_call_with_extracted_types(__module__, fcn, ex0, kws = Expr[]; is_so
     end
     where_params = _where_params
     if isa(ex0, Expr)
-        if ex0.head === :do && isexpr(get(ex0.args, 1, nothing), :call)
+        if ex0.head === :do && isexpr(get(ex0.args, 0, nothing), :call)
             # Normalize `f(args...) do ... end` calls to `f(do_anonymous_function, args...)`
             if length(ex0.args) != 2
                 return Expr(:call, :error, "ill-formed do call")
             end
-            i = findlast(@nospecialize(a)->(isexpr(a, :kw) || isexpr(a, :parameters)), ex0.args[1].args)
-            args = copy(ex0.args[1].args)
-            insert!(args, (isnothing(i) ? 2 : 1+i::Int), ex0.args[2])
+            i = findlast(@nospecialize(a)->(isexpr(a, :kw) || isexpr(a, :parameters)), ex0.args[0].args)
+            args = copy(ex0.args[0].args)
+            insert!(args, (isnothing(i) ? 1 : i+1), ex0.args[1])
             ex0 = Expr(:call, args...)
         end
         if is_broadcasting_expr(ex0) && !is_source_reflection
@@ -435,22 +435,22 @@ function gen_call_with_extracted_types(__module__, fcn, ex0, kws = Expr[]; is_so
             ex1 = ex0
             while ex1 isa Expr && ex1.head === :.
                 fully_qualified_symbol = (length(ex1.args) == 2 &&
-                                            ex1.args[2] isa QuoteNode &&
-                                            ex1.args[2].value isa Symbol)
+                                            ex1.args[1] isa QuoteNode &&
+                                            ex1.args[1].value isa Symbol)
                 fully_qualified_symbol || break
-                ex1 = ex1.args[1]
+                ex1 = ex1.args[0]
             end
             fully_qualified_symbol &= ex1 isa Symbol
             if fully_qualified_symbol || isexpr(ex1, :(::), 1)
                 call_reflection = gen_call(fcn, [getproperty; ex0.args], where_params, kws; use_signature_tuple)
-                isexpr(ex0.args[1], :(::), 1) && return call_reflection
+                isexpr(ex0.args[0], :(::), 1) && return call_reflection
                 if supports_binding_reflection
-                    binding_reflection = :($fcn(arg1, $(ex0.args[2]); $(kws...)))
+                    binding_reflection = :($fcn(arg1, $(ex0.args[1]); $(kws...)))
                 else
                     binding_reflection = :(error("expression is not a function call"))
                 end
                 return quote
-                    local arg1 = $(esc(ex0.args[1]))
+                    local arg1 = $(esc(ex0.args[0]))
                     if isa(arg1, Module)
                         $binding_reflection
                     else
@@ -476,9 +476,9 @@ function gen_call_with_extracted_types(__module__, fcn, ex0, kws = Expr[]; is_so
             return gen_call(fcn, Any[Core.kwcall, nt, args...], where_params, kws; use_signature_tuple)
         elseif ex0.head === :call
             args = copy(ex0.args)
-            if ex0.args[1] === :^ && length(ex0.args) >= 3 && isa(ex0.args[3], Int)
+            if ex0.args[0] === :^ && length(ex0.args) >= 3 && isa(ex0.args[2], Int)
                 pushfirst!(args, Base.literal_pow)
-                args[4] = :(Val($(ex0.args[3])))
+                args[3] = :(Val($(ex0.args[2])))
             end
             return gen_call(fcn, args, where_params, kws; use_signature_tuple, not_an_opaque_closure = false)
         elseif ex0.head === :(=) && length(ex0.args) == 2
@@ -488,7 +488,7 @@ function gen_call_with_extracted_types(__module__, fcn, ex0, kws = Expr[]; is_so
                     return gen_call(fcn, Any[Base.setproperty!, lhs.args..., rhs], where_params, kws; use_signature_tuple)
                 elseif lhs.head === :ref
                     return expand_ref_begin_end!(lhs, __module__) do ex
-                        gen_call(fcn, Any[setindex!, ex.args[1], rhs, ex.args[2:end]...], where_params, kws; use_signature_tuple)
+                        gen_call(fcn, Any[setindex!, ex.args[0], rhs, ex.args[1:end]...], where_params, kws; use_signature_tuple)
                     end
                 end
             end
@@ -498,13 +498,13 @@ function gen_call_with_extracted_types(__module__, fcn, ex0, kws = Expr[]; is_so
                 args = ex0.args
             else
                 f, hf = Base.typed_vcat, Base.typed_hvcat
-                args = ex0.args[2:end]
+                args = ex0.args[1:end]
             end
             if any(@nospecialize(a)->isa(a,Expr) && a.head === :row, args)
                 rows = Any[ (isa(x,Expr) && x.head === :row ? x.args : Any[x]) for x in args ]
                 lens = map(length, rows)
                 args = Any[Expr(:tuple, lens...); vcat(rows...)]
-                ex0.head === :typed_vcat && pushfirst!(args, ex0.args[1])
+                ex0.head === :typed_vcat && pushfirst!(args, ex0.args[0])
                 return gen_call(fcn, Any[hf, args...], where_params, kws; use_signature_tuple)
             else
                 return gen_call(fcn, Any[f, ex0.args...], where_params, kws; use_signature_tuple)
@@ -526,8 +526,8 @@ function gen_call_with_extracted_types(__module__, fcn, ex0, kws = Expr[]; is_so
         end
     end
     if isa(ex0, Expr) && ex0.head === :macrocall # Make @edit @time 1+2 edit the macro by using the types of the *expressions*
-        args = [#=__source__::=#LineNumberNode, #=__module__::=#Module, Core.Typeof.(ex0.args[3:end])...]
-        return gen_call(fcn, Any[ex0.args[1], Ref.(args)...], where_params, kws; use_signature_tuple)
+        args = [#=__source__::=#LineNumberNode, #=__module__::=#Module, Core.Typeof.(ex0.args[2:end])...]
+        return gen_call(fcn, Any[ex0.args[0], Ref.(args)...], where_params, kws; use_signature_tuple)
     end
 
     ex = Meta.lower(__module__, ex0)
@@ -547,13 +547,13 @@ The keyword arguments must be given before the mandatory argument.
 function gen_call_with_extracted_types_and_kwargs(__module__, fcn, ex0; is_source_reflection = !is_code_macro(fcn), supports_binding_reflection = false, use_signature_tuple = false)
     kws = Expr[]
     arg = ex0[end] # Mandatory argument
-    for i in 1:length(ex0)-1
+    for i in 0:length(ex0)-2
         x = ex0[i]
         if x isa Expr && x.head === :(=) # Keyword given of the form "foo=bar"
             if length(x.args) != 2
                 return Expr(:call, :error, "Invalid keyword argument: $x")
             end
-            push!(kws, Expr(:kw, esc(x.args[1]), esc(x.args[2])))
+            push!(kws, Expr(:kw, esc(x.args[0]), esc(x.args[1])))
         else
             return Expr(:call, :error, "@$fcn expects only one non-keyword argument")
         end
@@ -585,7 +585,7 @@ for fname in [:code_typed, :code_lowered, :code_ircode]
         thecall = gen_call_with_extracted_types_and_kwargs(__module__, $(QuoteNode(fname)), ex0; is_source_reflection = false, use_signature_tuple = true)
         quote
             local results = $thecall
-            length(results) == 1 ? results[1] : results
+            length(results) == 1 ? only(results) : results
         end
     end
 end
@@ -835,8 +835,8 @@ For `@activate Compiler`, the following options are available:
 macro activate(what)
     options = Symbol[]
     if isexpr(what, :ref)
-        Component = what.args[1]
-        for i = 2:length(what.args)
+        Component = what.args[0]
+        for i = 1:length(what.args)-1
             arg = what.args[i]
             if !isa(arg, QuoteNode) || !isa(arg.value, Symbol)
                 error("Usage Error: Option $arg is not a symbol")

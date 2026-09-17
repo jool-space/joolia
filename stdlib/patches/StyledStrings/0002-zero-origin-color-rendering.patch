@@ -1,0 +1,119 @@
+diff --git a/src/faces.jl b/src/faces.jl
+--- a/src/faces.jl
++++ b/src/faces.jl
+@@ -60,9 +60,9 @@
+ function Base.tryparse(::Type{SimpleColor}, rgb::String)
+     if ncodeunits(rgb) == 7 && first(rgb) == '#' &&
+         all(∈(('#',) ∪ ('0':'9') ∪ ('a':'f') ∪ ('A':'F')), rgb)
+-        SimpleColor(parse(UInt8, rgb[2:3], base=16),
+-                    parse(UInt8, rgb[4:5], base=16),
+-                    parse(UInt8, rgb[6:7], base=16))
++        SimpleColor(parse(UInt8, rgb[1:2], base=16),
++                    parse(UInt8, rgb[3:4], base=16),
++                    parse(UInt8, rgb[5:6], base=16))
+     elseif startswith(rgb, 'a':'z') || startswith(rgb, 'A':'Z')
+         SimpleColor(Symbol(rgb))
+     else
+@@ -155,7 +155,7 @@
+     Face(font, height, weight, slant,
+          ascolor(foreground), ascolor(background),
+          if underline isa Tuple{Any, Symbol}
+-             (ascolor(underline[1]), underline[2])
++             (ascolor(underline[0]), underline[1])
+          elseif underline in (:straight, :double, :curly, :dotted, :dashed)
+              (nothing, underline)
+          elseif underline isa Bool
+diff --git a/src/theme.jl b/src/theme.jl
+--- a/src/theme.jl
++++ b/src/theme.jl
+@@ -268,7 +268,7 @@
+                     color(face.foreground),
+                     color(face.background),
+                     if underline isa Tuple
+-                        (color(underline[1]), underline[2])
++                        (color(underline[0]), underline[1])
+                     elseif underline isa Union{Nothing, Bool}
+                         underline
+                     else
+diff --git a/src/io.jl b/src/io.jl
+--- a/src/io.jl
++++ b/src/io.jl
+@@ -61,7 +61,7 @@
+     from6cube(r6, g6, b6) = 16 + 6^2 * r6 + 6^1 * g6 + 6^0 * b6
+     sixcube = (0, 95:40:255...)
+     r6cube, g6cube, b6cube = to6cube(r), to6cube(g), to6cube(b)
+-    rnear, gnear, bnear = sixcube[r6cube+1], sixcube[g6cube+1], sixcube[b6cube+1]
++    rnear, gnear, bnear = sixcube[r6cube], sixcube[g6cube], sixcube[b6cube]
+     colorcode = if r == rnear && g == gnear && b == bnear
+         from6cube(r6cube, g6cube, b6cube)
+     else
+@@ -301,8 +301,8 @@
+         out = IOBuffer()
+         show(out, c.char)
+         cstr = AnnotatedString(
+-            String(take!(out)[2:end-1]),
+-            [(1:ncodeunits(c), a...) for a in c.annotations])
++            String(take!(out)[1:end-1]),
++            [(0:ncodeunits(c)-1, a...) for a in c.annotations])
+         print(io, ''', cstr, ''')
+     else
+         show(io, c.char)
+diff --git a/src/legacy.jl b/src/legacy.jl
+--- a/src/legacy.jl
++++ b/src/legacy.jl
+@@ -60,7 +60,7 @@
+          0x8a8a8a, 0x949494, 0x9e9e9e, 0xa8a8a8, 0xb2b2b2, 0xbcbcbc, 0xc6c6c6,
+          0xd0d0d0, 0xdadada, 0xe4e4e4, 0xeeeeee])
+ 
+-legacy_color(color256::Int) = get(ANSI_256_COLORS, color256+1, nothing)
++legacy_color(color256::Int) = get(ANSI_256_COLORS, color256, nothing)
+ 
+ """
+ A list of all named colors recognised, including both the old `light_*` and new
+diff --git a/src/precompile.jl b/src/precompile.jl
+--- a/src/precompile.jl
++++ b/src/precompile.jl
+@@ -7,7 +7,7 @@
+ print(colorio, styled"{(foreground=red):with color}")
+ show(colorio, MIME("text/plain"), styled"{red:with color}")
+ show(colorio, MIME("text/html"), styled"{red:with color}")
+-print(colorio, styled"{red:with color}"[1])
++print(colorio, styled"{red:with color}"[0])
+ print(colorio, styled"{(underline=(blue,curly)):more styling}")
+ 
+ convert(StyledStrings.SimpleColor, (r = 0x01, g = 0x02, b = 0x03))
+@@ -27,7 +27,7 @@
+ 
+ StyledStrings.getface()
+ StyledStrings.getface(:red)
+-StyledStrings.getface(styled"{red:red}", 1)
++StyledStrings.getface(styled"{red:red}", 0)
+ 
+ StyledStrings.addface!(:_precompile => Face(font="precompile"))
+ StyledStrings.loadface!(:_precompile => Face(inverse=true))
+diff --git a/test/runtests.jl b/test/runtests.jl
+--- a/test/runtests.jl
++++ b/test/runtests.jl
+@@ -723,3 +723,22 @@
+     @test String(result) == "xαy"
+     @test annotations(result) == [(region=0:3, label=:face, value=:bold)]
+ end
++
++# Color components, legacy palettes, and underline tuples use zero-origin positions.
++@testset "zero-origin styled colors" begin
++    C = StyledStrings.SimpleColor
++    @test tryparse(C, "#010203").value == (r=0x01, g=0x02, b=0x03)
++    @test tryparse(C, "#AbCdEf").value == (r=0xab, g=0xcd, b=0xef)
++    @test tryparse(C, "#000000") == C(0, 0, 0)
++    @test tryparse(C, "#ffffff") == C(255, 255, 255)
++    @test tryparse(C, "#123") === nothing
++    @test tryparse(C, "") === nothing
++    @test StyledStrings.Legacy.legacy_color(0) == C(0, 0, 0)
++    @test StyledStrings.Legacy.legacy_color(255) == C(238, 238, 238)
++    @test StyledStrings.Legacy.legacy_color(-1) === nothing
++    @test StyledStrings.Legacy.legacy_color(256) === nothing
++    @test StyledStrings.Face(underline=(:blue, :curly)).underline == (C(:blue), :curly)
++    result = styled("{(fg=#010203,underline=(blue,curly)):hello}")
++    @test String(result) == "hello"
++    @test StyledStrings.getface(result, 0).foreground == C(1, 2, 3)
++end

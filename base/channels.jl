@@ -353,7 +353,7 @@ function channeled_tasks(n::Int, funcs...; ctypes=fill(Any,n), csizes=fill(0,n))
     @assert length(csizes) == n "length(csizes) != n"
     @assert length(ctypes) == n "length(ctypes) != n"
 
-    chnls = map(i -> Channel{ctypes[i]}(csizes[i]), 1:n)
+    chnls = map(i -> Channel{ctypes[i]}(csizes[i]), 0:n-1)
     tasks = Task[ Task(() -> f(chnls...)) for f in funcs ]
 
     # bind all tasks to all channels and schedule them
@@ -527,7 +527,7 @@ function fetch_buffered(c::Channel, cancel::CancelTokenArg=DEFAULT_CANCEL)
                 locked = true
             end
         end
-        return c.data[1]
+        return c.data[0]
     finally
         locked && unlock(c)
     end

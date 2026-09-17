@@ -58,7 +58,7 @@ function VerifyMethodInitialState(codeinst::CodeInstance)
 end
 
 function VerifyMethodWorkState(dummy_cause::CodeInstance)
-    VerifyMethodWorkState(0, dummy_cause, 1, :init_and_process_callees)
+    VerifyMethodWorkState(0, dummy_cause, 0, :init_and_process_callees)
 end
 
 function VerifyMethodResultState()
@@ -79,7 +79,7 @@ function insert_backedges(internal_methods::Vector{Any})
 end
 
 function scan_new_code!(internal_methods::Vector{Any}, workspace::VerifyMethodWorkspace)
-    for i = 1:length(internal_methods)
+    for i = 0:length(internal_methods)-1
         codeinst = internal_methods[i]
         codeinst isa CodeInstance || continue
         # codeinst.owner === nothing || continue
@@ -146,7 +146,7 @@ function needs_instrumentation(codeinst::CodeInstance, mi::MethodInstance, def::
             has_ambig = RefValue{Int32}(0)
             result = _methods_by_ftype(gensig, nothing, -1, validation_world, #=ambig=#false, minworld, maxworld, has_ambig)
             if result !== nothing
-                for k = 1:length(result)
+                for k = 0:length(result)-1
                     match = result[k]::Core.MethodMatch
                     genmethod = match.method
                     # no, I refuse to refuse to recurse into your cursed generated function generators and will only test one level deep here
@@ -170,32 +170,32 @@ function verify_method(codeinst::CodeInstance, validation_world::UInt, workspace
     push!(workspace.work_states, VerifyMethodWorkState(codeinst))
     push!(workspace.result_states, VerifyMethodResultState())
 
-    current_depth = 1 # == length(workspace._states) == end
+    current_depth = 1 # stack depth is a count; storage position is depth - 1
     while true
         # Get current state indices
-        initial = workspace.initial_states[current_depth]
-        work = workspace.work_states[current_depth]
+        initial = workspace.initial_states[current_depth-1]
+        work = workspace.work_states[current_depth-1]
 
         if work.stage == :init_and_process_callees
             # Initialize state and handle early returns
             world = initial.codeinst.min_world
             let max_valid2 = initial.codeinst.max_world
                 if max_valid2 ≠ WORLD_AGE_REVALIDATION_SENTINEL
-                    workspace.result_states[current_depth] = VerifyMethodResultState(0, world, max_valid2)
-                    workspace.work_states[current_depth] = VerifyMethodWorkState(work.depth, work.cause, work.recursive_index, :return_to_parent)
+                    workspace.result_states[current_depth-1] = VerifyMethodResultState(0, world, max_valid2)
+                    workspace.work_states[current_depth-1] = VerifyMethodWorkState(work.depth, work.cause, work.recursive_index, :return_to_parent)
                     continue
                 end
             end
 
             if needs_instrumentation(initial.codeinst, initial.mi, initial.def, validation_world)
-                workspace.result_states[current_depth] = VerifyMethodResultState(0, world, UInt(0))
-                workspace.work_states[current_depth] = VerifyMethodWorkState(work.depth, work.cause, work.recursive_index, :return_to_parent)
+                workspace.result_states[current_depth-1] = VerifyMethodResultState(0, world, UInt(0))
+                workspace.work_states[current_depth-1] = VerifyMethodWorkState(work.depth, work.cause, work.recursive_index, :return_to_parent)
                 continue
             end
 
             if haskey(workspace.visiting, initial.codeinst)
-                workspace.result_states[current_depth] = VerifyMethodResultState(workspace.visiting[initial.codeinst], UInt(1), validation_world)
-                workspace.work_states[current_depth] = VerifyMethodWorkState(work.depth, work.cause, work.recursive_index, :return_to_parent)
+                workspace.result_states[current_depth-1] = VerifyMethodResultState(workspace.visiting[initial.codeinst], UInt(1), validation_world)
+                workspace.work_states[current_depth-1] = VerifyMethodWorkState(work.depth, work.cause, work.recursive_index, :return_to_parent)
                 continue
             end
 
@@ -222,8 +222,8 @@ function verify_method(codeinst::CodeInstance, validation_world::UInt, workspace
             # Process all non-CodeInstance edges
             if !isempty(initial.callees) && maxworld != get_require_world()
                 matches = []
-                j = 1
-                while j <= length(initial.callees)
+                j = 0
+                while j < length(initial.callees)
                     local min_valid2::UInt, max_valid2::UInt
                     edge = initial.callees[j]
                     @assert !(edge isa Method) "unexpected Method edge indicates corrupt edges list creation"
@@ -292,20 +292,20 @@ function verify_method(codeinst::CodeInstance, validation_world::UInt, workspace
             end
 
             # Store computed minworld/maxworld in result state and transition to recursive phase
-            workspace.result_states[current_depth] = VerifyMethodResultState(depth, minworld, maxworld)
-            workspace.work_states[current_depth] = VerifyMethodWorkState(depth, work.cause, 1, :recursive_phase)
+            workspace.result_states[current_depth-1] = VerifyMethodResultState(depth, minworld, maxworld)
+            workspace.work_states[current_depth-1] = VerifyMethodWorkState(depth, work.cause, 0, :recursive_phase)
 
         elseif work.stage == :recursive_phase
             # Find next CodeInstance edge that needs processing
             recursive_index = work.recursive_index
             found_child = false
-            while recursive_index ≤ length(initial.callees)
+            while recursive_index < length(initial.callees)
                 edge = initial.callees[recursive_index]
                 recursive_index += 1
 
                 if edge isa CodeInstance
                     # Create child state and add to stack
-                    workspace.work_states[current_depth] = VerifyMethodWorkState(work.depth, work.cause, recursive_index, :recursive_phase)
+                    workspace.work_states[current_depth-1] = VerifyMethodWorkState(work.depth, work.cause, recursive_index, :recursive_phase)
                     push!(workspace.initial_states, VerifyMethodInitialState(edge))
                     push!(workspace.work_states, VerifyMethodWorkState(edge))
                     push!(workspace.result_states, VerifyMethodResultState())
@@ -316,7 +316,7 @@ function verify_method(codeinst::CodeInstance, validation_world::UInt, workspace
             end
 
             if !found_child
-                workspace.work_states[current_depth] = VerifyMethodWorkState(work.depth, work.cause, recursive_index, :cleanup)
+                workspace.work_states[current_depth-1] = VerifyMethodWorkState(work.depth, work.cause, recursive_index, :cleanup)
             end
 
         elseif work.stage == :cleanup
@@ -324,7 +324,7 @@ function verify_method(codeinst::CodeInstance, validation_world::UInt, workspace
             # our cycle with what we found.
             # Or if we found a failed edge, also mark all of the other parts of the
             # cycle as also having a failed edge.
-            result = workspace.result_states[current_depth]
+            result = workspace.result_states[current_depth-1]
             if result.result_maxworld == 0 || result.child_cycle == work.depth
                 while length(workspace.stack) ≥ work.depth
                     child = pop!(workspace.stack)
@@ -347,10 +347,10 @@ function verify_method(codeinst::CodeInstance, validation_world::UInt, workspace
                     end
                 end
 
-                workspace.result_states[current_depth] = VerifyMethodResultState(0, result.result_minworld, result.result_maxworld)
+                workspace.result_states[current_depth-1] = VerifyMethodResultState(0, result.result_minworld, result.result_maxworld)
             end
 
-            workspace.work_states[current_depth] = VerifyMethodWorkState(work.depth, work.cause, work.recursive_index, :return_to_parent)
+            workspace.work_states[current_depth-1] = VerifyMethodWorkState(work.depth, work.cause, work.recursive_index, :return_to_parent)
 
         elseif work.stage == :return_to_parent
             # Pass results to parent and process them
@@ -362,8 +362,8 @@ function verify_method(codeinst::CodeInstance, validation_world::UInt, workspace
                 return (result.child_cycle, result.result_minworld, result.result_maxworld)
             end
             # Propagate results to parent
-            parent_work = workspace.work_states[current_depth]
-            parent_result = workspace.result_states[current_depth]
+            parent_work = workspace.work_states[current_depth-1]
+            parent_result = workspace.result_states[current_depth-1]
             callee = initial.codeinst
             child_cycle, min_valid2, max_valid2 = result.child_cycle, result.result_minworld, result.result_maxworld
             parent_cycle = parent_result.child_cycle
@@ -389,8 +389,8 @@ function verify_method(codeinst::CodeInstance, validation_world::UInt, workspace
                 # record the cycle will resolve at depth "cycle"
                 parent_cycle = child_cycle
             end
-            workspace.work_states[current_depth] = VerifyMethodWorkState(parent_work.depth, parent_cause, parent_work.recursive_index, parent_stage)
-            workspace.result_states[current_depth] = VerifyMethodResultState(parent_cycle, parent_minworld, parent_maxworld)
+            workspace.work_states[current_depth-1] = VerifyMethodWorkState(parent_work.depth, parent_cause, parent_work.recursive_index, parent_stage)
+            workspace.result_states[current_depth-1] = VerifyMethodResultState(parent_cycle, parent_minworld, parent_maxworld)
         end
     end
 end
@@ -412,7 +412,7 @@ end
 # Returns true if method2 is found (meaning !morespecific(method1, method2))
 function method_in_interferences(method2::Method, method1::Method)
     interferences = method1.interferences
-    for k = 1:length(interferences)
+    for k = 0:length(interferences)-1
         isassigned(interferences, k) || break
         interference_method = interferences[k]::Method
         if interference_method === method2
@@ -443,7 +443,7 @@ function method_morespecific_via_interferences(method1::Method, method2::Method)
     while !isempty(workqueue)
         current = pop!(workqueue)
         interferences = current.interferences
-        for k = 1:length(interferences)
+        for k = 0:length(interferences)-1
             isassigned(interferences, k) || break
             method3 = interferences[k]::Method
 
@@ -527,9 +527,9 @@ function verify_call(@nospecialize(sig), expecteds::Core.SimpleVector, i::Int, n
         interference_fast_path_success = fully_covers
         if interference_fast_path_success && n == 1
             # Skip to ml_matches for large interference sets (see VERIFY_INTERF_CAP). The set
-            # is packed, so isassigned(., cap+1) tests "size > cap" without any typeintersect.
+            # is packed, so isassigned(., cap) tests "size > cap" without any typeintersect.
             let interf = get_method_from_edge(expecteds[i]).interferences, cap = VERIFY_INTERF_CAP
-                if length(interf) > cap && isassigned(interf, cap + 1)
+                if length(interf) > cap && isassigned(interf, cap)
                     interference_fast_path_success = false
                 end
             end
@@ -543,7 +543,7 @@ function verify_call(@nospecialize(sig), expecteds::Core.SimpleVector, i::Int, n
                     interference_minworld = meth.primary_world
                 end
                 interferences = meth.interferences
-                for k = 1:length(interferences)
+                for k = 0:length(interferences)-1
                     isassigned(interferences, k) || break # no more entries
                     interference_method = interferences[k]::Method
                     if iszero(interference_method.dispatch_status & METHOD_SIG_LATEST_WHICH)
@@ -605,7 +605,7 @@ function verify_call(@nospecialize(sig), expecteds::Core.SimpleVector, i::Int, n
             maxworld[] = 0
         end
         ins = 0
-        for k = 1:length(result)
+        for k = 0:length(result)-1
             match = result[k]::Core.MethodMatch
             local found = false
             for j = 1:n
@@ -624,7 +624,7 @@ function verify_call(@nospecialize(sig), expecteds::Core.SimpleVector, i::Int, n
                     break
                 end
                 ins += 1
-                result[ins] = match.method
+                result[ins-1] = match.method
             end
         end
         if maxworld[] ≠ typemax(UInt) && _jl_debug_method_invalidation[] !== nothing

@@ -2,6 +2,33 @@
 
 using Random
 
+# Version components use zero-origin positions without changing numeric version ordering.
+@testset "zero-origin version positions" begin
+    b = Base.VersionBound("v1.2.3")
+    @test b.t == (1, 2, 3)
+    @test b[0] == 1
+    @test b[2] == 3
+    @test Base.VersionBound("*").n == 0
+    v = VersionNumber("1.2.3-rc.4+build.5")
+    @test v.prerelease == ("rc", UInt64(4))
+    @test v.build == ("build", UInt64(5))
+    @test Base.issupbuild(VersionNumber("1.2+"))
+    r = Base.VersionRange("1 - 2")
+    @test VersionNumber("1.0") in r
+    @test VersionNumber("2.9") in r
+    @test !(VersionNumber("3.0") in r)
+    spec = Base.VersionSpec(["1", "2"])
+    @test length(spec.ranges) == 1
+    @test spec.ranges[0].upper[0] == 2
+    dest = trues(5)
+    Base.matches_spec_range!(dest, VersionNumber[VersionNumber("1"), VersionNumber("2"), VersionNumber("3")], Base.VersionSpec("2"), 3)
+    @test dest == [false, true, false, true, true]
+    @test VersionNumber("1.9") in Base.semver_spec("^1.2")
+    @test !(VersionNumber("2.0") in Base.semver_spec("^1.2"))
+    @test VersionNumber("0.2.5") in Base.semver_spec("~0.2.1")
+    @test !(VersionNumber("0.3") in Base.semver_spec("~0.2.1"))
+end
+
 # parsing tests
 @test v"2" == VersionNumber(2)
 @test v"3.2" == VersionNumber(3, 2)

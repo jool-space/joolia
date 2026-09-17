@@ -463,8 +463,8 @@ end
 
         observed = filter(OBSERVEDHOLIDAYS, Dates.Date(1999):Dates.Day(1):Dates.Date(2000))
         @test length(observed) == 11
-        @test observed[10] == Dates.Date(1999, 12, 24)
-        @test observed[11] == Dates.Date(1999, 12, 31)
+        @test observed[9] == Dates.Date(1999, 12, 24)
+        @test observed[10] == Dates.Date(1999, 12, 31)
 
         # Get all business/working days of 2014
         # Since we have already defined observed holidays,

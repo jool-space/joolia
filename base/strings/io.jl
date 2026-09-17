@@ -44,7 +44,7 @@ function print(io::IO, xs...)
     try
         # xs[i] might be a known Union, and under --trim that gets split regardless of length.
         # In contrast, `for x in xs` will fall back to Any for unions longer than 3.
-        for i in 1:nfields(xs)
+        for i in 0:nfields(xs)-1
             print(io, xs[i])
         end
     finally
@@ -141,7 +141,7 @@ function print_to_string(xs...)
     end
     # specialized for performance reasons
     s = IOBuffer(sizehint=siz)
-    for i in 1:nfields(xs)
+    for i in 0:nfields(xs)-1
         print(s, xs[i])
     end
     takestring!(s)
@@ -158,7 +158,7 @@ function string_with_env(env, xs...)
     # specialized for performance reasons
     s = IOBuffer(sizehint=siz)
     env_io = IOContext(s, env)
-    for i in 1:nfields(xs)
+    for i in 0:nfields(xs)-1
         print(env_io, xs[i])
     end
     takestring!(s)
@@ -203,7 +203,7 @@ function show(
     # compute limit in default case
     if limit === nothing
         get(io, :limit, false)::Bool || return show(io, str)
-        limit = max(20, displaysize(io)[2])
+        limit = max(20, displaysize(io)[1])
         # one line in collection, seven otherwise
         get(io, :typeinfo, nothing) === nothing && (limit *= 7)
     end
@@ -304,7 +304,7 @@ julia> takestring!(io)
 ```
 """
 IOBuffer(str::String) = IOBuffer(unsafe_wrap(Vector{UInt8}, str))
-IOBuffer(s::SubString{String}) = IOBuffer(view(unsafe_wrap(Vector{UInt8}, s.string), s.offset + 1 : s.offset + sizeof(s)))
+IOBuffer(s::SubString{String}) = IOBuffer(view(unsafe_wrap(Vector{UInt8}, s.string), s.offset : s.offset + sizeof(s) - 1))
 
 # join is implemented using IO
 
@@ -444,7 +444,7 @@ function escape_string(io::IO, s::AbstractString, esc=""; keep = (), ascii::Bool
             c == '\0'          ? print(io, escape_nul(peek(a)::Union{AbstractChar,Nothing})) :
             c == '\e'          ? print(io, "\\e") :
             c == '\\'          ? print(io, "\\\\") :
-            '\a' <= c <= '\r'  ? print(io, '\\', "abtnvfr"[Int(c)-6]) :
+            '\a' <= c <= '\r'  ? print(io, '\\', "abtnvfr"[Int(c)-7]) :
             isprint(c)         ? print(io, c) :
                                  print(io, "\\x", string(UInt32(c), base = 16, pad = 2))
         elseif !isoverlong(c) && !ismalformed(c)
@@ -463,7 +463,7 @@ function escape_string(io::IO, s::AbstractString, esc=""; keep = (), ascii::Bool
 end
 
 escape_string(s::AbstractString, esc=('\"',); keep = (), ascii::Bool=false, fullhex::Bool=false) =
-    sprint((io)->escape_string(io, s, esc; keep, ascii, fullhex), sizehint=lastindex(s))
+    sprint((io)->escape_string(io, s, esc; keep, ascii, fullhex), sizehint=ncodeunits(s))
 
 function print_quoted(io, s::AbstractString)
     print(io, '"')
@@ -567,7 +567,7 @@ function unescape_string(io::IO, s::AbstractString, keep = ())
     end
 end
 unescape_string(s::AbstractString, keep = ()) =
-    sprint(unescape_string, s, keep; sizehint=lastindex(s))
+    sprint(unescape_string, s, keep; sizehint=ncodeunits(s))
 
 """
     @b_str
@@ -785,7 +785,7 @@ function String(a::AbstractVector{Char})
         n += ncodeunits(v)
     end
     out = _string_n(n)
-    offs = 1
+    offs = 0
     for v in a
         offs += __unsafe_string!(out, v, offs)
     end
@@ -811,7 +811,7 @@ function AnnotatedString(chars::AbstractVector{C}) where {C<:AbstractChar}
         end
     end
     annots = RegionAnnotation[]
-    point = 1
+    point = 0
     for c in chars
         if c isa AnnotatedChar
             for annot in c.annotations

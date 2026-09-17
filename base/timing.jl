@@ -201,17 +201,17 @@ const _mem_units = ["byte", "KiB", "MiB", "GiB", "TiB", "PiB"]
 const _cnt_units = ["", " k", " M", " G", " T", " P"]
 function prettyprint_getunits(value, numunits, factor)
     if value == 0 || value == 1
-        return (value, 1)
+        return (value, 0)
     end
     unit = ceil(Int, log(value) / log(factor))
     unit = min(numunits, unit)
     number = value/factor^(unit-1)
-    return number, unit
+    return number, unit - 1
 end
 
 function padded_nonzero_print(value, str, always_print = true)
     if always_print || value != 0
-        blanks = "                "[1:(19 - length(str))]
+        blanks = "                "[0:(18 - length(str))]
         println(str, ":", blanks, value)
     end
 end
@@ -244,7 +244,7 @@ function format_bytes(bytes; binary=true) # also used by InteractiveUtils
     units = binary ? _mem_units : _cnt_units
     factor = binary ? 1024 : 1000
     bytes, mb = prettyprint_getunits(bytes, length(units), Int64(factor))
-    if mb == 1
+    if mb == 0
         return string(Int(bytes), " ", _mem_units[mb], bytes==1 ? "" : "s")
     else
         return string(Ryu.writefixed(Float64(bytes), 3), binary ? " $(units[mb])" : "$(units[mb])B")
@@ -266,7 +266,7 @@ function time_print(io::IO, elapsedtime, bytes=0, gctime=0, allocs=0, lock_confl
         had_allocs = bytes != 0 || allocs != 0
         if had_allocs
             allocs_scaled, ma = prettyprint_getunits(allocs, length(_cnt_units), Int64(1000))
-            if ma == 1
+            if ma == 0
                 print(io, Int(allocs_scaled), _cnt_units[ma], allocs_scaled==1 ? " allocation: " : " allocations: ")
             else
                 print(io, Ryu.writefixed(Float64(allocs_scaled), 2), _cnt_units[ma], " allocations: ")
@@ -539,15 +539,15 @@ function is_simply_call(@nospecialize ex)
     Meta.isexpr(ex, :call) || return false
     for a in ex.args
         is_simple_atom(a) && continue
-        Meta.isexpr(a, :..., 1) && is_simple_atom(a.args[1]) && continue
+        Meta.isexpr(a, :..., 1) && is_simple_atom(a.args[0]) && continue
         return false
     end
     # Ensure Expr(:call, .+, ...) get wrapped
-    if ex.args[1] isa Symbol
-        sa = String(ex.args[1]::Symbol)
+    if ex.args[0] isa Symbol
+        sa = String(ex.args[0]::Symbol)
         startswith(sa, ".") &&
             !endswith(sa, ".") &&
-            isoperator(Symbol(sa[2:end])) &&
+            isoperator(Symbol(sa[1:end])) &&
             return false
     end
     return true
@@ -753,8 +753,8 @@ macro timed(ex)
             gctime=diff.total_time/1e9,
             gcstats=diff,
             lock_conflicts=lock_conflicts,
-            compile_time=compile_elapsedtimes[1]/1e9,
-            recompile_time=compile_elapsedtimes[2]/1e9
+            compile_time=compile_elapsedtimes[0]/1e9,
+            recompile_time=compile_elapsedtimes[1]/1e9
         )
     end
 end

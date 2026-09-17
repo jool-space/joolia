@@ -10,7 +10,7 @@ module Serialization
 import Base: Bottom, unsafe_convert
 import Base.ScopedValues: ScopedValue, with
 import Core: svec, SimpleVector
-using Base: @assume_effects, unaliascopy, unwrap_unionall, require_one_based_indexing, ntupleany
+using Base: @assume_effects, unaliascopy, unwrap_unionall, ntupleany
 using Core.IR
 
 export serialize, deserialize, AbstractSerializer, Serializer
@@ -114,8 +114,8 @@ const sertag_table = let
     vals = Memory{Int32}(undef, SERTAG_TABLE_SIZE)
     fill!(keys, sertag_empty)
     @assume_effects :terminates_locally :noub @inbounds for i in Iterators.reverse(1:NSERTAG_KEYS)
-        key = TAGS[i]
-        loc = mod1(objectid(key), SERTAG_TABLE_SIZE)
+        key = TAGS[i-1]
+        loc = mod(objectid(key), SERTAG_TABLE_SIZE)
         while true
             k = keys[loc]
             if k === sertag_empty || k === key
@@ -123,7 +123,7 @@ const sertag_table = let
                 vals[loc] = Int32(i)
                 break
             end
-            loc = mod1(loc + 1, SERTAG_TABLE_SIZE)
+            loc = mod(loc + 1, SERTAG_TABLE_SIZE)
         end
     end
     SertagTable(keys, vals)
@@ -131,7 +131,7 @@ end
 
 @inline function sertag(@nospecialize(v))
     (; keys, vals) = sertag_table
-    loc = mod1(objectid(v), SERTAG_TABLE_SIZE)
+    loc = mod(objectid(v), SERTAG_TABLE_SIZE)
     @assume_effects :terminates_locally :noub @inbounds while true
         @inbounds k = keys[loc]
         if k === v
@@ -139,11 +139,11 @@ end
         elseif k === sertag_empty
             return Int32(-1)
         else
-            loc = mod1(loc + 1, SERTAG_TABLE_SIZE)
+            loc = mod(loc + 1, SERTAG_TABLE_SIZE)
         end
     end
 end
-desertag(i::Int32) = @inbounds(TAGS[i])
+desertag(i::Int32) = @inbounds(TAGS[i-1])
 
 # tags >= this just represent themselves, their whole representation is 1 byte
 const VALUE_TAGS = sertag(())
@@ -206,8 +206,8 @@ _setcycle!(s::Serializer, @nospecialize(x), v::Int) = (s.cycle_table[IdKey(x)] =
 _setbackref!(s::AbstractSerializer, slot::Int, @nospecialize(x)) = (s.table[slot] = x; nothing)
 function _setbackref!(s::Serializer, slot::Int, @nospecialize(x))
     bt = s.backref_table
-    i = slot + 1
-    i > length(bt) && resize!(bt, max(i, 2 * length(bt) + 1))
+    i = slot
+    i >= length(bt) && resize!(bt, max(i + 1, 2 * length(bt) + 1))
     @inbounds bt[i] = x
     nothing
 end
@@ -225,8 +225,8 @@ end
 _getbackref(s::AbstractSerializer, id::Int) = get(() -> __getbackref_error(id), s.table, id)
 function _getbackref(s::Serializer, id::Int)
     bt = s.backref_table
-    i = id + 1
-    (id < 0 || i > length(bt) || !isassigned(bt, i)) && __getbackref_error(id)
+    i = id
+    (id < 0 || i >= length(bt) || !isassigned(bt, i)) && __getbackref_error(id)
     @inbounds return bt[i]
 end
 
@@ -332,12 +332,11 @@ function serialize(s::AbstractSerializer, x::Symbol)
 end
 
 function serialize_array_data(s::IO, a)
-    require_one_based_indexing(a)
     isempty(a) && return 0
     if eltype(a) === Bool
-        last = a[1]::Bool
+        last = a[0]::Bool
         count = 1
-        for i = 2:length(a)
+        for i = 1:length(a)-1
             if a[i]::Bool != last || count == 127
                 write(s, UInt8((UInt8(last) << 7) | count))
                 last = a[i]::Bool
@@ -580,8 +579,8 @@ function serialize(s::AbstractSerializer, src::Core.CancellationTokenSource)
     serialize_cycle_header(s, src) && return
     np = Int(src.nparents)
     serialize(s, np % Int64)  # fixed width: streams are word-size independent
-    for i in 1:np
-        serialize(s, Base._cancel_parent(src, i))
+    for i in 0:np-1
+        serialize(s, Base._cancel_parent(src, i + 1))
     end
     serialize(s, @atomic src.state)
     nothing
@@ -590,7 +589,7 @@ end
 function deserialize(s::AbstractSerializer, ::Type{Core.CancellationTokenSource})
     np = Int(deserialize(s)::Int64)
     parents = Vector{Any}(undef, np)
-    for i in 1:np
+    for i in 0:np-1
         parents[i] = deserialize(s)::Core.CancellationTokenSource
     end
     src = Core._new_cancel_source(parents...)::Core.CancellationTokenSource
@@ -666,7 +665,7 @@ function serialize(s::AbstractSerializer, t::Task)
         # the exception stack field is hidden inside the task, so if there
         # is any information there make a CapturedException from it instead.
         # TODO: Handle full exception chain, not just the first one.
-        serialize(s, CapturedException(stk[1].exception, stk[1].backtrace))
+        serialize(s, CapturedException(stk[0].exception, stk[0].backtrace))
     else
         serialize(s, t.result)
     end
@@ -823,7 +822,7 @@ end
 
 for i in 0:13
     tag = Int32(INT8_TAG + i)
-    ty = TAGS[tag]
+    ty = TAGS[tag-1]
     (ty === Int32 || ty === Int64) && continue
     @eval serialize(s::AbstractSerializer, n::$ty) = (writetag(s.io, $tag); write(s.io, n); nothing)
 end
@@ -877,7 +876,7 @@ function serialize_any(s::AbstractSerializer, @nospecialize(x))
             serialize_type(s, t, false)
         end
         nf = nfields(x)
-        for i in 1:nf
+        for i in 0:nf-1
             if isdefined(x, i)
                 serialize(s, getfield(x, i))
             else
@@ -1183,8 +1182,8 @@ function deserialize_module(s::AbstractSerializer)
         if mkey === ()
             return Main
         end
-        m = Base.root_module(mkey[1])
-        for i = 2:length(mkey)
+        m = Base.root_module(mkey[0])
+        for i = 1:length(mkey)-1
             m = getglobal(m, mkey[i])::Module
         end
     else
@@ -1374,14 +1373,14 @@ function deserialize(s::AbstractSerializer, ::Type{CodeInfo})
     ci.code = code
     ci.debuginfo = NullDebugInfo
     # allow older-style IR with return and gotoifnot Exprs
-    for i in 1:length(code)
+    for i in 0:length(code)-1
         stmt = code[i]
         if isa(stmt, Expr)
             ex = stmt::Expr
             if ex.head === :return
-                code[i] = ReturnNode(isempty(ex.args) ? nothing : ex.args[1])
+                code[i] = ReturnNode(isempty(ex.args) ? nothing : ex.args[0])
             elseif ex.head === :gotoifnot
-                code[i] = GotoIfNot(ex.args[1], ex.args[2])
+                code[i] = GotoIfNot(ex.args[0], ex.args[1])
             end
         end
     end
@@ -1534,8 +1533,8 @@ function deserialize_array(s::AbstractSerializer)
         n = prod(dims)::Int
         if elty === Bool && n > 0
             A = Array{Bool, length(dims)}(undef, dims)
-            i = 1
-            while i <= n
+            i = 0
+            while i < n
                 b = read(s.io, UInt8)::UInt8
                 v = (b >> 7) != 0
                 count = b & 0x7f
@@ -1575,8 +1574,8 @@ function deserialize(s::AbstractSerializer, X::Type{Memory{T}} where T)
     if isbitstype(elty)
         A = X(undef, n)
         if X === Memory{Bool}
-            i = 1
-            while i <= n
+            i = 0
+            while i < n
                 b = read(s.io, UInt8)::UInt8
                 v = (b >> 7) != 0
                 count = b & 0x7f
@@ -1602,7 +1601,7 @@ end
 function deserialize(s::AbstractSerializer, X::Type{MemoryRef{T}} where T)
     x = Core.memoryref(deserialize(s))::X
     i = deserialize(s)::Int
-    i == 1 || (x = Core.memoryrefnew(x, i, true))
+    i == 0 || (x = Core.memoryrefnew(x, i, true))
     return x::X
 end
 
@@ -1632,7 +1631,7 @@ function deserialize_expr(s::AbstractSerializer, len)
 
         if len == 1
             # Short form: (:method name) → (call Core.define_method module (inert name))
-            name = e.args[1]
+            name = e.args[0]
             if name isa GlobalRef
                 # Extract module and name from GlobalRef
                 mod_ref = name.mod
@@ -1644,9 +1643,9 @@ function deserialize_expr(s::AbstractSerializer, len)
             end
         elseif len == 3
             # Long form: (:method name_or_mt sigtype code) → (call Core.define_method module name_or_mt sigtype code)
-            name_or_mt = e.args[1]
-            sigtype = e.args[2]
-            code = e.args[3]
+            name_or_mt = e.args[0]
+            sigtype = e.args[1]
+            code = e.args[2]
             if name_or_mt isa Symbol
                 name_or_mt = QuoteNode(name_or_mt)
                 e = Expr(:call, GlobalRef(Core, :define_method), mod, name_or_mt, sigtype, code)
@@ -1713,7 +1712,7 @@ function deserialize_typename(s::AbstractSerializer, number)
             if !isdefined(ty, :instance)
                 singleton = ccall(:jl_new_struct, Any, (Any, Any...), ty)
                 # use setfield! directly to avoid `fieldtype` lowering expecting to see a Singleton object already on ty
-                ccall(:jl_set_nth_field, Cvoid, (Any, Csize_t, Any), ty, Base.fieldindex(DataType, :instance)-1, singleton)
+                ccall(:jl_set_nth_field, Cvoid, (Any, Csize_t, Any), ty, Base.fieldindex(DataType, :instance), singleton)
             end
         end
     end
@@ -1850,10 +1849,10 @@ function deserialize(s::AbstractSerializer, t::DataType)
     elseif ismutabletype(t)
         x = ccall(:jl_new_struct_uninit, Any, (Any,), t)
         deserialize_cycle(s, x)
-        for i in 1:nf
+        for i in 0:nf-1
             tag = Int32(read(s.io, UInt8)::UInt8)
             if tag != UNDEFREF_TAG
-                ccall(:jl_set_nth_field, Cvoid, (Any, Csize_t, Any), x, i-1, handle_deserialize(s, tag))
+                ccall(:jl_set_nth_field, Cvoid, (Any, Csize_t, Any), x, i, handle_deserialize(s, tag))
             end
         end
         return x
@@ -1862,13 +1861,13 @@ function deserialize(s::AbstractSerializer, t::DataType)
     else
         na = nf
         vflds = Vector{Any}(undef, nf)
-        for i in 1:nf
+        for i in 0:nf-1
             tag = Int32(read(s.io, UInt8)::UInt8)
             if tag != UNDEFREF_TAG
                 f = handle_deserialize(s, tag)
-                na >= i && (vflds[i] = f)
+                na > i && (vflds[i] = f)
             else
-                na >= i && (na = i - 1) # rest of tail must be undefined values
+                na > i && (na = i) # rest of tail must be undefined values
             end
         end
         return ccall(:jl_new_structv, Any, (Any, Ptr{Any}, UInt32), t, vflds, na)

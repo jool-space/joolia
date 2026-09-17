@@ -38,8 +38,8 @@ julia> replace.(["xops", "oxps"], "x" => "o")
 Pair, =>
 
 eltype(p::Type{Pair{A, B}}) where {A, B} = Union{A, B}
-iterate(p::Pair, i=1) = i > 2 ? nothing : (getfield(p, i), i + 1)
-indexed_iterate(p::Pair, i::Int, state=1) = (getfield(p, i), i + 1)
+iterate(p::Pair, i=0) = i >= 2 ? nothing : (getfield(p, i), i + 1)
+indexed_iterate(p::Pair, i::Int, state=0) = (getfield(p, i), i + 1)
 
 let seed = (UInt === UInt64) ? 0x94cb2bb20a28ce96 : 0x1f60a087
     global hash
@@ -55,8 +55,8 @@ getindex(p::Pair,i::Int) = getfield(p,i)
 getindex(p::Pair,i::Real) = getfield(p, convert(Int, i))
 reverse(p::Pair{A,B}) where {A,B} = Pair{B,A}(p.second, p.first)
 
-firstindex(p::Pair) = 1
-lastindex(p::Pair) = 2
+firstindex(p::Pair) = 0
+lastindex(p::Pair) = 1
 length(p::Pair) = 2
 first(p::Pair) = p.first
 last(p::Pair) = p.second

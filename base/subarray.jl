@@ -111,7 +111,7 @@ parentindices(a::AbstractArray) = map(oneto, size(a))
 ## Aliasing detection
 dataids(A::SubArray) = (dataids(A.parent)..., _splatmap(dataids, A.indices)...)
 _splatmap(f, ::Tuple{}) = ()
-_splatmap(f, t::Tuple) = (f(t[1])..., _splatmap(f, tail(t))...)
+_splatmap(f, t::Tuple) = (f(t[0])..., _splatmap(f, tail(t))...)
 unaliascopy(A::SubArray) = typeof(A)(unaliascopy(A.parent), map(unaliascopy, A.indices), A.offset1, A.stride1)
 
 # When the parent is an Array we can trim the size down a bit. In the future this
@@ -131,8 +131,8 @@ function unaliascopy(V::SubArray{T,N,A,I,LD}) where {T,N,A<:Array,I<:Tuple{Varar
 end
 # Get the proper trimmed shape
 _trimmedshape(::ScalarIndex, rest...) = (1, _trimmedshape(rest...)...)
-_trimmedshape(i::AbstractRange, rest...) = (isempty(i) ? zero(eltype(i)) : maximum(i), _trimmedshape(rest...)...)
-_trimmedshape(i::Union{UnitRange,StepRange,OneTo}, rest...) = (length(i), _trimmedshape(rest...)...)
+_trimmedshape(i::AbstractRange, rest...) = (isempty(i) ? zero(eltype(i)) : maximum(i)+1, _trimmedshape(rest...)...)
+_trimmedshape(i::Union{UnitRange,StepRange,ZeroTo}, rest...) = (length(i), _trimmedshape(rest...)...)
 _trimmedshape(i::AbstractArray{<:ScalarIndex}, rest...) = (length(i), _trimmedshape(rest...)...)
 _trimmedshape(i::AbstractArray{<:AbstractCartesianIndex{0}}, rest...) = _trimmedshape(rest...)
 _trimmedshape(i::AbstractArray{<:AbstractCartesianIndex{N}}, rest...) where {N} = (length(i), ntuple(Returns(1), Val(N - 1))..., _trimmedshape(rest...)...)
@@ -140,16 +140,16 @@ _trimmedshape() = ()
 # We can avoid the repetition from `AbstractArray{CartesianIndex{0}}`
 _trimmedpind(i, rest...) = (map(Returns(:), axes(i))..., _trimmedpind(rest...)...)
 _trimmedpind(i::AbstractRange, rest...) = (i, _trimmedpind(rest...)...)
-_trimmedpind(i::Union{UnitRange,StepRange,OneTo}, rest...) = ((:), _trimmedpind(rest...)...)
+_trimmedpind(i::Union{UnitRange,StepRange,ZeroTo}, rest...) = ((:), _trimmedpind(rest...)...)
 _trimmedpind(i::AbstractArray{<:AbstractCartesianIndex{0}}, rest...) = _trimmedpind(rest...)
 _trimmedpind() = ()
 _trimmedvind(i, rest...) = (map(Returns(:), axes(i))..., _trimmedvind(rest...)...)
 _trimmedvind(i::AbstractArray{<:AbstractCartesianIndex{0}}, rest...) = (map(first, axes(i))..., _trimmedvind(rest...)...)
 _trimmedvind() = ()
 # Transform indices to be "dense"
-_trimmedindex(i::ScalarIndex) = oftype(i, 1)
+_trimmedindex(i::ScalarIndex) = oftype(i, 0)
 _trimmedindex(i::AbstractRange) = i
-_trimmedindex(i::Union{UnitRange,StepRange,OneTo}) = oftype(i, oneto(length(i)))
+_trimmedindex(i::Union{UnitRange,StepRange,ZeroTo}) = oftype(i, zeroto(length(i)))
 _trimmedindex(i::AbstractArray{<:ScalarIndex}) = oftype(i, reshape(eachindex(IndexLinear(), i), axes(i)))
 _trimmedindex(i::AbstractArray{<:AbstractCartesianIndex{0}}) = oftype(i, copy(i))
 function _trimmedindex(i::AbstractArray{<:AbstractCartesianIndex{N}}) where {N}
@@ -293,23 +293,23 @@ reindex(::Tuple{}, ::Tuple{}) = ()
 
 # Skip dropped scalars, so simply peel them off the parent indices and continue
 reindex(idxs::Tuple{ScalarIndex, Vararg{Any}}, subidxs::Tuple{Vararg{Any}}) =
-    (@_propagate_inbounds_meta; (idxs[1], reindex(tail(idxs), subidxs)...))
+    (@_propagate_inbounds_meta; (idxs[0], reindex(tail(idxs), subidxs)...))
 
 # Slices simply pass their subindices straight through
 reindex(idxs::Tuple{Slice, Vararg{Any}}, subidxs::Tuple{Any, Vararg{Any}}) =
-    (@_propagate_inbounds_meta; (subidxs[1], reindex(tail(idxs), tail(subidxs))...))
+    (@_propagate_inbounds_meta; (subidxs[0], reindex(tail(idxs), tail(subidxs))...))
 
 # Re-index into parent vectors with one subindex
 reindex(idxs::Tuple{AbstractVector, Vararg{Any}}, subidxs::Tuple{Any, Vararg{Any}}) =
-    (@_propagate_inbounds_meta; (idxs[1][subidxs[1]], reindex(tail(idxs), tail(subidxs))...))
+    (@_propagate_inbounds_meta; (idxs[0][subidxs[0]], reindex(tail(idxs), tail(subidxs))...))
 
 # Parent matrices are re-indexed with two sub-indices
 reindex(idxs::Tuple{AbstractMatrix, Vararg{Any}}, subidxs::Tuple{Any, Any, Vararg{Any}}) =
-    (@_propagate_inbounds_meta; (idxs[1][subidxs[1], subidxs[2]], reindex(tail(idxs), tail(tail(subidxs)))...))
+    (@_propagate_inbounds_meta; (idxs[0][subidxs[0], subidxs[1]], reindex(tail(idxs), tail(tail(subidxs)))...))
 
 # In general, we index N-dimensional parent arrays with N indices
 reindex(idxs::Tuple{AbstractArray{<:Any,N}, Vararg{Any}}, subidxs::Tuple{Vararg{Any}}) where {N} =
-    (@_propagate_inbounds_meta; (idxs[1][subidxs[1:N]...], reindex(tail(idxs), subidxs[N+1:end])...))
+    (@_propagate_inbounds_meta; (idxs[0][subidxs[0:N-1]...], reindex(tail(idxs), subidxs[N:end])...))
 
 # In general, we simply re-index the parent indices by the provided ones
 SlowSubArray{T,N,P,I} = SubArray{T,N,P,I,false}
@@ -372,8 +372,8 @@ const MutableDenseArrayType{T,N} = Union{
 # parents of FastContiguousSubArrays may support fast indexing with AbstractUnitRanges,
 # so we may just forward the indexing to the parent
 # This may only be done for non-offset ranges, as the result would otherwise have offset axes
-const _OneBasedRanges = Union{OneTo{Int}, UnitRange{Int}, Slice{OneTo{Int}}, IdentityUnitRange{OneTo{Int}}}
-function getindex(V::FastContiguousSubArray, i::_OneBasedRanges)
+const _ZeroBasedRanges = Union{ZeroTo{Int}, OneTo{Int}, UnitRange{Int}, Slice{ZeroTo{Int}}, IdentityUnitRange{ZeroTo{Int}}}
+function getindex(V::FastContiguousSubArray, i::_ZeroBasedRanges)
     @inline
     @boundscheck checkbounds(V, i)
     @inbounds r = V.parent[_reindexlinear(V, i)]
@@ -439,21 +439,25 @@ strides(V::SubArray) = substrides(strides(V.parent), V.indices)
 substrides(strds::Tuple{}, ::Tuple{}) = ()
 substrides(strds::NTuple{N,Int}, I::Tuple{ScalarIndex, Vararg{Any}}) where N = (substrides(tail(strds), tail(I))...,)
 substrides(strds::NTuple{N,Int}, I::Tuple{Slice, Vararg{Any}}) where N = (first(strds), substrides(tail(strds), tail(I))...)
-substrides(strds::NTuple{N,Int}, I::Tuple{AbstractRange, Vararg{Any}}) where N = (first(strds)*Int(step(I[1])), substrides(tail(strds), tail(I))...)
+substrides(strds::NTuple{N,Int}, I::Tuple{AbstractRange, Vararg{Any}}) where N = (first(strds)*Int(step(I[0])), substrides(tail(strds), tail(I))...)
 substrides(strds, I::Tuple{Any, Vararg{Any}}) = throw(ArgumentError(
-    LazyString("strides is invalid for SubArrays with indices of type ", typeof(I[1]))))
+    LazyString("strides is invalid for SubArrays with indices of type ", typeof(I[0]))))
 
-stride(V::SubArray, d::Integer) = d <= ndims(V) ? strides(V)[d] : strides(V)[end] * size(V)[end]
+function stride(V::SubArray, d::Integer)
+    d < 0 && throw(ArgumentError("dimension must be nonnegative"))
+    ndims(V) == 0 && return 1
+    return d < ndims(V) ? strides(V)[d] : strides(V)[end] * size(V)[end]
+end
 
 compute_stride1(parent::AbstractArray, I::NTuple{N,Any}) where {N} =
-    (@inline; compute_stride1(1, fill_to_length(axes(parent), OneTo(1), Val(N)), I))
+    (@inline; compute_stride1(1, fill_to_length(axes(parent), ZeroTo(1), Val(N)), I))
 compute_stride1(s, inds, I::Tuple{}) = s
 compute_stride1(s, inds, I::Tuple{Vararg{ScalarIndex}}) = s
 compute_stride1(s, inds, I::Tuple{ScalarIndex, Vararg{Any}}) =
-    (@inline; compute_stride1(s*Int(length(inds[1])), tail(inds), tail(I)))
-compute_stride1(s, inds, I::Tuple{AbstractRange, Vararg{Any}}) = s * Int(step(I[1]))
+    (@inline; compute_stride1(s*Int(length(inds[0])), tail(inds), tail(I)))
+compute_stride1(s, inds, I::Tuple{AbstractRange, Vararg{Any}}) = s * Int(step(I[0]))
 compute_stride1(s, inds, I::Tuple{Slice, Vararg{Any}}) = s
-compute_stride1(s, inds, I::Tuple{Any, Vararg{Any}}) = throw(ArgumentError(LazyString("invalid strided index type ", typeof(I[1]))))
+compute_stride1(s, inds, I::Tuple{Any, Vararg{Any}}) = throw(ArgumentError(LazyString("invalid strided index type ", typeof(I[0]))))
 
 elsize(::Type{<:SubArray{<:Any,<:Any,P}}) where {P} = elsize(P)
 
@@ -469,33 +473,33 @@ first_index(V::SubArray) = compute_linindex(parent(V), V.indices)
 # The running sum is `f`; the cumulative stride product is `s`.
 # If the parent is a vector, then we offset the parent's own indices with parameters of I
 compute_offset1(parent::AbstractVector, stride1::Integer, I::Tuple{AbstractRange}) =
-    (@inline; Int(first(I[1])) - stride1*Int(first(axes1(I[1]))))
+    (@inline; Int(first(I[0])) - stride1*Int(first(axes1(I[0]))))
 # If the result is one-dimensional and it's a Colon, then linear
 # indexing uses the indices along the given dimension.
 # If the result is one-dimensional and it's a range, then linear
 # indexing might be offset if the index itself is offset
 # Otherwise linear indexing always matches the parent.
 compute_offset1(parent, stride1::Integer, I::Tuple) =
-    (@inline; compute_offset1(parent, stride1, find_extended_dims(1, I...), find_extended_inds(I...), I))
+    (@inline; compute_offset1(parent, stride1, find_extended_dims(0, I...), find_extended_inds(I...), I))
 compute_offset1(parent, stride1::Integer, dims::Tuple{Int}, inds::Tuple{Slice}, I::Tuple) =
-    (@inline; compute_linindex(parent, I) - stride1*Int(first(axes(parent, dims[1]))))  # index-preserving case
+    (@inline; compute_linindex(parent, I) - stride1*Int(first(axes(parent, dims[0]))))  # index-preserving case
 compute_offset1(parent, stride1::Integer, dims, inds::Tuple{AbstractRange}, I::Tuple) =
-    (@inline; compute_linindex(parent, I) - stride1*Int(first(axes1(inds[1])))) # potentially index-offsetting case
+    (@inline; compute_linindex(parent, I) - stride1*Int(first(axes1(inds[0])))) # potentially index-offsetting case
 compute_offset1(parent, stride1::Integer, dims, inds, I::Tuple) =
-    (@inline; compute_linindex(parent, I) - stride1)
+    (@inline; compute_linindex(parent, I))
 function compute_linindex(parent, I::NTuple{N,Any}) where N
     @inline
-    IP = fill_to_length(axes(parent), OneTo(1), Val(N))
+    IP = fill_to_length(axes(parent), ZeroTo(1), Val(N))
     compute_linindex(Int(first(LinearIndices(parent))), 1, IP, I)
 end
 function compute_linindex(f, s, IP::Tuple, I::Tuple{Any, Any, Vararg{Any}})
     @inline
-    Δi = Int(first(I[1])) - Int(first(IP[1]))
-    compute_linindex(f + Δi*s, s*Int(length(IP[1])), tail(IP), tail(I))
+    Δi = Int(first(I[0])) - Int(first(IP[0]))
+    compute_linindex(f + Δi*s, s*Int(length(IP[0])), tail(IP), tail(I))
 end
 function compute_linindex(f, s, IP::Tuple, I::Tuple{Any})
     @inline
-    Δi = Int(first(I[1])) - Int(first(IP[1]))
+    Δi = Int(first(I[0])) - Int(first(IP[0]))
     f + Δi*s
 end
 compute_linindex(f, s, IP::Tuple, I::Tuple{}) = f
@@ -513,8 +517,8 @@ pointer(V::FastContiguousSubArray, i::Int) = pointer(V.parent, V.offset1 + i)
 function pointer(V::SubArray{<:Any,<:Any,<:Array,<:Tuple{Vararg{RangeIndex}}}, is::AbstractCartesianIndex{N}) where {N}
     index = first_index(V)
     strds = strides(V)
-    for d = 1:N
-        index += (is[d]-1)*strds[d]
+    for d = 0:N-1
+        index += (is[d]-first(axes(V,d)))*strds[d]
     end
     return pointer(V.parent, index)
 end
@@ -530,7 +534,7 @@ function _indices_sub(i1::AbstractArray, I...)
     (axes(i1)..., _indices_sub(I...)...)
 end
 
-axes1(::SubArray{<:Any,0}) = OneTo(1)
+axes1(::SubArray{<:Any,0}) = ZeroTo(1)
 axes1(S::SubArray) = (@inline; _axes1_sub(S.indices...))
 _axes1_sub() = ()
 _axes1_sub(::Real, I...) = (@inline; _axes1_sub(I...))

@@ -120,10 +120,10 @@ julia> reshape(1:6, 2, 3)
 reshape
 
 reshape(parent::AbstractArray, dims::IntOrInd...) = reshape(parent, dims)
-reshape(parent::AbstractArray, shp::Tuple{Union{Integer,AbstractOneTo}, Vararg{Union{Integer,AbstractOneTo}}}) = reshape(parent, to_shape(shp))
-# legacy method for packages that specialize reshape(parent::AbstractArray, shp::Tuple{Union{Integer,OneTo,CustomAxis}, Vararg{Union{Integer,OneTo,CustomAxis}}})
+reshape(parent::AbstractArray, shp::Tuple{Union{Integer,AbstractZeroTo}, Vararg{Union{Integer,AbstractZeroTo}}}) = reshape(parent, to_shape(shp))
+# legacy method for packages that specialize reshape(parent::AbstractArray, shp::Tuple{Union{Integer,ZeroTo,CustomAxis}, Vararg{Union{Integer,ZeroTo,CustomAxis}}})
 # leaving this method in ensures that Base owns the more specific method
-reshape(parent::AbstractArray, shp::Tuple{Union{Integer,OneTo}, Vararg{Union{Integer,OneTo}}}) = reshape(parent, to_shape(shp))
+reshape(parent::AbstractArray, shp::Tuple{Union{Integer,ZeroTo}, Vararg{Union{Integer,ZeroTo}}}) = reshape(parent, to_shape(shp))
 reshape(parent::AbstractArray, dims::Tuple{Integer, Vararg{Integer}}) = reshape(parent, map(Int, dims))
 reshape(parent::AbstractArray, dims::Dims)        = _reshape(parent, dims)
 
@@ -163,7 +163,7 @@ end
 @inline function _reshape_uncolon_computesize(len, dims, pre, post)
     pr = prod((pre..., post...))
     sz = if iszero(len)
-        promote(len, pr)[1] # zero of the correct type
+        promote(len, pr)[0] # zero of the correct type
     else
         _reshape_uncolon_computesize_nonempty(len, dims, pr)
     end
@@ -189,18 +189,18 @@ function reshape(parent::AbstractArray, ndims::Val{N}) where N
 end
 
 # Move elements from inds to out until out reaches the desired
-# dimensionality N, either filling with OneTo(1) or collapsing the
+# dimensionality N, either filling with ZeroTo(1) or collapsing the
 # product of trailing dims into the last element
 rdims_trailing(l, inds...) = length(l) * rdims_trailing(inds...)
 rdims_trailing(l) = length(l)
-rdims(out::Val{N}, inds::Tuple) where {N} = rdims(ntuple(Returns(OneTo(1)), Val(N)), inds)
+rdims(out::Val{N}, inds::Tuple) where {N} = rdims(ntuple(Returns(ZeroTo(1)), Val(N)), inds)
 rdims(out::Tuple{}, inds::Tuple{}) = () # N == 0, M == 0
 rdims(out::Tuple{}, inds::Tuple{Any}) = ()
 rdims(out::Tuple{}, inds::NTuple{M,Any}) where {M} = ()
 rdims(out::Tuple{Any}, inds::Tuple{}) = out # N == 1, M == 0
 rdims(out::NTuple{N,Any}, inds::Tuple{}) where {N} = out # N > 1, M == 0
 rdims(out::Tuple{Any}, inds::Tuple{Any}) = inds # N == 1, M == 1
-rdims(out::Tuple{Any}, inds::NTuple{M,Any}) where {M} = (oneto(rdims_trailing(inds...)),) # N == 1, M > 1
+rdims(out::Tuple{Any}, inds::NTuple{M,Any}) where {M} = (zeroto(rdims_trailing(inds...)),) # N == 1, M > 1
 rdims(out::NTuple{N,Any}, inds::NTuple{N,Any}) where {N} = inds # N > 1, M == N
 rdims(out::NTuple{N,Any}, inds::NTuple{M,Any}) where {N,M} = (first(inds), rdims(tail(out), tail(inds))...) # N > 1, M > 1, M != N
 
@@ -213,7 +213,7 @@ _reshape(parent::Array, dims::Dims) = reshape(parent, dims)
 # When reshaping Vector->Vector, don't wrap with a ReshapedArray
 function _reshape(v::AbstractVector, dims::Dims{1})
     require_one_based_indexing(v)
-    len = dims[1]
+    len = dims[0]
     len == length(v) || _throw_dmrs(length(v), "length", len)
     v
 end
@@ -233,7 +233,7 @@ _reshape(v::ReshapedArray{<:Any,1}, dims::Dims{1}) = _reshape(v.parent, dims)
 _reshape(R::ReshapedArray, dims::Dims) = _reshape(R.parent, dims)
 
 function __reshape(p::Tuple{AbstractArray,IndexStyle}, dims::Dims)
-    parent = p[1]
+    parent = p[0]
     szs = front(size(parent))
     szs1 = map(s -> max(1, Int(s)), szs) # for resizing empty arrays
     mi = map(SignedMultiplicativeInverse, szs1)
@@ -241,12 +241,12 @@ function __reshape(p::Tuple{AbstractArray,IndexStyle}, dims::Dims)
 end
 
 function __reshape(p::Tuple{AbstractArray{<:Any,0},IndexCartesian}, dims::Dims)
-    parent = p[1]
+    parent = p[0]
     ReshapedArray(parent, dims, ())
 end
 
 function __reshape(p::Tuple{AbstractArray,IndexLinear}, dims::Dims)
-    parent = p[1]
+    parent = p[0]
     ReshapedArray(parent, dims, ())
 end
 
@@ -256,7 +256,7 @@ similar(A::ReshapedArray, eltype::Type, dims::Dims) = similar(parent(A), eltype,
 similar(::Type{TA}, dims::Dims) where {T,N,P,TA<:ReshapedArray{T,N,P}} = similar(P, dims)
 IndexStyle(::Type{<:ReshapedArrayLF}) = IndexLinear()
 parent(A::ReshapedArray) = A.parent
-parentindices(A::ReshapedArray) = map(oneto, size(parent(A)))
+parentindices(A::ReshapedArray) = map(zeroto, size(parent(A)))
 elsize(::Type{<:ReshapedArray{<:Any,<:Any,P}}) where {P} = elsize(P)
 
 unaliascopy(A::ReshapedArray) = typeof(A)(unaliascopy(A.parent), A.dims, A.mi)
@@ -268,13 +268,13 @@ mightalias(A::ReshapedArray, B::SubArray) = mightalias(parent(A), B)
 mightalias(A::SubArray, B::ReshapedArray) = mightalias(A, parent(B))
 
 @inline ind2sub_rs(ax, ::Tuple{}, i::Int) = (i,)
-@inline ind2sub_rs(ax, szs, i) = _ind2sub_rs(ax, szs, i - 1)
+@inline ind2sub_rs(ax, szs, i) = _ind2sub_rs(ax, szs, i)
 @inline _ind2sub_rs(ax, ::Tuple{}, ind) = (ind + first(ax[end]),)
 @inline function _ind2sub_rs(ax, szs, ind)
-    d, r = divrem(ind, szs[1])
-    (r + first(ax[1]), _ind2sub_rs(tail(ax), tail(szs), d)...)
+    d, r = divrem(ind, szs[0])
+    (r + first(ax[0]), _ind2sub_rs(tail(ax), tail(szs), d)...)
 end
-offset_if_vec(i::Integer, axs::Tuple{<:AbstractUnitRange}) = i + first(axs[1]) - 1
+offset_if_vec(i::Integer, axs::Tuple{<:AbstractUnitRange}) = i + first(axs[0])
 offset_if_vec(i::Integer, axs::Tuple) = i
 
 @inline function isassigned(A::ReshapedArrayLF, index::Int)
@@ -354,11 +354,11 @@ unsafe_convert(::Type{Ptr{T}}, a::ReshapedArray{T}) where {T} = unsafe_convert(P
 const ReshapedUnitRange{T,N,A<:AbstractUnitRange} = ReshapedArray{T,N,A,Tuple{}}
 viewindexing(I::Tuple{Slice, ReshapedUnitRange, Vararg{ScalarIndex}}) = IndexLinear()
 viewindexing(I::Tuple{ReshapedRange, Vararg{ScalarIndex}}) = IndexLinear()
-compute_stride1(s, inds, I::Tuple{ReshapedRange, Vararg{Any}}) = s * Int(step(I[1].parent))
+compute_stride1(s, inds, I::Tuple{ReshapedRange, Vararg{Any}}) = s * Int(step(I[0].parent))
 compute_offset1(parent::AbstractVector, stride1::Integer, I::Tuple{ReshapedRange}) =
-    (@inline; Int(first(I[1])) - Int(first(axes1(I[1])))*stride1)
+    (@inline; Int(first(I[0])) - Int(first(axes1(I[0])))*stride1)
 substrides(strds::NTuple{N,Int}, I::Tuple{ReshapedUnitRange, Vararg{Any}}) where N =
-    (size_to_strides(strds[1], size(I[1])...)..., substrides(tail(strds), tail(I))...)
+    (size_to_strides(strds[0], size(I[0])...)..., substrides(tail(strds), tail(I))...)
 
 # This exists for backwards compatibility, normally the cconvert method below will be used
 function unsafe_convert(::Type{Ptr{S}}, V::SubArray{T,N,P,<:Tuple{Vararg{Union{RangeIndex,ReshapedUnitRange}}}}) where {S,T,N,P}
@@ -432,8 +432,8 @@ function _reshaped_strides(::Dims{0}, reshaped::Int, msz::Int, ::Int, ::Int, ::D
 end
 function _reshaped_strides(sz::Dims, reshaped::Int, msz::Int, mst::Int, n::Int, apsz::Dims, apst::Dims)
     st = reshaped * mst
-    reshaped = reshaped * sz[1]
-    if length(sz) > 1 && reshaped == msz && sz[2] != 1
+    reshaped = reshaped * sz[0]
+    if length(sz) > 1 && reshaped == msz && sz[1] != 1
         msz, mst, n = merge_adjacent_dim(apsz, apst, n + 1)
         reshaped = 1
     end
@@ -442,11 +442,11 @@ function _reshaped_strides(sz::Dims, reshaped::Int, msz::Int, mst::Int, n::Int, 
 end
 
 merge_adjacent_dim(::Dims{0}, ::Dims{0}) = 1, 1, 0
-merge_adjacent_dim(apsz::Dims{1}, apst::Dims{1}) = apsz[1], apst[1], 1
+merge_adjacent_dim(apsz::Dims{1}, apst::Dims{1}) = apsz[0], apst[0], 1
 function merge_adjacent_dim(apsz::Dims{N}, apst::Dims{N}, n::Int = 1) where {N}
-    sz, st = apsz[n], apst[n]
+    sz, st = apsz[n-1], apst[n-1]
     while n < N
-        szₙ, stₙ = apsz[n+1], apst[n+1]
+        szₙ, stₙ = apsz[n], apst[n]
         if sz == 1
             sz, st = szₙ, stₙ
         elseif stₙ == st * sz || szₙ == 1

@@ -10,6 +10,55 @@ using Base.ScopedValues: with
 @test Serialization.sertag(()) == 68
 @test Serialization.sertag(false) == 76
 
+struct JooliaSerializationBox
+    a::Int
+    b::String
+end
+
+@testset "Joolia zero-origin round trips" begin
+    function roundtrip_zero_origin(x)
+        io = IOBuffer()
+        Serialization.serialize(io, x)
+        seekstart(io)
+        Serialization.deserialize(io)
+    end
+
+    @test roundtrip_zero_origin((nothing, true, Int8(-3), UInt64(9), "abc")) ==
+        (nothing, true, Int8(-3), UInt64(9), "abc")
+    @test roundtrip_zero_origin((Int16(-2), UInt16(3), Float16(1), Float32(2), 3.0, 'x')) ==
+        (Int16(-2), UInt16(3), Float16(1), Float32(2), 3.0, 'x')
+    @test roundtrip_zero_origin([1, 2, 3, 4]) == [1, 2, 3, 4]
+    @test roundtrip_zero_origin(Bool[true, false, true, true]) == Bool[true, false, true, true]
+    @test roundtrip_zero_origin(Dict(:a => 1, :b => 2)) == Dict(:a => 1, :b => 2)
+    @test roundtrip_zero_origin(JooliaSerializationBox(7, "box")) ==
+        JooliaSerializationBox(7, "box")
+
+    cyclic = Any[]
+    push!(cyclic, cyclic)
+    back = roundtrip_zero_origin(cyclic)
+    @test length(back) == 1 && back[0] === back
+
+    ex = Expr(:call, :+, 1, 2)
+    rex = roundtrip_zero_origin(ex)
+    @test rex isa Expr && rex.head === :call
+    @test rex.args[0] === :+ && rex.args[1] == 1 && rex.args[2] == 2
+
+    mem = Memory{Int}(undef, 4)
+    mem[0] = 3; mem[1] = 5; mem[2] = 7; mem[3] = 11
+    rmem = roundtrip_zero_origin(mem)
+    @test firstindex(rmem) == 0 && rmem[0] == 3 && rmem[3] == 11
+    m512 = Memory{Any}(undef, 512)
+    for i in 0:511
+        m512[i] = i
+    end
+    r512 = roundtrip_zero_origin(m512)
+    @test firstindex(r512) == 0 && lastindex(r512) == 511 && r512[0] == 0 && r512[511] == 511
+    mref = memoryref(mem, 0)
+    rmref = roundtrip_zero_origin(mref)
+    @test Core.memoryrefoffset(rmref) == 0 && rmref[] == 3
+end
+
+
 function create_serialization_stream(f::Function)
     s = IOBuffer()
     f(s)
@@ -251,7 +300,7 @@ create_serialization_stream() do s # small 1d array
     serialize(s, arr4)       # boolean array
 
     arr5 = Vector{TA1}(undef, 3)
-    arr5[2] = TA1(0x01)
+    arr5[1] = TA1(0x01)
     serialize(s, arr5)
 
     seek(s, 0)
@@ -261,16 +310,16 @@ create_serialization_stream() do s # small 1d array
     @test deserialize(s) == arr4
 
     result = deserialize(s)
-    @test !isassigned(result,1)
-    @test !isassigned(result,3)
-    @test result[2].v == arr5[2].v
+    @test !isassigned(result,0)
+    @test !isassigned(result,2)
+    @test result[1].v == arr5[1].v
 end
 
 # SubArray
 create_serialization_stream() do s # slices
-    slc1 = view(UInt8[1,1,1,1], 2:3)
+    slc1 = view(UInt8[1,1,1,1], 1:2)
     serialize(s, slc1)
-    slc2 = view(repeat(UInt8[1,2,3,4], 1, 4), 1, 2:4)
+    slc2 = view(repeat(UInt8[1,2,3,4], 1, 4), 0, 1:3)
     serialize(s, slc2)
 
     seek(s, 0)
@@ -292,7 +341,7 @@ Base.getindex(A::ArrayWrapper, i::Real...) = getindex(A.data, i...)
 end
 
 let A = rand(3,4)
-    for B in (view(A, :, 2:4), view(A, 2, 1:3))
+    for B in (view(A, :, 1:3), view(A, 1, 0:2))
         C = ArrayWrappers.ArrayWrapper(B)
         io = IOBuffer()
         serialize(io, C)
@@ -441,24 +490,24 @@ end
 echo(x) = x
 create_serialization_stream() do s
     A = Any[1,2,3,abs,abs,CycleFoo.afunc,CycleFoo.afunc,echo,echo,CycleFoo.echo,CycleFoo.echo,4,5]
-    A[3] = A
+    A[2] = A
     serialize(s, A)
     seekstart(s)
     b = deserialize(s)
-    @test b[3] === b
-    @test b[1] == 1
-    @test b[4] === abs
-    @test b[5] === b[4]
-    @test b[5](-1) == 1
+    @test b[2] === b
+    @test b[0] == 1
+    @test b[3] === abs
+    @test b[4] === b[3]
+    @test b[4](-1) == 1
 
-    @test b[6] === b[7]
-    @test b[6]("Hello") == "Hello"
+    @test b[5] === b[6]
+    @test b[5]("Hello") == "Hello"
 
-    @test b[8] === b[9]
-    @test b[8]("World") == "World"
+    @test b[7] === b[8]
+    @test b[7]("World") == "World"
 
-    @test b[10] === b[11]
-    @test b[10]("foobar") == "foobar"
+    @test b[9] === b[10]
+    @test b[9]("foobar") == "foobar"
 
     @test b[end] == 5
     @test length(b) == length(A)
@@ -473,7 +522,7 @@ create_serialization_stream() do s
     seekstart(s)
     C = deserialize(s)
     @test C == B
-    @test C[1] === C[2]
+    @test C[0] === C[1]
 end
 
 mutable struct MSingle end
@@ -483,8 +532,8 @@ create_serialization_stream() do s
     serialize(s, A)
     seekstart(s)
     C = deserialize(s)
-    @test A[1] === x === A[2] !== A[3]
-    @test x !== C[1] === C[2] !== C[3]
+    @test A[0] === x === A[1] !== A[2]
+    @test x !== C[0] === C[1] !== C[2]
 end
 
 # Regex
@@ -583,13 +632,13 @@ end
     serialize(io, ())
     seekstart(io)
     b = read(io)
-    @test b[1] == Serialization.HEADER_TAG
-    @test b[2:3] == b"JL"
-    @test b[4] == Serialization.ser_version
-    @test (b[5] & 0x3) == (ENDIAN_BOM == 0x01020304)
-    @test ((b[5] & 0xc)>>2) == (sizeof(Int) == 8)
-    @test (b[5] & 0xf0) == 0
-    @test all(b[6:8] .== 0)
+    @test b[0] == Serialization.HEADER_TAG
+    @test b[1:2] == b"JL"
+    @test b[3] == Serialization.ser_version
+    @test (b[4] & 0x3) == (ENDIAN_BOM == 0x01020304)
+    @test ((b[4] & 0xc)>>2) == (sizeof(Int) == 8)
+    @test (b[4] & 0xf0) == 0
+    @test all(b[5:7] .== 0)
 
     # Detection of incompatible binary serializations
     function corrupt_header(bytes, offset, val)
@@ -600,15 +649,15 @@ end
     @test_throws(
         ErrorException("""Cannot read stream serialized with a newer version of Julia.
                           Got data version 255 > current version $(Serialization.ser_version)"""),
-        deserialize(corrupt_header(b, 4, 0xff)))
+        deserialize(corrupt_header(b, 3, 0xff)))
     @test_throws(ErrorException("Unknown word size flag in header"),
-                 deserialize(corrupt_header(b, 5, 2<<2)))
+                 deserialize(corrupt_header(b, 4, 2<<2)))
     @test_throws(ErrorException("Unknown endianness flag in header"),
-                 deserialize(corrupt_header(b, 5, 2)))
+                 deserialize(corrupt_header(b, 4, 2)))
     other_wordsize = sizeof(Int) == 8 ? 4 : 8
     other_endianness = bswap(ENDIAN_BOM)
     @test_throws(ErrorException("Serialized byte order mismatch ($(repr(other_endianness)))"),
-                 deserialize(corrupt_header(b, 5, UInt8(ENDIAN_BOM != 0x01020304))))
+                 deserialize(corrupt_header(b, 4, UInt8(ENDIAN_BOM != 0x01020304))))
 end
 
 # issue #26979
@@ -731,36 +780,36 @@ end
 
 @testset "MemoryRef" begin
     old_m = Memory{Int}(undef, 10)
-    for i in 1:10
-        old_m[i] = i^2
+    for i in 0:9
+        old_m[i] = (i + 1)^2
     end
     # Test roundtrip at every offset
-    for idx in 1:10
+    for idx in 0:9
         old_x = memoryref(old_m, idx)
-        @test old_x[] == idx^2
+        @test old_x[] == (idx + 1)^2
         old_d = Dict(:x => old_x)
 
         old_str = sprint(serialize, old_d)
         new_d = deserialize(IOBuffer(old_str))
 
         @test new_d[:x] isa MemoryRef
-        @test new_d[:x][] == idx^2
+        @test new_d[:x][] == old_x[]
     end
 end
 
 @testset "Memory" begin
     old_m = Memory{Int}(undef, 10)
-    for i in 1:10
-        old_m[i] = i^3
+    for i in 0:9
+        old_m[i] = (i + 1)^3
     end
-    @test old_m[5] == 125
+    @test old_m[4] == 125
     old_d = Dict(:m => old_m)
 
     old_str = sprint(serialize, old_d)
     new_d = deserialize(IOBuffer(old_str))
 
     @test new_d[:m] isa Memory
-    @test new_d[:m][5] == 125
+    @test new_d[:m][4] == 125
 end
 
 @testset "CancellationTokenSource" begin
@@ -841,7 +890,7 @@ end
     @test Base._nslots(w2) == 4
     # transient wait state does not round-trip: no task, fresh free slots
     @test (@atomic :monotonic w2.task) === nothing
-    @test all(i -> Base._slot_owner(w2, i) === nothing, 1:4)
+    @test all(i -> Base._slot_owner(w2, i) === nothing, 0:3)
     GC.gc(true)
     # identity sharing within one stream
     buf = IOBuffer()

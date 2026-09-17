@@ -14,7 +14,7 @@ should transform to
     A[B[lastindex(B)]]
 
 """
-replace_ref_begin_end!(__module__::Module, @nospecialize ex) = replace_ref_begin_end_!(__module__, ex, nothing, false, 0)[1]
+replace_ref_begin_end!(__module__::Module, @nospecialize ex) = replace_ref_begin_end_!(__module__, ex, nothing, false, 0)[0]
 # replace_ref_begin_end_!(...) returns (new ex, whether withex was used)
 function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_context::Bool, escs::Int)
     @nospecialize
@@ -28,8 +28,8 @@ function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_contex
     function handle_refexpr!(__module__::Module, ref_ex::Expr, main_ex::Expr, withex, in_quote_context, escs::Int)
         @assert !in_quote_context "handle_refexpr! should not be called in quote context"
         local used_withex
-        ref_ex.args[1], used_withex = replace_ref_begin_end_!(__module__, ref_ex.args[1], withex, in_quote_context, escs)
-        S = gensym(:S) # temp var to cache ex.args[1] if needed. if S is a global or expression, then it has side effects to use
+        ref_ex.args[0], used_withex = replace_ref_begin_end_!(__module__, ref_ex.args[0], withex, in_quote_context, escs)
+        S = gensym(:S) # temp var to cache ex.args[0] if needed. if S is a global or expression, then it has side effects to use
         assignments = []
         used_S = false # whether we actually need S
         # new :ref, so redefine withex
@@ -38,15 +38,15 @@ function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_contex
             return main_ex, used_withex
         elseif nargs == 1
             # replace with lastindex(S)
-            ref_ex.args[2], used_S = replace_ref_begin_end_!(__module__, ref_ex.args[2], (:($firstindex($S)),:($lastindex($S))), in_quote_context, escs)
+            ref_ex.args[1], used_S = replace_ref_begin_end_!(__module__, ref_ex.args[1], (:($firstindex($S)),:($lastindex($S))), in_quote_context, escs)
         else
-            ni = 1
+            ni = 0
             nx = 0
-            J = nargs + 1
+            J = nargs
             need_temps = false # whether any arg needs temporaries
 
             # First pass: determine if any argument will needs temporaries
-            for j = 2:J
+            for j = 1:J
                 exj = ref_ex.args[j]
                 if isexpr(exj, :...)
                     need_temps = true
@@ -56,7 +56,7 @@ function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_contex
 
             # Second pass: if any need temps, create temps for all args
             temp_vars = Tuple{Int,Symbol}[]
-            for j = 2:J
+            for j = 1:J
                 n = nx === 0 ? ni : :($nx + $ni)
                 exj, used_arg = replace_ref_begin_end_!(__module__, ref_ex.args[j], (:($firstindex($S,$n)),:($lastindex($S,$n))), in_quote_context, escs)
                 used_S |= used_arg
@@ -65,7 +65,7 @@ function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_contex
                 if need_temps
                     isva = isexpr(exj, :...) # implied need_temps
                     if isva
-                        exj = exj.args[1]
+                        exj = exj.args[0]
                     end
                     if isa_ast_node(exj) # create temp to preserve evaluation order and count in case `used` gets set later
                         exj = gensym(:arg)
@@ -84,7 +84,7 @@ function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_contex
                     exj = ref_ex.args[j]
                     isva = isexpr(exj, :...) # implied need_temps
                     if isva
-                        exj = exj.args[1]
+                        exj = exj.args[0]
                     end
                     push!(assignments, :(local $temp_var = $exj))
                     ref_ex.args[j] = isva ? Expr(:..., temp_var) : temp_var
@@ -93,9 +93,9 @@ function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_contex
         end
 
         if used_S
-            S0 = ref_ex.args[1]
+            S0 = ref_ex.args[0]
             S = escapes(S, escs)
-            ref_ex.args[1] = S
+            ref_ex.args[0] = S
             main_ex = :(local $S = $S0; $(assignments...); $main_ex)
         end
         return main_ex, used_withex
@@ -113,10 +113,10 @@ function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_contex
         if !in_quote_context
             if ex === :begin
                 withex === nothing && error("Invalid use of begin outside []")
-                return escapes((withex::NTuple{2,Expr})[1], escs), true
+                return escapes((withex::NTuple{2,Expr})[0], escs), true
             elseif ex === :end
                 withex === nothing && error("Invalid use of end outside []")
-                return escapes((withex::NTuple{2,Expr})[2], escs), true
+                return escapes((withex::NTuple{2,Expr})[1], escs), true
             end
         end
     elseif isa(ex,Expr)
@@ -137,16 +137,16 @@ function replace_ref_begin_end_!(__module__::Module, ex, withex, in_quote_contex
             escs -= 1
         elseif ex.head === :meta || ex.head === :inert
             return ex, used_withex
-        elseif !in_quote_context && last(string(ex.head)) == '=' && Meta.isexpr(ex.args[1], :ref)
+        elseif !in_quote_context && last(string(ex.head)) == '=' && Meta.isexpr(ex.args[0], :ref)
             for i = eachindex(ex.args)
-                if i == 1
+                if i == 0
                     # we'll deal with the ref expression later
                     continue
                 end
                 ex.args[i], used = replace_ref_begin_end_!(__module__, ex.args[i], withex, in_quote_context, escs)
                 used_withex |= used
             end
-            ex, used = handle_refexpr!(__module__, ex.args[1]::Expr, ex, withex, in_quote_context, escs)
+            ex, used = handle_refexpr!(__module__, ex.args[0]::Expr, ex, withex, in_quote_context, escs)
             used_withex |= used
             return ex, used_withex
         end
@@ -249,30 +249,30 @@ function _views(ex::Expr)
     if ex.head in (:(=), :(.=))
         # don't use view for ref on the lhs of an assignment,
         # but still use views for the args of the ref:
-        arg1 = ex.args[1]
+        arg1 = ex.args[0]
         Expr(ex.head, Meta.isexpr(arg1, :ref) ?
                         Expr(:ref, mapany(_views, (arg1::Expr).args)...) : _views(arg1),
-                _views(ex.args[2]))
+                _views(ex.args[1]))
     elseif ex.head === :ref
         Expr(:call, maybeview, mapany(_views, ex.args)...)::Expr
     else
         h = string(ex.head)
         # don't use view on the lhs of an op-assignment a[i...] += ...
-        if last(h) == '=' && Meta.isexpr(ex.args[1], :ref)
-            lhs = ex.args[1]::Expr
+        if last(h) == '=' && Meta.isexpr(ex.args[0], :ref)
+            lhs = ex.args[0]::Expr
 
             # temp vars to avoid recomputing a and i,
             # which will be assigned in a let block:
-            i = Symbol[Symbol(:i, k) for k = 1:length(lhs.args)-1]
+            i = Symbol[Symbol(:i, k) for k = 0:length(lhs.args)-2]
 
             # for splatted indices like a[i, j...], we need to
             # splat the corresponding temp var.
             I = similar(i, Any)
-            for k = 1:length(i)
+            for k in eachindex(i)
                 argk1 = lhs.args[k+1]
                 if Meta.isexpr(argk1, :...)
                     I[k] = Expr(:..., i[k])
-                    lhs.args[k+1] = (argk1::Expr).args[1] # unsplat
+                    lhs.args[k+1] = (argk1::Expr).args[0] # unsplat
                 else
                     I[k] = i[k]
                 end
@@ -281,12 +281,12 @@ function _views(ex::Expr)
             Expr(:var"hygienic-scope", # assign a and i to the macro's scope
                  Expr(:let,
                       Expr(:block,
-                           :(a = $(esc(_views(lhs.args[1])))),
-                           Any[:($(i[k]) = $(esc(_views(lhs.args[k+1])))) for k=1:length(i)]...),
+                           :(a = $(esc(_views(lhs.args[0])))),
+                           Any[:($(i[k]) = $(esc(_views(lhs.args[k+1])))) for k in eachindex(i)]...),
                       Expr(first(h) == '.' ? :(.=) : :(=), :(a[$(I...)]),
-                           Expr(:call, esc(Symbol(h[1:end-1])),
+                           Expr(:call, esc(Symbol(h[0:end-1])),
                                 :($maybeview(a, $(I...))),
-                                mapany(e -> esc(_views(e)), ex.args[2:end])...))), Base)
+                                mapany(e -> esc(_views(e)), ex.args[1:end])...))), Base)
         else
             exprarray(ex.head, mapany(_views, ex.args))
         end

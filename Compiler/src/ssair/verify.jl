@@ -36,13 +36,13 @@ function check_op(ir::IRCode, domtree::DomTree, @nospecialize(op), use_bb::Int, 
                 @verify_error "Def ($(op.id)) points to non-existent new node"
                 raise_error()
             end
-            def_bb = block_for_inst(ir.cfg, ir.new_nodes.info[op.id - length(ir.stmts)].pos)
+            def_bb = block_for_inst(ir.cfg, ir.new_nodes.info[op.id - length(ir.stmts) - 1].pos)
         else
             def_bb = block_for_inst(ir.cfg, op.id)
         end
         if (def_bb == use_bb)
             if op.id > length(ir.stmts)
-                @assert ir.new_nodes.info[op.id - length(ir.stmts)].pos <= use_idx
+                @assert ir.new_nodes.info[op.id - length(ir.stmts) - 1].pos <= use_idx
             else
                 if op.id >= use_idx
                     @verify_error "Def ($(op.id)) does not dominate use ($(use_idx)) in same BB"
@@ -77,7 +77,7 @@ function check_op(ir::IRCode, domtree::DomTree, @nospecialize(op), use_bb::Int, 
         end
     elseif isa(op, Expr)
         # Only Expr(:boundscheck) is allowed in value position
-        if isforeigncall && arg_idx == 1 && op.head === :tuple
+        if isforeigncall && arg_idx == 0 && op.head === :tuple
             # Allow a tuple literal in symbol position for foreigncall - this
             # is syntax for a literal value or globalref - it is interpreted in
             # global scope by codegen.
@@ -156,14 +156,15 @@ function verify_ir(ir::IRCode, print::Bool=true,
     # Verify CFG
     last_end = 0
     # Verify CFG graph. Must be well formed to construct domtree
-    for (idx, block) in pairs(ir.cfg.blocks)
+    for (idx0, block) in pairs(ir.cfg.blocks)
+        idx = idx0 + 1
         for p in block.preds
             p == 0 && continue
             if !(1 <= p <= length(ir.cfg.blocks))
                 @verify_error "Predecessor $p of block $idx out of bounds for IR"
                 raise_error()
             end
-            c = count_int(idx, ir.cfg.blocks[p].succs)
+            c = count_int(idx, ir.cfg.blocks[p-1].succs)
             if c == 0
                 @verify_error "Predecessor $p of block $idx not in successor list"
                 raise_error()
@@ -179,7 +180,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                 @verify_error "Successor $s of block $idx out of bounds for IR"
                 raise_error()
             end
-            if !(idx in ir.cfg.blocks[s].preds)
+            if !(idx in ir.cfg.blocks[s-1].preds)
                 #Base.@show ir.cfg
                 #Base.@show ir
                 #Base.@show ir.argtypes
@@ -195,14 +196,15 @@ function verify_ir(ir::IRCode, print::Bool=true,
             @verify_error "Last statement of BB $idx ($(last(block.stmts))) out of bounds for IR (length=$(length(ir.stmts)))"
             raise_error()
         end
-        if idx <= length(ir.cfg.index) && last(block.stmts) + 1 != ir.cfg.index[idx]
-            @verify_error "End of BB $idx ($(last(block.stmts))) is not one less than CFG index ($(ir.cfg.index[idx]))"
+        if idx <= length(ir.cfg.index) && last(block.stmts) + 1 != ir.cfg.index[idx-1]
+            @verify_error "End of BB $idx ($(last(block.stmts))) is not one less than CFG index ($(ir.cfg.index[idx-1]))"
             raise_error()
         end
     end
     # Verify statements
     domtree = construct_domtree(ir.cfg.blocks)
-    for (idx, block) in pairs(ir.cfg.blocks)
+    for (idx0, block) in pairs(ir.cfg.blocks)
+        idx = idx0 + 1
         if first(block.stmts) != last_end + 1
             #ranges = [(idx,first(bb.stmts),last(bb.stmts)) for (idx, bb) in pairs(ir.cfg.blocks)]
             @verify_error "First statement of BB $idx ($(first(block.stmts))) does not match end of previous ($last_end)"
@@ -218,7 +220,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                 raise_error()
             end
         elseif isa(terminator, GotoNode)
-            if length(block.succs) != 1 || block.succs[1] != terminator.label
+            if length(block.succs) != 1 || block.succs[0] != terminator.label
                 @verify_error "Block $idx successors ($(block.succs)), does not match GotoNode terminator ($(terminator.label))"
                 raise_error()
             end
@@ -243,7 +245,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                 raise_error()
             end
         else
-            if length(block.succs) != 1 || block.succs[1] != idx + 1
+            if length(block.succs) != 1 || block.succs[0] != idx + 1
                 # As a special case, we allow extra statements in the BB of an :enter
                 # statement, until we can do proper CFG manipulations during compaction.
                 for stmt_idx in first(block.stmts):last(block.stmts)
@@ -293,9 +295,9 @@ function verify_ir(ir::IRCode, print::Bool=true,
             end
             lastphi = idx
             @assert length(stmt.edges) == length(stmt.values)
-            for i = 1:length(stmt.edges)
+            for i in eachindex(stmt.edges)
                 edge = stmt.edges[i]
-                for j = (i+1):length(stmt.edges)
+                for j = i+1:length(stmt.edges)-1
                     edge′ = stmt.edges[j]
                     if edge == edge′
                         # TODO: Move `unique` to Core.Compiler. For now we assume the predecessor list is always unique.
@@ -303,7 +305,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                         raise_error()
                     end
                 end
-                if !(edge == 0 && bb == 1) && !(edge in ir.cfg.blocks[bb].preds)
+                if !(edge == 0 && bb == 1) && !(edge in ir.cfg.blocks[bb-1].preds)
                     #Base.@show ir.argtypes
                     #Base.@show ir
                     @verify_error "Edge $edge of φ node $idx not in predecessor list"
@@ -329,7 +331,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                         #raise_error()
                     end
                 end
-                check_op(ir, domtree, val, Int(edge), last(ir.cfg.blocks[stmt.edges[i]].stmts)+1, idx, print, false, i,
+                check_op(ir, domtree, val, Int(edge), last(ir.cfg.blocks[stmt.edges[i]-1].stmts)+1, idx, print, false, i,
                     allow_frontend_forms, raise_error)
             end
             continue
@@ -346,7 +348,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
             is_phinode_block = false
         end
         if isa(stmt, PhiCNode)
-            for i = 1:length(stmt.values)
+            for i in eachindex(stmt.values)
                 val = stmt.values[i]
                 if !isa(val, SSAValue)
                     @verify_error "Operand $i of PhiC node $idx must be an SSA Value."
@@ -358,7 +360,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                 end
             end
         elseif isterminator(stmt)
-            if idx != last(ir.cfg.blocks[bb].stmts)
+            if idx != last(ir.cfg.blocks[bb-1].stmts)
                 @verify_error "Terminator $idx in bb $bb is not the last statement in the block"
                 raise_error()
             end
@@ -377,7 +379,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                         @verify_error "malformed isdefined"
                         raise_error()
                     end
-                    let v = stmt.args[1]
+                    let v = stmt.args[0]
                         # a GlobalRef or static_parameter isdefined check does
                         # not evaluate its argument
                         if v isa GlobalRef || isexpr(v, :static_parameter)
@@ -389,7 +391,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                         @verify_error "malformed throw_undef_if_not"
                         raise_error()
                     end
-                    if stmt.args[1] isa GlobalRef
+                    if stmt.args[0] isa GlobalRef
                         # undefined GlobalRef is OK in throw_undef_if_not
                         continue
                     end
@@ -401,7 +403,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                 elseif stmt.head === :foreigncall || stmt.head === :foreignglobal
                     isforeigncall = true
                 elseif stmt.head === :leave
-                    for i in 1:length(stmt.args)
+                    for i in eachindex(stmt.args)
                         arg = stmt.args[i]
                         if !isa(arg, Union{Nothing, SSAValue})
                             @verify_error "Malformed :leave - Expected `Nothing` or SSAValue"
@@ -416,7 +418,7 @@ function verify_ir(ir::IRCode, print::Bool=true,
                     end
                 end
             end
-            n = 1
+            n = 0
             for op in userefs(stmt)
                 op = op[]
                 check_op(ir, domtree, op, bb, idx, idx, print, isforeigncall, n,
@@ -430,8 +432,8 @@ end
 function verify_linetable(di::DebugInfoStream, nstmts::Int, print::Bool=true)
     @assert 3nstmts == length(di.codelocs)
     for i in 1:nstmts
-        edge = di.codelocs[3i-1]
-        if !(edge == 0 || get(di.edges, edge, nothing) isa DebugInfo)
+        edge = di.codelocs[3i-2]
+        if !(edge == 0 || get(di.edges, edge-1, nothing) isa DebugInfo)
             @verify_error "Malformed debuginfo index into edges"
         end
     end

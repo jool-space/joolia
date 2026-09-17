@@ -4,6 +4,7 @@
 
 # for reductions that expand 0 dims to 1
 reduced_index(i::OneTo{T}) where {T} = OneTo(one(T))
+reduced_index(i::ZeroTo{T}) where {T} = ZeroTo(one(T))
 reduced_index(i::Union{Slice, IdentityUnitRange}) = oftype(i, first(i):first(i))
 reduced_index(i::AbstractUnitRange) =
     throw(ArgumentError(
@@ -30,7 +31,7 @@ end
 function _check_valid_region(region)
     for d in region
         isa(d, Integer) || throw(ArgumentError("reduced dimension(s) must be integers"))
-        Int(d) < 1 && throw(ArgumentError("region dimension(s) must be ≥ 1, got $d"))
+        Int(d) < 0 && throw(ArgumentError("region dimension(s) must be ≥ 0, got $d"))
     end
 end
 
@@ -144,14 +145,14 @@ function reducedim_init(f::ExtremaMap, op::typeof(_extrema_rf), A::AbstractArray
     v0 = reverse(mapreduce(f, op, A1)) # turn minmax to maxmin
 
     T = _realtype(f.f, promote_union(eltype(A)))
-    Tmin = v0[1] isa T ? T : typeof(v0[1])
-    Tmax = v0[2] isa T ? T : typeof(v0[2])
+    Tmin = v0[0] isa T ? T : typeof(v0[0])
+    Tmax = v0[1] isa T ? T : typeof(v0[1])
 
     # but NaNs and missing need to be avoided as initial values
-    if v0[1] isa Number && isnan(v0[1])
+    if v0[0] isa Number && isnan(v0[0])
         # v0 is NaN
-        v0 = oftype(v0[1], Inf), oftype(v0[2], -Inf)
-    elseif isunordered(v0[1])
+        v0 = oftype(v0[0], Inf), oftype(v0[1], -Inf)
+    elseif isunordered(v0[0])
         # v0 is missing or a third-party unordered value
         Tminnm = nonmissingtype(Tmin)
         Tmaxnm = nonmissingtype(Tmax)
@@ -163,8 +164,8 @@ function reducedim_init(f::ExtremaMap, op::typeof(_extrema_rf), A::AbstractArray
         end
     end
     # v0 may have changed type.
-    Tmin = v0[1] isa T ? T : typeof(v0[1])
-    Tmax = v0[2] isa T ? T : typeof(v0[2])
+    Tmin = v0[0] isa T ? T : typeof(v0[0])
+    Tmax = v0[1] isa T ? T : typeof(v0[1])
 
     return reducedim_initarray(A, region, v0, Tuple{Tmin,Tmax})
 end
@@ -206,15 +207,15 @@ function check_reducedims(R, A)
     # Check whether R has compatible dimensions w.r.t. A for reduction
     #
     # It returns an integer value (useful for choosing implementation)
-    # - If it reduces only along leading dimensions, e.g. sum(A, dims=1) or sum(A, dims=(1,2)),
+    # - If it reduces only along leading dimensions, e.g. sum(A, dims=0) or sum(A, dims=(0,1)),
     #   it returns the length of the leading slice. For the two examples above,
-    #   it will be size(A, 1) or size(A, 1) * size(A, 2).
-    # - Otherwise, e.g. sum(A, dims=2) or sum(A, dims=(1,3)), it returns 0.
+    #   it will be size(A, 0) or size(A, 0) * size(A, 1).
+    # - Otherwise, e.g. sum(A, dims=1) or sum(A, dims=(0,2)), it returns 0.
     #
     ndims(R) <= ndims(A) || throw(DimensionMismatch("cannot reduce $(ndims(A))-dimensional array to $(ndims(R)) dimensions"))
     lsiz = 1
     had_nonreduc = false
-    for i = 1:ndims(A)
+    for i = 0:ndims(A)-1
         Ri, Ai = axes(R, i), axes(A, i)
         sRi, sAi = length(Ri), length(Ai)
         if sRi == 1
@@ -247,9 +248,10 @@ end
 # dimensions than A, which is trickier than it seems due to offset arrays and type stability
 _firstreducedslice(::Tuple{}, a::Tuple{}) = ()
 _firstreducedslice(::Tuple, ::Tuple{}) = ()
-@inline _firstreducedslice(::Tuple{}, a::Tuple) = (_firstslice(a[1]), _firstreducedslice((), tail(a))...)
-@inline _firstreducedslice(r::Tuple, a::Tuple) = (length(r[1])==1 ? _firstslice(a[1]) : r[1], _firstreducedslice(tail(r), tail(a))...)
+@inline _firstreducedslice(::Tuple{}, a::Tuple) = (_firstslice(a[0]), _firstreducedslice((), tail(a))...)
+@inline _firstreducedslice(r::Tuple, a::Tuple) = (length(r[0])==1 ? _firstslice(a[0]) : r[0], _firstreducedslice(tail(r), tail(a))...)
 _firstslice(i::OneTo) = OneTo(1)
+_firstslice(i::ZeroTo) = ZeroTo(1)
 _firstslice(i::Slice) = Slice(_firstslice(i.indices))
 _firstslice(i) = i[firstindex(i):firstindex(i)]
 
@@ -275,7 +277,7 @@ function _mapreducedim!(f, op, R::AbstractArray, A::AbstractArrayOrBroadcasted)
         for IA in CartesianIndices(indsAt)
             IR = Broadcast.newindex(IA, keep, Idefault)
             @inbounds r = R[i1,IR]
-            @simd for i in axes(A, 1)
+            @simd for i in axes(A, 0)
                 r = op(r, f(@inbounds(A[i, IA])))
             end
             @inbounds R[i1,IR] = r
@@ -283,7 +285,7 @@ function _mapreducedim!(f, op, R::AbstractArray, A::AbstractArrayOrBroadcasted)
     else
         for IA in CartesianIndices(indsAt)
             IR = Broadcast.newindex(IA, keep, Idefault)
-            @simd for i in axes(A, 1)
+            @simd for i in axes(A, 0)
                 v = op(@inbounds(R[i,IR]), f(@inbounds(A[i,IA])))
                 @inbounds R[i,IR] = v
             end
@@ -316,11 +318,11 @@ julia> a = reshape(Vector(1:16), (4,4))
  3  7  11  15
  4  8  12  16
 
-julia> mapreduce(isodd, *, a, dims=1)
+julia> mapreduce(isodd, *, a, dims=0)
 1×4 Matrix{Bool}:
  0  0  0  0
 
-julia> mapreduce(isodd, |, a, dims=1)
+julia> mapreduce(isodd, |, a, dims=0)
 1×4 Matrix{Bool}:
  1  1  1  1
 ```
@@ -335,8 +337,8 @@ function _mapreduce_dim(f, op, nt, A::AbstractArrayOrBroadcasted, ::Colon)
     # to work around limitations in inference's recursion heuristic
     y = iterate(A)
     y === nothing && return nt
-    v = op(nt, f(y[1]))
-    for x in Iterators.rest(A, y[2])
+    v = op(nt, f(y[0]))
+    for x in Iterators.rest(A, y[1])
         v = op(v, f(x))
     end
     return v
@@ -377,14 +379,14 @@ julia> a = reshape(Vector(1:16), (4,4))
  3  7  11  15
  4  8  12  16
 
-julia> reduce(max, a, dims=2)
+julia> reduce(max, a, dims=1)
 4×1 Matrix{Int64}:
  13
  14
  15
  16
 
-julia> reduce(max, a, dims=1)
+julia> reduce(max, a, dims=0)
 1×4 Matrix{Int64}:
  4  8  12  16
 ```
@@ -412,11 +414,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> count(<=(2), A, dims=1)
+julia> count(<=(2), A, dims=0)
 1×2 Matrix{Int64}:
  1  1
 
-julia> count(<=(2), A, dims=2)
+julia> count(<=(2), A, dims=1)
 2×1 Matrix{Int64}:
  2
  0
@@ -472,11 +474,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> sum(A, dims=1)
+julia> sum(A, dims=0)
 1×2 Matrix{Int64}:
  4  6
 
-julia> sum(A, dims=2)
+julia> sum(A, dims=1)
 2×1 Matrix{Int64}:
  3
  7
@@ -497,11 +499,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> sum(abs2, A, dims=1)
+julia> sum(abs2, A, dims=0)
 1×2 Matrix{Int64}:
  10  20
 
-julia> sum(abs2, A, dims=2)
+julia> sum(abs2, A, dims=1)
 2×1 Matrix{Int64}:
   5
  25
@@ -547,11 +549,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> prod(A, dims=1)
+julia> prod(A, dims=0)
 1×2 Matrix{Int64}:
  3  8
 
-julia> prod(A, dims=2)
+julia> prod(A, dims=1)
 2×1 Matrix{Int64}:
   2
  12
@@ -572,11 +574,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> prod(abs2, A, dims=1)
+julia> prod(abs2, A, dims=0)
 1×2 Matrix{Int64}:
  9  64
 
-julia> prod(abs2, A, dims=2)
+julia> prod(abs2, A, dims=1)
 2×1 Matrix{Int64}:
    4
  144
@@ -626,11 +628,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> maximum(A, dims=1)
+julia> maximum(A, dims=0)
 1×2 Matrix{Int64}:
  3  4
 
-julia> maximum(A, dims=2)
+julia> maximum(A, dims=1)
 2×1 Matrix{Int64}:
  2
  4
@@ -651,11 +653,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> maximum(abs2, A, dims=1)
+julia> maximum(abs2, A, dims=0)
 1×2 Matrix{Int64}:
  9  16
 
-julia> maximum(abs2, A, dims=2)
+julia> maximum(abs2, A, dims=1)
 2×1 Matrix{Int64}:
   4
  16
@@ -705,11 +707,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> minimum(A, dims=1)
+julia> minimum(A, dims=0)
 1×2 Matrix{Int64}:
  1  2
 
-julia> minimum(A, dims=2)
+julia> minimum(A, dims=1)
 2×1 Matrix{Int64}:
  1
  3
@@ -730,11 +732,11 @@ julia> A = [1 2; 3 4]
  1  2
  3  4
 
-julia> minimum(abs2, A, dims=1)
+julia> minimum(abs2, A, dims=0)
 1×2 Matrix{Int64}:
  1  4
 
-julia> minimum(abs2, A, dims=2)
+julia> minimum(abs2, A, dims=1)
 2×1 Matrix{Int64}:
  1
  9
@@ -787,7 +789,7 @@ julia> A = reshape(Vector(1:2:16), (2,2,2))
   9  13
  11  15
 
-julia> extrema(A, dims = (1,2))
+julia> extrema(A, dims = (0,1))
 1×1×2 Array{Tuple{Int64, Int64}, 3}:
 [:, :, 1] =
  (1, 7)
@@ -850,11 +852,11 @@ julia> A = [true false; true true]
  1  0
  1  1
 
-julia> all(A, dims=1)
+julia> all(A, dims=0)
 1×2 Matrix{Bool}:
  1  0
 
-julia> all(A, dims=2)
+julia> all(A, dims=1)
 2×1 Matrix{Bool}:
  0
  1
@@ -874,11 +876,11 @@ julia> A = [1 -1; 2 2]
  1  -1
  2   2
 
-julia> all(i -> i > 0, A, dims=1)
+julia> all(i -> i > 0, A, dims=0)
 1×2 Matrix{Bool}:
  1  0
 
-julia> all(i -> i > 0, A, dims=2)
+julia> all(i -> i > 0, A, dims=1)
 2×1 Matrix{Bool}:
  0
  1
@@ -924,11 +926,11 @@ julia> A = [true false; true false]
  1  0
  1  0
 
-julia> any(A, dims=1)
+julia> any(A, dims=0)
 1×2 Matrix{Bool}:
  1  0
 
-julia> any(A, dims=2)
+julia> any(A, dims=1)
 2×1 Matrix{Bool}:
  1
  1
@@ -948,11 +950,11 @@ julia> A = [1 -1; 2 -2]
  1  -1
  2  -2
 
-julia> any(i -> i > 0, A, dims=1)
+julia> any(i -> i > 0, A, dims=0)
 1×2 Matrix{Bool}:
  1  0
 
-julia> any(i -> i > 0, A, dims=2)
+julia> any(i -> i > 0, A, dims=1)
 2×1 Matrix{Bool}:
  1
  1
@@ -1032,28 +1034,37 @@ end
 function findminmax!(f, op, Rval, Rind, A::AbstractArray{T,N}) where {T,N}
     (isempty(Rval) || isempty(A)) && return Rval, Rind
     check_reducedims(Rval, A)
-    for i = 1:N
+    for i = 0:N-1
         axes(Rval, i) == axes(Rind, i) || throw(DimensionMismatch("Find-reduction: outputs must have the same indices"))
     end
-    # If we're reducing along dimension 1, for efficiency we can make use of a temporary.
+    # If we're reducing along dimension 0, for efficiency we can make use of a temporary.
     # Otherwise, keep the result in Rval/Rind so that we traverse A in storage order.
     indsAt, indsRt = safe_tail(axes(A)), safe_tail(axes(Rval))
     keep, Idefault = Broadcast.shapeindexer(indsRt)
     ks = keys(A)
     y = iterate(ks)
     zi = zero(eltype(ks))
+    # Keep initialization state separate from the result index: zero is a
+    # valid zero-origin index and cannot remain a per-iteration sentinel.
+    seen = similar(Rind, Bool)
+    for j in eachindex(Rind)
+        @inbounds seen[j] = Rind[j] != zi
+    end
     if reducedim1(Rval)
         i1 = first(axes1(Rval))
         for IA in CartesianIndices(indsAt)
             IR = Broadcast.newindex(IA, keep, Idefault)
             @inbounds tmpRv = Rval[i1,IR]
             @inbounds tmpRi = Rind[i1,IR]
-            for i in axes(A,1)
+            initialized = @inbounds seen[i1,IR]
+            for i in axes(A,0)
                 k, kss = y::Tuple
                 tmpAv = f(@inbounds(A[i,IA]))
-                if tmpRi == zi || op(tmpRv, tmpAv)
+                if !initialized || op(tmpRv, tmpAv)
                     tmpRv = tmpAv
                     tmpRi = k
+                    initialized = true
+                    @inbounds seen[i1,IR] = true
                 end
                 y = iterate(ks, kss)
             end
@@ -1063,14 +1074,17 @@ function findminmax!(f, op, Rval, Rind, A::AbstractArray{T,N}) where {T,N}
     else
         for IA in CartesianIndices(indsAt)
             IR = Broadcast.newindex(IA, keep, Idefault)
-            for i in axes(A, 1)
+            for i in axes(A, 0)
                 k, kss = y::Tuple
                 tmpAv = f(@inbounds(A[i,IA]))
                 @inbounds tmpRv = Rval[i,IR]
                 @inbounds tmpRi = Rind[i,IR]
-                if tmpRi == zi || op(tmpRv, tmpAv)
+                initialized = @inbounds seen[i,IR]
+                if !initialized || op(tmpRv, tmpAv)
                     @inbounds Rval[i,IR] = tmpAv
                     @inbounds Rind[i,IR] = k
+                    initialized = true
+                    @inbounds seen[i,IR] = true
                 end
                 y = iterate(ks, kss)
             end
@@ -1106,11 +1120,11 @@ julia> A = [1.0 2; 3 4]
  1.0  2.0
  3.0  4.0
 
-julia> findmin(A, dims=1)
-([1.0 2.0], CartesianIndex{2}[CartesianIndex(1, 1) CartesianIndex(1, 2)])
+julia> findmin(A, dims=0)
+([1.0 2.0], CartesianIndex{2}[CartesianIndex(0, 0) CartesianIndex(0, 1)])
 
-julia> findmin(A, dims=2)
-([1.0; 3.0;;], CartesianIndex{2}[CartesianIndex(1, 1); CartesianIndex(2, 1);;])
+julia> findmin(A, dims=1)
+([1.0; 3.0;;], CartesianIndex{2}[CartesianIndex(0, 0); CartesianIndex(1, 0);;])
 ```
 """
 findmin(A::AbstractArray; dims::D=:) where {D} = _findmin(A, dims)
@@ -1129,11 +1143,11 @@ julia> A = [-1.0 1; -0.5 2]
  -1.0  1.0
  -0.5  2.0
 
-julia> findmin(abs2, A, dims=1)
-([0.25 1.0], CartesianIndex{2}[CartesianIndex(2, 1) CartesianIndex(1, 2)])
+julia> findmin(abs2, A, dims=0)
+([0.25 1.0], CartesianIndex{2}[CartesianIndex(1, 0) CartesianIndex(0, 1)])
 
-julia> findmin(abs2, A, dims=2)
-([1.0; 0.25;;], CartesianIndex{2}[CartesianIndex(1, 1); CartesianIndex(2, 1);;])
+julia> findmin(abs2, A, dims=1)
+([1.0; 0.25;;], CartesianIndex{2}[CartesianIndex(0, 0); CartesianIndex(1, 0);;])
 ```
 """
 findmin(f, A::AbstractArray; dims::D=:) where {D} = _findmin(f, A, dims)
@@ -1179,11 +1193,11 @@ julia> A = [1.0 2; 3 4]
  1.0  2.0
  3.0  4.0
 
-julia> findmax(A, dims=1)
-([3.0 4.0], CartesianIndex{2}[CartesianIndex(2, 1) CartesianIndex(2, 2)])
+julia> findmax(A, dims=0)
+([3.0 4.0], CartesianIndex{2}[CartesianIndex(1, 0) CartesianIndex(1, 1)])
 
-julia> findmax(A, dims=2)
-([2.0; 4.0;;], CartesianIndex{2}[CartesianIndex(1, 2); CartesianIndex(2, 2);;])
+julia> findmax(A, dims=1)
+([2.0; 4.0;;], CartesianIndex{2}[CartesianIndex(0, 1); CartesianIndex(1, 1);;])
 ```
 """
 findmax(A::AbstractArray; dims::D=:) where {D} = _findmax(A, dims)
@@ -1202,11 +1216,11 @@ julia> A = [-1.0 1; -0.5 2]
  -1.0  1.0
  -0.5  2.0
 
-julia> findmax(abs2, A, dims=1)
-([1.0 4.0], CartesianIndex{2}[CartesianIndex(1, 1) CartesianIndex(2, 2)])
+julia> findmax(abs2, A, dims=0)
+([1.0 4.0], CartesianIndex{2}[CartesianIndex(0, 0) CartesianIndex(1, 1)])
 
-julia> findmax(abs2, A, dims=2)
-([1.0; 4.0;;], CartesianIndex{2}[CartesianIndex(1, 1); CartesianIndex(2, 2);;])
+julia> findmax(abs2, A, dims=1)
+([1.0; 4.0;;], CartesianIndex{2}[CartesianIndex(0, 0); CartesianIndex(1, 1);;])
 ```
 """
 findmax(f, A::AbstractArray; dims::D=:) where {D} = _findmax(f, A, dims)
@@ -1250,17 +1264,17 @@ julia> A = [1.0 2; 3 4]
  1.0  2.0
  3.0  4.0
 
-julia> argmin(A, dims=1)
+julia> argmin(A, dims=0)
 1×2 Matrix{CartesianIndex{2}}:
- CartesianIndex(1, 1)  CartesianIndex(1, 2)
+ CartesianIndex(0, 0)  CartesianIndex(0, 1)
 
-julia> argmin(A, dims=2)
+julia> argmin(A, dims=1)
 2×1 Matrix{CartesianIndex{2}}:
- CartesianIndex(1, 1)
- CartesianIndex(2, 1)
+ CartesianIndex(0, 0)
+ CartesianIndex(1, 0)
 ```
 """
-argmin(A::AbstractArray; dims::D=:) where {D} = findmin(A; dims=dims)[2]
+argmin(A::AbstractArray; dims::D=:) where {D} = findmin(A; dims=dims)[1]
 
 """
     argmax(A; dims) -> indices
@@ -1275,14 +1289,14 @@ julia> A = [1.0 2; 3 4]
  1.0  2.0
  3.0  4.0
 
-julia> argmax(A, dims=1)
+julia> argmax(A, dims=0)
 1×2 Matrix{CartesianIndex{2}}:
- CartesianIndex(2, 1)  CartesianIndex(2, 2)
+ CartesianIndex(1, 0)  CartesianIndex(1, 1)
 
-julia> argmax(A, dims=2)
+julia> argmax(A, dims=1)
 2×1 Matrix{CartesianIndex{2}}:
- CartesianIndex(1, 2)
- CartesianIndex(2, 2)
+ CartesianIndex(0, 1)
+ CartesianIndex(1, 1)
 ```
 """
-argmax(A::AbstractArray; dims::D=:) where {D} = findmax(A; dims=dims)[2]
+argmax(A::AbstractArray; dims::D=:) where {D} = findmax(A; dims=dims)[1]

@@ -1,0 +1,85 @@
+--- a/ext/REPLExt/REPLExt.jl
++++ b/ext/REPLExt/REPLExt.jl
+@@ -38,21 +38,8 @@
+     ret, range, should_complete = completions(full, lastindex(partial); hint)
+     # Convert to new completion interface format
+     named_completions = map(LineEdit.NamedCompletion, ret)
+-    # Convert UnitRange to Region (Pair{Int,Int}) to match new completion interface
+-    # range represents character positions in partial string, convert to 0-based byte positions
+-    if length(range) == 0 && first(range) > last(range)
+-        # Empty backward range like 4:3 means insert at cursor position
+-        # The cursor is at position last(range), so insert after it
+-        pos = thisind(partial, last(range) + 1) - 1
+-        region = pos => pos
+-    elseif isempty(range)
+-        region = 0 => 0
+-    else
+-        # Convert 1-based character positions to 0-based byte positions
+-        start_pos = thisind(full, first(range)) - 1
+-        end_pos = thisind(full, last(range))
+-        region = start_pos => end_pos
+-    end
++    # Completion ranges are inclusive zero-origin string indices; regions are byte boundaries.
++    region = REPL.to_region(full, range)
+     return named_completions, region, should_complete
+ end
+ 
+--- a/test/repl.jl
++++ b/test/repl.jl
+@@ -1089,6 +1089,56 @@
+ end
+ 
+ # Autocompletions
++# Package completions must provide valid byte regions to both Tab and asynchronous hints.
++@testset "zero-origin package completion regions" begin
++    LineEdit = REPL.LineEdit
++    provider = REPLExt.PkgCompletionProvider()
++    term = REPL.Terminals.TTYTerminal("dumb", IOBuffer(), IOBuffer(), IOBuffer())
++    prompt = LineEdit.Prompt("pkg> "; complete = provider)
++    for hint in (false, true), (input, cursor, expected, text) in (
++            ("", 0, 0 => 0, ""),
++            ("stat", 4, 0 => 4, "stat"),
++            ("help act", 8, 5 => 8, "act"),
++            ("?act", 4, 1 => 4, "act"),
++            ("status; stat", 12, 8 => 12, "stat"),
++            ("stat trailing", 4, 0 => 4, "stat"))
++        state = LineEdit.init_state(term, prompt)
++        write(state.input_buffer, input)
++        seek(state.input_buffer, cursor)
++        completions, region, _ = LineEdit.complete_line(provider, state; hint)
++        @test region == expected
++        @test LineEdit.content(state, region) == text
++        @test 0 <= first(region) <= last(region) <= sizeof(input)
++        input == "stat" && @test only(completions).completion == "status"
++    end
++    mktempdir() do dir
++        cd(dir) do
++            mkdir("αβ")
++            for hint in (false, true), input in ("activate ", "activate ./α")
++                state = LineEdit.init_state(term, prompt)
++                write(state.input_buffer, input)
++                completions, region, _ = LineEdit.complete_line(provider, state; hint)
++                expected = input == "activate " ? (9 => 9) : (11 => 13)
++                @test region == expected
++                @test LineEdit.content(state, region) == (input == "activate " ? "" : "α")
++                @test joinpath("αβ", "") in getproperty.(completions, :completion)
++            end
++        end
++    end
++    state = LineEdit.init_state(term, LineEdit.ModalInterface([prompt]))
++    ps = LineEdit.state(state)
++    write(ps.input_buffer, "stat")
++    LineEdit.check_show_hint(state)
++    @test Base.timedwait(() -> lock(() -> position(term.out_stream) > 0, state.line_modify_lock),
++                        10; pollint = 0.01) == :ok
++    rendered = lock(() -> String(take!(term.out_stream)), state.line_modify_lock)
++    @test occursin("us", rendered)
++    @test LineEdit.content(ps) == "stat"
++    @test LineEdit.complete_line(ps, 0, Main)
++    @test LineEdit.content(ps) == "status"
++    @test position(ps.input_buffer) == 6
++end
++
+ @testset "tab completion while offline" begin
+     temp_pkg_dir(; linked_reg = false) do project_path # starts without registries
+         cd(project_path) do

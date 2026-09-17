@@ -290,8 +290,9 @@ for FT in (Float16, Float32, Float64)
     #     Float16(i >>>  5) * Float16(0x1.0p-11)
     #     Float32(i >>>  8) * Float32(0x1.0p-24)
     #     Float64(i >>> 11) * Float64(0x1.0p-53)
+    scale = FT === Float16 ? 0.00048828125 : FT === Float32 ? 5.960464477539063e-8 : 1.1102230246251565e-16
     @eval @inline _uint2float(i::$(UT), ::Type{$(FT)}) =
-        $(FT)(i >>> $(8 * sizeof(FT) - precision(FT))) * $(FT(2) ^ -precision(FT))
+        $(FT)(i >>> $(8 * sizeof(FT) - precision(FT))) * $(FT(scale))
 
     @eval rand(r::Union{TaskLocalRNG, Xoshiro}, ::SamplerTrivial{CloseOpen01{$(FT)}}) =
         _uint2float(rand(r, $(UT)), $(FT))

@@ -153,14 +153,14 @@ graphemes(s::AbstractString) = Base.Unicode.GraphemeIterator{typeof(s)}(s)
     graphemes(s::AbstractString, m:n)::SubString
 
 Returns a [`SubString`](@ref) of `s` consisting of the `m`-th
-through `n`-th graphemes of the string `s`, where the second
+through `n`-th graphemes of the string `s`, counted from zero, where the second
 argument `m:n` is an integer-valued [`AbstractUnitRange`](@ref).
 
 Loosely speaking, this corresponds to the `m:n`-th user-perceived
 "characters" in the string.  For example:
 
 ```jldoctest
-julia> s = graphemes("exposé", 3:6)
+julia> s = graphemes("exposé", 2:5)
 "posé"
 
 julia> collect(s)
@@ -185,12 +185,12 @@ before the end of the substring.
 """
 function graphemes(s::AbstractString, r::AbstractUnitRange{<:Integer})
     m, n = Int(first(r)), Int(last(r))
-    m > 0 || throw(ArgumentError("starting index $m is not ≥ 1"))
-    n < m && return @view s[1:0]
+    m ≥ 0 || throw(ArgumentError("starting index $m is not ≥ 0"))
+    n < m && return @view s[firstindex(s):firstindex(s)-1]
     c0 = eltype(s)(0x00000000)
     state = Ref{Int32}(0)
-    count = 0
-    i, iprev, ilast = 1, 1, lastindex(s)
+    count = -1
+    i, iprev, ilast = firstindex(s), firstindex(s), lastindex(s)
     # find the start of the m-th grapheme
     while i ≤ ilast && count < m
         @inbounds c = s[i]
@@ -215,7 +215,7 @@ end
 using Base.Unicode: utf8proc_error, UTF8PROC_DECOMPOSE, UTF8PROC_CASEFOLD, UTF8PROC_STRIPMARK
 
 function _decompose_char!(codepoint::Union{Integer,Char}, dest::Vector{UInt32}, offset::Integer, options::Integer)
-    ret = GC.@preserve dest @ccall utf8proc_decompose_char(codepoint::UInt32, pointer(dest, 1+offset)::Ptr{UInt32}, (length(dest)-offset)::Int, options::Cint, C_NULL::Ptr{Cint})::Int
+    ret = GC.@preserve dest @ccall utf8proc_decompose_char(codepoint::UInt32, pointer(dest, offset)::Ptr{UInt32}, (length(dest)-offset)::Int, options::Cint, C_NULL::Ptr{Cint})::Int
     ret < 0 && utf8proc_error(ret)
     return ret
 end
@@ -224,7 +224,7 @@ end
 # we could mirror the whole utf8proc_property_t struct in Julia, but that is annoying
 # because of the bitfields.
 combining_class(uc::Integer) =
-    0x000301 ≤ uc ≤ 0x10ffff ? unsafe_load(ccall(:utf8proc_get_property, Ptr{UInt16}, (UInt32,), uc), 2) : 0x0000
+    0x000301 ≤ uc ≤ 0x10ffff ? unsafe_load(ccall(:utf8proc_get_property, Ptr{UInt16}, (UInt32,), uc), 1) : 0x0000
 combining_class(c::AbstractChar) = Base.ismalformed(c) ? 0x0000 : combining_class(UInt32(c))
 
 """
@@ -279,12 +279,12 @@ function _isequal_normalized!(s1::AbstractString, s2::AbstractString,
         offset = 0
         @inbounds while true
             # read a char and decompose it to d
-            c = chartransform(UInt32(state[1]))
-            state = iterate(s, state[2])
+            c = chartransform(UInt32(state[0]))
+            state = iterate(s, state[1])
             if c < 0x80 # fast path for common ASCII case
                 n = 1 + offset
                 n > length(d) && resize!(d, 2n)
-                d[n] = casefold ? (0x41 ≤ c ≤ 0x5A ? c+0x20 : c) : c
+                d[n-1] = casefold ? (0x41 ≤ c ≤ 0x5A ? c+0x20 : c) : c
                 break # ASCII characters are all zero combining class
             else
                 while true
@@ -299,46 +299,47 @@ function _isequal_normalized!(s1::AbstractString, s2::AbstractString,
 
             # decomposed chars must be sorted in ascending order of combining class,
             # which means we need to keep fetching chars until we get to non-combining
-            (iszero(combining_class(d[n])) || isnothing(state)) && break # non-combining
+            (n == 0 || iszero(combining_class(d[n-1])) || isnothing(state)) && break # non-combining
             offset = n
         end
 
         # sort by combining class
         if n < 32 # almost always true
-            for j1 = 2:n # insertion sort
+            for j1 = 1:n-1 # insertion sort
                 cc = combining_class(d[j1])
                 iszero(cc) && continue # don't re-order non-combiners
-                for j2 = j1:-1:2
+                for j2 = j1:-1:1
                     combining_class(d[j2-1]) ≤ cc && break
                     d[j2-1], d[j2] = d[j2], d[j2-1]
                 end
             end
         else # avoid n^2 complexity in crazy large-n case
-            j = 1
+            j = 0
             @views while j < n
-                j₀ = j + something(findnext(iszero ∘ combining_class, d[j+1:n], 1), n+1-j)
+                j₀ = j + 1 + something(findnext(iszero ∘ combining_class, d[j+1:n-1], 0), n-1-j)
                 sort!(d[j:j₀-1], by=combining_class)
                 j = j₀
             end
         end
 
         # split return statement to help type inference:
-        return state === nothing ? (1, n, nothing) : (1, n, state)
+        return state === nothing ? (0, n, nothing) : (0, n, state)
     end
     options = UTF8PROC_DECOMPOSE
     casefold && (options |= UTF8PROC_CASEFOLD)
     stripmark && (options |= UTF8PROC_STRIPMARK)
     i1,i2 = iterate(s1),iterate(s2)
     n1 = n2 = 0 # lengths of codepoint buffers
-    j1 = j2 = 1 # indices in d1, d2
+    j1 = j2 = 0 # indices in d1, d2
     while true
-        if j1 > n1
-            i1 === nothing && return i2 === nothing && j2 > n2
+        while j1 ≥ n1 && i1 !== nothing
             j1, n1, i1 = decompose_next_chars!(i1, d1, options, s1)
         end
-        if j2 > n2
-            i2 === nothing && return false
+        while j2 ≥ n2 && i2 !== nothing
             j2, n2, i2 = decompose_next_chars!(i2, d2, options, s2)
+        end
+        if j1 ≥ n1 || j2 ≥ n2
+            return j1 ≥ n1 && j2 ≥ n2
         end
         d1[j1] == d2[j2] || return false
         j1 += 1; j2 += 1

@@ -4,7 +4,7 @@ function writefixed(buf, pos, v::T,
     pos = Int(pos)
     precision = Int(precision)
     precision >= 0 || throw(ArgumentError("precision must be non-negative"))
-    @assert 0 < pos <= length(buf) "invalid pos"
+    @assert 0 <= pos < length(buf) "invalid pos"
     startpos = pos
     x = Float64(v)
     pos = append_sign(x, plus, space, buf, pos)
@@ -56,7 +56,7 @@ function writefixed(buf, pos, v::T,
         i = len - 1
         while i >= 0
             j = p10bits - e2
-            mula, mulb, mulc = POW10_SPLIT[POW10_OFFSET[idx + 1] + i + 1]
+            mula, mulb, mulc = POW10_SPLIT[POW10_OFFSET[idx] + i]
             digits = mulshiftmod1e9(m2 << 8, mula, mulb, mulc, j + 8)
             if nonzero
                 pos = append_nine_digits(digits, buf, pos)
@@ -83,14 +83,14 @@ function writefixed(buf, pos, v::T,
         blocks = div(precision, 9) + 1
         roundUp = 0
         i = 0
-        if blocks <= MIN_BLOCK_2[idx + 1]
+        if blocks <= MIN_BLOCK_2[idx]
             i = blocks
             for _ = 1:precision
                 buf[pos] = UInt8('0')
                 pos += 1
             end
-        elseif i < MIN_BLOCK_2[idx + 1]
-            i = MIN_BLOCK_2[idx + 1]
+        elseif i < MIN_BLOCK_2[idx]
+            i = MIN_BLOCK_2[idx]
             for _ = 1:(9 * i)
                 buf[pos] = UInt8('0')
                 pos += 1
@@ -98,15 +98,15 @@ function writefixed(buf, pos, v::T,
         end
         while i < blocks
             j = 120 + (-e2 - 16 * idx)
-            p = POW10_OFFSET_2[idx + 1] + UInt32(i) - MIN_BLOCK_2[idx + 1]
-            if p >= POW10_OFFSET_2[idx + 2]
+            p = POW10_OFFSET_2[idx] + UInt32(i) - MIN_BLOCK_2[idx]
+            if p >= POW10_OFFSET_2[idx + 1]
                 for _ = 1:(precision - 9 * i)
                     buf[pos] = UInt8('0')
                     pos += 1
                 end
                 break
             end
-            mula, mulb, mulc = POW10_SPLIT_2[p + 1]
+            mula, mulb, mulc = POW10_SPLIT_2[p]
             digits = mulshiftmod1e9(m2 << 8, mula, mulb, mulc, j + 8)
             if i < blocks - 1
                 pos = append_nine_digits(digits, buf, pos)
@@ -136,13 +136,13 @@ function writefixed(buf, pos, v::T,
         end
         if roundUp != 0
             roundPos = pos
-            dotPos = 1
+            dotPos = 0
             while true
                 roundPos -= 1
                 if roundPos == (startpos - 1) || (buf[roundPos] == UInt8('-')) || (plus && buf[roundPos] == UInt8('+')) || (space && buf[roundPos] == UInt8(' '))
                     buf[pos] = UInt8('0')
                     buf[roundPos + 1] = UInt8('1')
-                    if dotPos > 1
+                    if dotPos > 0
                         buf[dotPos] = UInt8('0')
                         buf[dotPos + 1] = decchar
                         hasfractional = true
@@ -150,7 +150,7 @@ function writefixed(buf, pos, v::T,
                     pos += 1
                     break
                 end
-                c = roundPos > 0 ? buf[roundPos] : 0x00
+                c = roundPos >= 0 ? buf[roundPos] : 0x00
                 if c == decchar
                     dotPos = roundPos
                     continue

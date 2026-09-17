@@ -629,7 +629,7 @@ end
 # TODO: We may want to do this earlier to avoid TOCTOU issues.
 const _compiler_require_dependencies = Any[]
 @Core.latestworld
-for i = 1:length(_included_files)
+for i in eachindex(_included_files)
     (mod, file) = _included_files[i]
     if mod === Compiler || parentmodule(mod) === Compiler || endswith(file, "/Compiler.jl")
         _include_dependency!(_compiler_require_dependencies, true, mod, file, true, false)
@@ -637,9 +637,9 @@ for i = 1:length(_included_files)
 end
 # Make relative to DATAROOTDIR to allow relocation
 let basedir = joinpath(Sys.BINDIR, DATAROOTDIR)
-for i = 1:length(_compiler_require_dependencies)
+for i in eachindex(_compiler_require_dependencies)
     tup = _compiler_require_dependencies[i]
-    _compiler_require_dependencies[i] = (tup[1], relpath(tup[2], basedir), tup[3:end]...)
+    _compiler_require_dependencies[i] = (tup[0], relpath(tup[1], basedir), tup[2:end]...)
 end
 end
 @assert length(_compiler_require_dependencies) >= 15

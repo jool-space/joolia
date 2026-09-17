@@ -120,10 +120,10 @@ struct RefArray{T,A<:AbstractArray{T},R} <: Ref{T}
     RefArray{T,A,R}(x,i,roots=nothing) where {T,A<:AbstractArray{T},R} = new(x,i,roots)
 end
 RefArray(x::AbstractArray{T}, i::Int, roots::Any) where {T} = RefArray{T,typeof(x),Any}(x, i, roots)
-RefArray(x::AbstractArray{T}, i::Int=1, roots::Nothing=nothing) where {T} = RefArray{T,typeof(x),Nothing}(x, i, nothing)
+RefArray(x::AbstractArray{T}, i::Int=firstindex(x), roots::Nothing=nothing) where {T} = RefArray{T,typeof(x),Nothing}(x, i, nothing)
 RefArray(x::AbstractArray{T}, i::Integer, roots::Any) where {T} = RefArray{T,typeof(x),Any}(x, Int(i), roots)
 RefArray(x::AbstractArray{T}, i::Integer, roots::Nothing=nothing) where {T} = RefArray{T,typeof(x),Nothing}(x, Int(i), nothing)
-convert(::Type{Ref{T}}, x::AbstractArray{T}) where {T} = RefArray(x, 1)
+convert(::Type{Ref{T}}, x::AbstractArray{T}) where {T} = RefArray(x, firstindex(x))
 
 function unsafe_convert(P::Union{Type{Ptr{T}},Type{Ptr{Cvoid}}}, b::RefArray{T})::P where T
     if allocatedinline(T)
@@ -132,7 +132,7 @@ function unsafe_convert(P::Union{Type{Ptr{T}},Type{Ptr{Cvoid}}}, b::RefArray{T})
         p = pointer_from_objref(b.x[b.i])
     else
         # see comment on equivalent branch for RefValue
-        p = pointerref(Ptr{Ptr{Cvoid}}(pointer(b.x, b.i)), 1, Core.sizeof(Ptr{Cvoid}))
+        p = pointerref(Ptr{Ptr{Cvoid}}(pointer(b.x, b.i)), 0, Core.sizeof(Ptr{Cvoid}))
     end
     return p
 end
@@ -146,8 +146,8 @@ if is_primary_base_module
     Ref{T}() where {T} = RefValue{T}() # Ref{T}()
     Ref{T}(x) where {T} = RefValue{T}(x) # Ref{T}(x)
 
-    Ref(x::Ref, i::Integer) = (i != 1 && error("Ref only has one element"); x)
-    Ref(x::Ptr{T}, i::Integer) where {T} = x + (i - 1) * Core.sizeof(T)
+    Ref(x::Ref, i::Integer) = (i != 0 && error("Ref only has one element"); x)
+    Ref(x::Ptr{T}, i::Integer) where {T} = x + i * Core.sizeof(T)
 
     # convert Arrays to pointer arrays for ccall
     # For example `["a", "b"]` to Ptr{Cstring} for `char **argv`
@@ -157,17 +157,17 @@ if is_primary_base_module
         elseif (isbitstype(T) ? T <: Ptr || T <: Union{Cwstring,Cstring} : T <: eltype(P))
             # this Array already has the right memory layout for the requested Ref
             # but the wrong eltype for the constructor
-            return RefArray{P,typeof(a),Nothing}(a, 1, nothing) # effectively a no-op
+            return RefArray{P,typeof(a),Nothing}(a, 0, nothing) # effectively a no-op
         else
             ptrs = Vector{P}(undef, length(a)+1)
             roots = Vector{Any}(undef, length(a))
-            for i = 1:length(a)
+            for i = 0:length(a)-1
                 root = cconvert(P, a[i])
                 ptrs[i] = unsafe_convert(P, root)::P
                 roots[i] = root
             end
-            ptrs[length(a)+1] = C_NULL
-            return RefArray{P,typeof(ptrs),typeof(roots)}(ptrs, 1, roots)
+            ptrs[length(a)] = C_NULL
+            return RefArray{P,typeof(ptrs),typeof(roots)}(ptrs, 0, roots)
         end
     end
     Ref(x::AbstractArray, i::Integer) = RefArray(x, i)

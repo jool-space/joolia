@@ -21,11 +21,11 @@ function rstrip_shell(s::AbstractString)
     c_old = nothing
     for (i, c) in Iterators.reverse(pairs(s))
         i::Int; c::AbstractChar
-        ((c == '\\') && c_old == ' ') && return SubString(s, 1, i+1)
-        isspace(c) || return SubString(s, 1, i)
+        ((c == '\\') && c_old == ' ') && return SubString(s, 0, i+1)
+        isspace(c) || return SubString(s, 0, i)
         c_old = c
     end
-    SubString(s, 1, 0)
+    SubString(s, 0, -1)
 end)
 
 shell_parse(str::AbstractString, interpolate::Bool=true;
@@ -104,8 +104,8 @@ function __repl_entry_shell_parse(str::AbstractString, interpolate::Bool, specia
 
     # Convert a word (list of string/expr parts) to a redirect filename expression.
     function redirect_word_expr(word)
-        if length(word) == 1 && isa(word[1], AbstractString)
-            return String(word[1])
+        if length(word) == 1 && isa(word[0], AbstractString)
+            return String(word[0])
         else
             return Expr(:call, GlobalRef(Base, :cmd_interpolate), word...)
         end
@@ -139,10 +139,10 @@ function __repl_entry_shell_parse(str::AbstractString, interpolate::Bool, specia
         elseif interpolate && !in_single_quotes && c == '$'
             consume_upto!(arg, s, i, j)
             result = parse_dollar_interp(st, s)
-            s = result[2]
-            last_arg = result[3]
+            s = result[1]
+            last_arg = result[2]
             update_last_arg = true
-            push!(arg, result[1])
+            push!(arg, result[0])
             i = firstindex(s)
         elseif interpolate && !in_single_quotes && !in_double_quotes && c == '|'
             # Pipeline operator: finalize current word/redirect, then save segment.
@@ -170,9 +170,9 @@ function __repl_entry_shell_parse(str::AbstractString, interpolate::Bool, specia
             # A pure-integer word immediately before the operator is an fd number (e.g. 2>).
             i = consume_upto!(arg, s, i, j)
             fd = nothing
-            if !word_has_special && length(arg) == 1 && isa(arg[1], AbstractString) &&
-                    !isempty(arg[1]::AbstractString) && all(isdigit, arg[1]::AbstractString)
-                fd = parse(Int, arg[1]::AbstractString)
+            if !word_has_special && length(arg) == 1 && isa(arg[0], AbstractString) &&
+                    !isempty(arg[0]::AbstractString) && all(isdigit, arg[0]::AbstractString)
+                fd = parse(Int, arg[0]::AbstractString)
                 empty!(arg)
                 word_has_special = false
             elseif !isempty(arg)
@@ -213,13 +213,13 @@ function __repl_entry_shell_parse(str::AbstractString, interpolate::Bool, specia
                 i = consume_upto!(arg, s, i, j)
             elseif !in_single_quotes && c == '\\'
                 word_has_special = true
-                if !isempty(st) && (peek(st)::P)[2] in ('\n', '\r')
+                if !isempty(st) && (peek(st)::P)[1] in ('\n', '\r')
                     i = consume_upto!(arg, s, i, j) + 1
-                    if popfirst!(st)[2] == '\r' && (peek(st)::P)[2] == '\n'
+                    if popfirst!(st)[1] == '\r' && (peek(st)::P)[1] == '\n'
                         i += 1
                         popfirst!(st)
                     end
-                    while !isempty(st) && (peek(st)::P)[2] in (' ', '\t')
+                    while !isempty(st) && (peek(st)::P)[1] in (' ', '\t')
                         i = nextind(str, i)
                         _ = popfirst!(st)
                     end
@@ -245,15 +245,15 @@ function __repl_entry_shell_parse(str::AbstractString, interpolate::Bool, specia
                 user_lit_start = i
                 while !isempty(st)
                     nxt = peek(st)::P
-                    nc = nxt[2]
+                    nc = nxt[1]
                     (nc == '/' || isspace(nc) || nc == '\'' || nc == '"' || nc == '\\' ||
                      nc == '|' || nc == '<' || nc == '>') && break
                     if nc == '$'
-                        push_nonempty!(user_parts, s[user_lit_start:prevind(s, nxt[1])])
+                        push_nonempty!(user_parts, s[user_lit_start:prevind(s, nxt[0])])
                         popfirst!(st)  # consume $
                         result = parse_dollar_interp(st, s)
-                        push!(user_parts, result[1])
-                        s = result[2]
+                        push!(user_parts, result[0])
+                        s = result[1]
                         i = firstindex(s)
                         user_lit_start = i
                     else
@@ -264,8 +264,8 @@ function __repl_entry_shell_parse(str::AbstractString, interpolate::Bool, specia
                 push_nonempty!(user_parts, s[user_lit_start:prevind(s, user_end)])
                 if isempty(user_parts)
                     push!(arg, :(expanduser("~")))
-                elseif length(user_parts) == 1 && isa(user_parts[1], AbstractString)
-                    push!(arg, :(expanduser($("~" * user_parts[1]))))
+                elseif length(user_parts) == 1 && isa(user_parts[0], AbstractString)
+                    push!(arg, :(expanduser($("~" * user_parts[0]))))
                 else
                     push!(arg, :(let _u = string($(user_parts...)); isempty(_u) ? "~" : expanduser(string('~', _u)) end))
                 end
@@ -334,9 +334,9 @@ function __repl_entry_shell_parse(str::AbstractString, interpolate::Bool, specia
     end
 
     # Chain pipeline segments left-to-right: pipeline(seg1, pipeline(seg2, seg3, ...)).
-    (s0_args, s0_in, s0_out, s0_out_app, s0_err, s0_err_app) = pipeline_parts[1]
+    (s0_args, s0_in, s0_out, s0_out_app, s0_err, s0_err_app) = pipeline_parts[0]
     result = build_seg_expr(s0_args, s0_in, s0_out, s0_out_app, s0_err, s0_err_app)
-    for k in 2:length(pipeline_parts)
+    for k in 1:length(pipeline_parts)-1
         (sk_args, sk_in, sk_out, sk_out_app, sk_err, sk_err_app) = pipeline_parts[k]
         result = Expr(:call, GlobalRef(Base, :pipeline), result,
                       build_seg_expr(sk_args, sk_in, sk_out, sk_out_app, sk_err, sk_err_app))
@@ -364,7 +364,7 @@ julia> Base.shell_split("git commit -m 'Initial commit'")
 ```
 """
 function shell_split(s::AbstractString)
-    parsed = shell_parse(s, false)[1]
+    parsed = shell_parse(s, false)[0]
     args = String[]
     for arg in parsed
         push!(args, string(arg...)::String)
@@ -527,7 +527,7 @@ function shell_escape_csh(io::IO, args::AbstractString...)
     for arg in args
         first || write(io, ' ')
         first = false
-        i = 1
+        i = firstindex(arg)
         while true
             for (r,e) = (r"^[A-Za-z0-9/\._-]+\z"sa => "",
                          r"^[^']*\z"sa => "'", r"^[^\$\`\"]*\z"sa => "\"",
@@ -630,12 +630,12 @@ function shell_escape_wincmd(io::IO, s::AbstractString)
     # https://stackoverflow.com/a/4095133/1990689
     occursin(r"[\r\n\0]"sa, s) &&
         throw(ArgumentError("control character unsupported by CMD.EXE"))
-    i = 1
+    i = firstindex(s)
     len = ncodeunits(s)
-    if len > 0 && s[1] == '@'
+    if len > 0 && s[0] == '@'
         write(io, '^')
     end
-    while i <= len
+    while i < len
         c = s[i]
         if c == '"' && (j = findnext('"', s, nextind(s,i))) !== nothing
             write(io, SubString(s,i,j))

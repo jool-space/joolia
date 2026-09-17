@@ -1,45 +1,22 @@
-<a name="logo"/>
-<div align="center">
-<a href="https://julialang.org/" target="_blank">
-<img src="doc/src/assets/logo.svg" alt="Julia Logo" width="210" height="142"></img>
-</a>
-</div>
+# joolia
 
-<table>
-    <!-- Docs -->
-    <tr>
-        <td>Documentation</td>
-        <td>
-            <a href="https://docs.julialang.org"><img src='https://img.shields.io/badge/docs-v1-blue.svg'/></a>
-        </td>
-    </tr>
-    <!-- Continuous integration
-    To change the badge to point to a different pipeline, it is not sufficient to simply change the `?branch=` part.
-    You need to go to the Buildkite website and get the SVG URL for the correct pipeline. -->
-    <tr>
-        <td>Continuous integration</td>
-        <td>
-            <a href="https://buildkite.com/julialang/julia-master"><img src='https://badge.buildkite.com/f28e0d28b345f9fad5856ce6a8d64fffc7c70df8f4f2685cd8.svg?branch=master'/></a>
-            <a href="https://perf.julialang.org/"><img src='https://img.shields.io/badge/tracking-performance-blue'/></a>
-        </td>
-    </tr>
-    <!-- Coverage -->
-    <tr>
-        <td>Code coverage</td>
-        <td>
-            <a href='https://coveralls.io/github/JuliaLang/julia?branch=master'><img src='https://coveralls.io/repos/github/JuliaLang/julia/badge.svg?branch=master' alt='Coverage Status'/></a>
-            <a href="https://codecov.io/gh/JuliaLang/julia"><img src="https://codecov.io/gh/JuliaLang/julia/branch/master/graph/badge.svg?token=TckCRxc7HS"/></a>
-        </td>
-    </tr>
-</table>
+A fork of Julia with zero-based collection positions and dimensions. Tuples,
+arrays, strings, Memory, and Cartesian indexing start at zero. Colon ranges
+remain inclusive, and arrays remain column-major.
 
-## The Julia Language
+Start the local build with:
 
-Julia is a high-level, high-performance dynamic language for technical
-computing. The main homepage for Julia can be found at
-[julialang.org](https://julialang.org/). This is the GitHub
-repository of Julia source code, including instructions for compiling
-and installing Julia, below.
+```sh
+./usr/bin/joolia --startup-file=no
+```
+
+This is an experimental port. The system image and interactive REPL work;
+Pkg and several standard-library paths are still being ported. See
+[the build notes](JOOLIA.md) and [validated coverage and limitations](JOOLIA_BASE_PORT.md).
+The upstream `julia` executable name remains available for compatibility.
+
+`.jo` is a candidate source-file extension; `.jl` conventions remain in place
+while that decision is open. The links below still refer to upstream Julia.
 
 ## Resources
 

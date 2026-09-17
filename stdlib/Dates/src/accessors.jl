@@ -39,7 +39,7 @@ const WEEK_INDEX = (15, 23, 3, 11)
 function week(days)
     w = div(abs(days - 1), 7) % 20871
     c, w = divrem((w + (w >= 10435)), 5218)
-    w = (w * 28 + WEEK_INDEX[c + 1]) % 1461
+    w = (w * 28 + WEEK_INDEX[c]) % 1461
     return div(w, 28) + 1
 end
 

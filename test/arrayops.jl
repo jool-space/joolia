@@ -1,5 +1,272 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
+# Exercise the pre-compiler Base foundation with the zero-origin native runtime.
+if Core.Intrinsics.not_int(Core.isdefined(Core.Main, :Base))
+    throw(Core.ErrorException("Base foundation must be loaded before this test"))
+end
+if Core.Intrinsics.not_int(Core.isdefined(Base, :Compiler))
+    Core.eval(Core.Main, :(module JooliaBaseFoundationTests
+    const checks = Base.RefValue(0)
+    function check(ok::Bool, label::String)
+        ok || throw(ErrorException(label))
+        checks[] += 1
+    end
+    function throws(f, T, label::String)
+        try
+            f()
+        catch err
+            check(err isa T, label)
+            return
+        end
+        throw(ErrorException(label))
+    end
+    struct MixedFields{T}
+        first::T
+        second::Any
+    end
+    mutable struct AtomicFields
+        const first::Int
+        @atomic second::Int
+    end
+    function run()
+        mixed = MixedFields(10,:value)
+        check(mixed.first == 10 && mixed.second === :value, "generated outer constructor arguments")
+        typed = MixedFields{Float64}(10,:value)
+        check(typed.first === 10.0 && typed.second === :value, "generated converting constructor arguments")
+        atomic = AtomicFields(1,2)
+        check(Base.isconst(AtomicFields,0) && Base.isfieldatomic(AtomicFields,1), "field metadata positions")
+        check((@atomic atomic.second += 3) == 5, "atomic macro result position")
+        check((@atomicreplace atomic.second 5 => 7).success, "atomic replace macro arguments")
+        t = (10, 20, 30)
+        sv = Core.svec(10,20,30)
+        check(collect(sv) == [10,20,30], "SimpleVector iteration")
+        check(Core.svec(1,2) == Core.svec(1,2), "SimpleVector equality")
+        check(map(x -> x+1, sv) == [11,21,31], "SimpleVector map")
+        scalar = 7
+        check(size(scalar) == () && size(scalar,0) == 1 && size(scalar,1) == 1 &&
+              axes(scalar) == () && axes(scalar,0) == Base.ZeroTo(1) &&
+              ndims(scalar) == 0 && length(scalar) == 1, "scalar collection shape")
+        check(firstindex(scalar) == 0 && firstindex(scalar,0) == 0 &&
+              lastindex(scalar) == 0 && lastindex(scalar,0) == 0 &&
+              keys(scalar) == Base.ZeroTo(1), "scalar collection indices")
+        check(scalar[] == 7 && scalar[0] == 7 && scalar[0,0] == 7 &&
+              get(scalar,0,:missing) == 7 && get(scalar,1,:missing) === :missing &&
+              get(() -> :missing, scalar, (0,0)) == 7 &&
+              get(() -> :missing, scalar, (1,0)) === :missing, "scalar indexing and get")
+        collected_scalar = collect(scalar)
+        check(size(collected_scalar) == () && collected_scalar[] == 7, "scalar collection iteration")
+        throws(() -> size(scalar,-1), BoundsError, "scalar negative dimension")
+        throws(() -> axes(scalar,-1), BoundsError, "scalar negative axis")
+        throws(() -> scalar[-1], BoundsError, "scalar negative index")
+        throws(() -> scalar[1], BoundsError, "scalar upper index")
+        check(firstindex(t) == 0 && lastindex(t) == 2, "tuple boundaries")
+        check(t[0] == 10 && t[end] == 30, "tuple access")
+        throws(() -> t[-1], BoundsError, "negative tuple index")
+        throws(() -> t[3], BoundsError, "upper tuple index")
+        check(ntuple(identity, 4) === (0,1,2,3), "ntuple callback indices")
+        check(ntuple(identity, Val(3)) === (0,1,2), "static ntuple indices")
+        check(Base.ntupleany(identity, 40)[39] == 39, "large ntuple indices")
+        check(size(t,0) == 3 && Base.rest(t,1) == (20,30), "tuple dimension and rest")
+        check(last(enumerate(t)) == (2,30) && last(zip(t,t)) == (30,30), "iterator last positions")
+        check(map(x -> x+1, t) === (11,21,31), "tuple map")
+        check(reverse(t) === (30,20,10), "tuple reverse")
+        check(t[0:1] === (10,20), "tuple range indexing")
+        a,b,c = t
+        check((a,b,c) === t, "destructuring")
+        nt = (a=10,b=20)
+        check(nt[0] == 10 && nt[1] == 20 && nt.a == 10, "named tuple positions")
+        check(collect(enumerate(t)) == [(0,10),(1,20),(2,30)], "enumerate origin")
+        check(collect(zip(t,t)) == [(10,10),(20,20),(30,30)], "zip tuple states")
+        check(collect(Int, (x+1 for x in t)) == [11,21,31], "generator states")
+        check(Iterators.nth(t,0) == 10 && Iterators.nth(t,2) == 30, "iterator nth")
+        check(Base.Fix{0}(-,10)(3) == 7 && Base.Fix2(-,3)(10) == 7, "fixed argument positions")
+        check(+(t...,t...,t...,t...,t...,t...,t...,t...,t...,t...,t...) == 660, "long argument fold")
+        r = 0:4
+        check(length(r) == 5 && r[0] == 0 && r[4] == 4, "inclusive colon range")
+        check((1:4)[0] == 1 && length(1:4) == 4, "range values independent of indices")
+        check(collect(4:-2:0) == [4,2,0], "descending inclusive range")
+        check(collect(StepRangeLen(10,2,3)) == [10,12,14], "counted range iteration")
+        check(isempty(collect(StepRangeLen(10,2,0))), "empty counted range iteration")
+        check(collect(LinRange(0.0,1.0,3)) == [0.0,0.5,1.0], "linear range interpolation positions")
+        check(collect(Base.OneTo(3)) == [1,2,3], "OneTo values preserved")
+        check(findfirst(isone,Base.OneTo(3)) == 0, "OneTo search position")
+        check(findfirst(==(2),Base.OneTo(3)) == 1, "OneTo value search")
+        check(findfirst(==(14),10:2:20) == 2, "range value search")
+        check(findlast(==(14),10:2:20) == 2, "range reverse search")
+        check(collect(Base.ZeroTo(3)) == [0,1,2], "ZeroTo count axis")
+        check(isempty(Base.ZeroTo(0)) && last(Base.ZeroTo(0)) == -1, "empty zero axis")
+        check(isempty(Base.ZeroTo(UInt8(0))) && last(Base.ZeroTo(UInt8(0))) == -1, "unsigned empty axis")
+        check((10:2:20)[0:2] == 10:2:14, "range slicing")
+        throws(() -> r[-1], BoundsError, "negative range index")
+        throws(() -> r[5], BoundsError, "upper range index")
+        v = [10,20,30]
+        check(firstindex(v) == 0 && lastindex(v) == 2, "vector boundaries")
+        check(v[begin] == 10 && v[end] == 30, "begin/end lowering")
+        check(axes(v,0) == Base.ZeroTo(3) && axes(v,1) == Base.ZeroTo(1), "axis dimensions")
+        check(collect(eachindex(v)) == [0,1,2], "eachindex origin")
+        check(Base.require_zero_based_indexing(v), "zero-origin validation")
+        throws(() -> Base.require_zero_based_indexing(Base.IdentityUnitRange(1:3)), ArgumentError, "offset axis rejection")
+        check(v[0:1] == [10,20], "vector slice")
+        check(copy(v) == v, "array copy")
+        check(reverse(v; dims=0) == [30,20,10], "vector reverse dimension zero")
+        check(reverse!(copy(v); dims=(0,)) == [30,20,10], "in-place reverse dimension tuple")
+        throws(() -> reverse(v; dims=1), ArgumentError, "vector reverse invalid dimension")
+        push!(v,40)
+        check(v == [10,20,30,40] && pop!(v) == 40, "push and pop")
+        pushfirst!(v,5)
+        check(v == [5,10,20,30] && popfirst!(v) == 5, "front growth and shrink")
+        insert!(v,1,15)
+        check(v == [10,15,20,30], "insertion position")
+        deleteat!(v,1)
+        check(v == [10,20,30], "deletion position")
+        check(deleteat!([10,20,30], [0]) == [20,30], "vector deletion at first index")
+        check(deleteat!([10,20,30], [0,2]) == [20], "vector deletion at both endpoints")
+        check(deleteat!([10,20,30], Int[]) == [10,20,30], "empty deletion index vector")
+        throws(() -> deleteat!([10,20,30], [3]), BoundsError, "vector deletion upper bound")
+        throws(() -> deleteat!([10,20,30], [0,0]), ArgumentError, "duplicate deletion indices")
+        check(first((10*x for x in (2,3))) == 20, "generic first returns iteration value")
+        throws(() -> first(Iterators.take((1,),0)), ArgumentError, "generic first on empty iterator")
+        append!(v,[40,50])
+        check(v == [10,20,30,40,50], "append copy offsets")
+        copyto!(v,1,v,0,3)
+        check(v == [10,10,20,30,50], "overlapping copy")
+        resize!(v,2)
+        check(v == [10,10], "resize count")
+        empty!(v)
+        check(isempty(v) && lastindex(v) == -1, "empty vector boundaries")
+        throws(() -> v[0], BoundsError, "empty vector access")
+        m = Array{Int,2}(undef,2,3)
+        for i in 0:5
+            m[i] = i+10
+        end
+        check(size(m,0) == 2 && size(m,1) == 3 && size(m,2) == 1, "dimension numbering")
+        check(m[0,0] == 10 && m[1,0] == 11 && m[0,1] == 12, "column major Cartesian access")
+        check(stride(m,0) == 1 && stride(m,1) == 2 && stride(m,2) == 6, "column major strides")
+        check(m[1,2,0] == 15, "trailing singleton dimension")
+        throws(() -> m[1,2,1], BoundsError, "trailing dimension bounds")
+        throws(() -> m[-1], BoundsError, "negative array bounds")
+        throws(() -> size(m,-1), BoundsError, "negative dimension bounds")
+        z = Array{Int,0}(undef)
+        z[] = 42
+        check(z[] == 42 && z[0] == 42, "zero-dimensional array")
+        byteindexed = Vector{Int}(undef,256)
+        for i in 0:255
+            byteindexed[UInt8(i)] = i
+        end
+        check(byteindexed == collect(0:255), "UInt8 indices span all 256 vector elements")
+        throws(() -> byteindexed[256], BoundsError, "256-element vector upper bound")
+        mem = Memory{Int}(undef,256)
+        mem[UInt8(255)] = 42
+        mem[0] = 7
+        check(mem[UInt8(255)] == 42 && mem[0] == 7, "UInt8 index spans 256 memory elements")
+        throws(() -> mem[256], BoundsError, "memory upper bounds")
+        check(copy(mem)[255] == 42, "memory copy offsets")
+        check(Base.memoryindex(Core.memoryref(mem,255)) == 255, "memory reference index")
+        GC.@preserve mem begin
+            p = pointer(mem)
+            check(unsafe_load(p) == 7 && unsafe_load(p,255) == 42, "pointer load origin")
+            unsafe_store!(p,99,1)
+            check(mem[1] == 99, "pointer store origin")
+        end
+        check(fieldindex(Pair{Int,Int},:first) == 0, "reflection field origin")
+        check(fieldindex(Pair{Int,Int},:absent,false) == -1, "missing field sentinel")
+        check(hasfield(Pair{Int,Int},:first) && !hasfield(Pair{Int,Int},:absent), "hasfield sentinel")
+        check(fieldname(Pair{Int,Int},0) === :first && fieldtype(Pair{Int,Symbol},1) === Symbol, "field reflection")
+        check(fieldoffset(Pair{Int,Int},0) == 0, "field byte offset")
+        d = IdDict{Any,Any}(:x=>1,:y=>2)
+        check(length(d) == 2 && d[:x] == 1, "identity dictionary")
+        check(length(collect(d)) == 2, "identity dictionary iteration")
+        s = IdSet{Any}((:x,:y))
+        check(length(collect(s)) == 2 && :x in s, "identity set iteration")
+        delete!(s,:x)
+        check(!(:x in s) && :y in s, "identity set deletion")
+        check(typejoin(Tuple{Int,Int},Tuple{Int,Symbol}) === Tuple{Int,Any}, "typejoin storage indices")
+        bv = falses(130)
+        for i in (0,63,64,129)
+            bv[i] = true
+        end
+        check(bv[0] && bv[63] && bv[64] && bv[129] && !bv[65], "packed bits across word boundaries")
+        check(findfirst(bv) == 0 && findnext(bv,1) == 63 && findnext(bv,64) == 64, "packed forward search")
+        check(findlast(bv) == 129 && findprev(bv,128) == 64, "packed reverse search")
+        check(findnext(Returns(true),bv,130) === nothing, "packed search after end")
+        check(findprev(Returns(true),bv,-1) === nothing, "packed search before start")
+        check(Base.bitcount(bv.chunks) == 4, "packed popcount")
+        check(copy(bv) == bv, "packed copy")
+        tailbits = trues(130)
+        copyto!(tailbits, falses(65))
+        check(!tailbits[64] && tailbits[65] && tailbits[127] && tailbits[129], "short packed copy preserves tail")
+        boolsrc = Bool[isodd(i) for i in 0:699]
+        packed = trues(710)
+        copyto!(packed,0,boolsrc,0,700)
+        check(all(packed[i] == boolsrc[i] for i in 0:699) && packed[700], "aligned Bool packing")
+        fill!(packed,true)
+        copyto!(packed,3,boolsrc,5,690)
+        check(packed[2] && packed[693] && all(packed[i+3] == boolsrc[i+5] for i in 0:689), "unaligned Bool packing")
+        copyto!(bv,1,bv,0,129)
+        check(bv[0] && bv[1] && bv[64] && bv[65] && !bv[129], "packed overlapping copy")
+        push!(bv,true)
+        check(bv[130] && pop!(bv), "packed push/pop boundary")
+        pushfirst!(bv,true)
+        check(bv[0] && popfirst!(bv), "packed front growth/shrink")
+        check(isempty(falses(0)) && findfirst(falses(0)) === nothing, "empty packed array")
+        bm = falses(2,3)
+        bm[1,2] = true
+        check(bm[5] && !bm[4], "packed column-major dimensions")
+        bs = BitSet((-65,-1,0,63,64,255))
+        check(collect(bs) == [-65,-1,0,63,64,255], "bitset values and word positions")
+        check(first(bs) == -65, "bitset first value")
+        check(last(bs) == 255, "bitset last value")
+        check(length(bs) == 6, "bitset count")
+        delete!(bs,0)
+        check(!(0 in bs) && 64 in bs, "bitset deletion")
+        empty!(bs)
+        check(isempty(bs), "empty bitset")
+        left = BitSet(0:63)
+        right = BitSet(128:191)
+        u = union(left, right)
+        check(length(u) == 128 && first(u) == 0 && last(u) == 191 &&
+              0 in u && !(64 in u) && 128 in u, "bitset disjoint union")
+        ur = union(right, left)
+        check(length(ur) == 128 && first(ur) == 0 && last(ur) == 191 &&
+              0 in ur && !(64 in ur) && 128 in ur, "bitset reverse disjoint union")
+        check(isempty(intersect(left, right)) && isempty(intersect(right, left)),
+              "bitset disjoint intersection")
+        dleft = setdiff(left, right)
+        dright = setdiff(right, left)
+        check(length(dleft) == 64 && first(dleft) == 0 && last(dleft) == 63 &&
+              length(dright) == 64 && first(dright) == 128 && last(dright) == 191,
+              "bitset disjoint setdiff")
+        sx = symdiff(left, right)
+        check(length(sx) == 128 && first(sx) == 0 && last(sx) == 191 &&
+              0 in sx && !(64 in sx) && 128 in sx, "bitset disjoint symdiff")
+        overlap = BitSet(32:95)
+        ou = union(left, overlap)
+        check(length(ou) == 96 && first(ou) == 0 && last(ou) == 95 &&
+              0 in ou && 32 in ou && 95 in ou, "bitset overlapping union")
+        oi = intersect(left, overlap)
+        check(length(oi) == 32 && first(oi) == 32 && last(oi) == 63,
+              "bitset overlapping intersection")
+        od = setdiff(overlap, left)
+        os = symdiff(left, overlap)
+        check(length(od) == 32 && first(od) == 64 && last(od) == 95 &&
+              length(os) == 64 && first(os) == 0 && last(os) == 95 &&
+              0 in os && !(32 in os) && 64 in os, "bitset overlapping differences")
+        negative = BitSet(-128:-65)
+        nu = union(negative, left)
+        nr = union(left, negative)
+        check(length(nu) == 128 && first(nu) == -128 && last(nu) == 63 &&
+              -128 in nu && !(-1 in nu) && 0 in nu &&
+              nu == nr, "bitset negative offset union")
+        check(symdiff(BitSet(), BitSet()) == BitSet(), "bitset empty symdiff")
+        check(Core.Intrinsics.not_int(isdefined(Base,:Compiler)), "compiler remains absent")
+    end
+    run()
+    Core.println("joolia Base foundation checks passed: ", checks[])
+    end))
+    ccall(:jl_exit, Core.Cvoid, (Core.Int32,), Core.Int32(0))
+end
+
+
 # Array test
 isdefined(Main, :OffsetArrays) || @eval Main include("testhelpers/OffsetArrays.jl")
 using .Main.OffsetArrays
@@ -2454,97 +2721,104 @@ end
 
     # Simple ones
     M = [1 2 3; 4 5 6; 7 8 9]
-    @test eachrow(M) == eachslice(M, dims = 1) == [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
-    @test eachcol(M) == eachslice(M, dims = 2) == [[1, 4, 7], [2, 5, 8], [3, 6, 9]]
-    @test eachslice(M, dims = 4) == [[1 2 3; 4 5 6; 7 8 9;;;]]
+    @test eachrow(M) == eachslice(M, dims = 0) == [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+    @test eachcol(M) == eachslice(M, dims = 1) == [[1, 4, 7], [2, 5, 8], [3, 6, 9]]
+    @test eachslice(M, dims = 3) == [[1 2 3; 4 5 6; 7 8 9;;;]]
 
     SR = @inferred eachrow(M)
-    @test SR[2] isa eltype(SR)
-    SR[2] = [14,15,16]
-    @test SR[2] == M[2,:] == [14,15,16]
+    @test SR[1] isa eltype(SR)
+    SR[1] = [14,15,16]
+    @test SR[1] == M[1,:] == [14,15,16]
     @test parent(SR) === M
 
     SC = @inferred eachcol(M)
-    @test SC[3] isa eltype(SC)
-    SC[3] = [23,26,29]
-    @test SC[3] == M[:,3] == [23,26,29]
+    @test SC[2] isa eltype(SC)
+    SC[2] = [23,26,29]
+    @test SC[2] == M[:,2] == [23,26,29]
     @test parent(SC) === M
+
+    # Zero-origin slice bounds, empty axes, and rank-zero inputs.
+    @test axes(eachrow(zeros(0,3)), 0) == Base.ZeroTo(0)
+    @test isempty(eachrow(zeros(0,3)))
+    @test eachslice(fill(9); dims=())[][] == 9
+    @test_throws DimensionMismatch eachslice(M; dims=-1)
+    @test_throws DimensionMismatch eachslice(M; dims=(0,0))
 
     # Higher-dimensional cases
     M = reshape(collect(1:16), (2,2,2,2))
     @test_throws MethodError collect(eachrow(M))
     @test_throws MethodError collect(eachcol(M))
 
-    S1 = eachslice(M, dims = 1)
+    S1 = eachslice(M, dims = 0)
     @test S1 isa AbstractSlices{<:AbstractArray{Int, 3}, 1}
     @test size(S1) == (2,)
-    @test S1[1] == M[1,:,:,:]
+    @test S1[0] == M[0,:,:,:]
 
-    S1K = eachslice(M, dims = 1, drop=false)
+    S1K = eachslice(M, dims = 0, drop=false)
     @test S1K isa AbstractSlices{<:AbstractArray{Int, 3}, 4}
     @test size(S1K) == (2,1,1,1)
-    @test S1K[1,1,1,1] == M[1,:,:,:]
+    @test S1K[0,0,0,0] == M[0,:,:,:]
 
-    S23 = eachslice(M, dims = (2,3))
+    S23 = eachslice(M, dims = (1,2))
     @test S23 isa AbstractSlices{<:AbstractArray{Int, 2}, 2}
     @test size(S23) == (2,2)
-    @test S23[2,1] == M[:,2,1,:]
+    @test S23[1,0] == M[:,1,0,:]
 
-    S23K = eachslice(M, dims = (2,3), drop=false)
+    S23K = eachslice(M, dims = (1,2), drop=false)
     @test S23K isa AbstractSlices{<:AbstractArray{Int, 2}, 4}
     @test size(S23K) == (1,2,2,1)
-    @test S23K[1,2,1,1] == M[:,2,1,:]
+    @test S23K[0,1,0,0] == M[:,1,0,:]
 
-    S32 = eachslice(M, dims = (3,2))
+    S32 = eachslice(M, dims = (2,1))
     @test S32 isa AbstractSlices{<:AbstractArray{Int, 2}, 2}
     @test size(S32) == (2,2)
-    @test S32[2,1] == M[:,1,2,:]
+    @test S32[1,0] == M[:,0,1,:]
 
-    S32K = eachslice(M, dims = (3,2), drop=false)
+    S32K = eachslice(M, dims = (2,1), drop=false)
     @test S32K isa AbstractSlices{<:AbstractArray{Int, 2}, 4}
     @test size(S32K) == (1,2,2,1)
-    @test S32K[1,2,1,1] == M[:,2,1,:]
+    @test S32K[0,1,0,0] == M[:,1,0,:]
 
     @testset "eachslice inference (#45923)" begin
         a = [1 2; 3 4]
-        f1(a) = eachslice(a, dims=1)
+        f1(a) = eachslice(a, dims=0)
         @test (@inferred f1(a)) == eachrow(a)
-        f2(a) = eachslice(a, dims=2)
+        f2(a) = eachslice(a, dims=1)
         @test (@inferred f2(a)) == eachcol(a)
     end
 
     @testset "eachslice bounds checking" begin
         # https://github.com/JuliaLang/julia/pull/32310#issuecomment-1146911510
-        A = eachslice(rand(2,3), dims = 2, drop = false)
-        @test_throws BoundsError A[2, 1]
-        @test_throws BoundsError A[4]
-        @test_throws BoundsError A[2,3] = [4,5]
-        @test_throws BoundsError A[2,3] .= [4,5]
+        A = eachslice(rand(2,3), dims = 1, drop = false)
+        @test_throws BoundsError A[1, 0]
+        @test_throws BoundsError A[3]
+        @test_throws BoundsError A[1,2] = [4,5]
+        @test_throws BoundsError A[1,2] .= [4,5]
     end
 
     @testset "trailing dimensions" begin
         v = collect(1:3)
 
-        S2  = eachslice(v; dims = 2, drop=true)
+        S2  = eachslice(v; dims = 1, drop=true)
         @test S2 isa AbstractSlices{<:AbstractVector, 1}
         @test size(S2) == (1,)
-        @test S2[1] == v
+        @test S2[0] == v
 
-        S2K = eachslice(v; dims = 2, drop=false)
+        S2K = eachslice(v; dims = 1, drop=false)
         @test S2K isa AbstractSlices{<:AbstractVector, 2}
         @test size(S2K) == (1,1)
-        @test S2K[1,1] == v
+        @test S2K[0,0] == v
 
         M = reshape(1:6, 2, 3)
 
-        S13 = eachslice(M; dims = (1,3))
+        S13 = eachslice(M; dims = (0,2))
         @test size(S13) == (2,1)
-        @test S13[2,1] == M[2,:,1]
+        @test S13[1,0] == M[1,:,0]
 
-        S13K = eachslice(M; dims = (1,3), drop=false)
+        S13K = eachslice(M; dims = (0,2), drop=false)
         @test size(S13K) == (2,1,1)
-        @test S13K[1,1,1] == M[1,:]
-        @test S13K[2,1,1] == M[2,:]
+        @test S13K[0,0,0] == M[0,:]
+        @test S13K[1,0,0] == M[1,:]
     end
 
 end
@@ -2927,21 +3201,28 @@ end
     # test diff, throw ArgumentError for invalid dimension argument
     v = [7, 3, 5, 1, 9]
     @test diff(v) == [-4, 2, -4, 8]
-    @test diff(v,dims=1) == [-4, 2, -4, 8]
+    @test diff(v,dims=0) == [-4, 2, -4, 8]
     X = [3  9   5;
          7  4   2;
          2  1  10]
-    @test diff(X,dims=1) == [4  -5 -3; -5  -3  8]
-    @test diff(X,dims=2) == [6 -4; -3 -2; -1 9]
-    @test diff(view(X, 1:2, 1:2),dims=1) == [4 -5]
-    @test diff(view(X, 1:2, 1:2),dims=2) == reshape([6; -3], (2,1))
-    @test diff(view(X, 2:3, 2:3),dims=1) == [-3 8]
-    @test diff(view(X, 2:3, 2:3),dims=2) == reshape([-2; 9], (2,1))
-    Y = cat([1 3; 4 3], [6 5; 1 4], dims=3)
-    @test diff(Y, dims=3) == reshape([5 2; -3 1], (2, 2, 1))
+    @test diff(X,dims=0) == [4  -5 -3; -5  -3  8]
+    @test diff(X,dims=1) == [6 -4; -3 -2; -1 9]
+    @test diff(view(X, 0:1, 0:1),dims=0) == [4 -5]
+    @test diff(view(X, 0:1, 0:1),dims=1) == reshape([6; -3], (2,1))
+    @test diff(view(X, 1:2, 1:2),dims=0) == [-3 8]
+    @test diff(view(X, 1:2, 1:2),dims=1) == reshape([-2; 9], (2,1))
+    Y = cat([1 3; 4 3], [6 5; 1 4], dims=2)
+    @test diff(Y, dims=2) == reshape([5 2; -3 1], (2, 2, 1))
     @test_throws UndefKeywordError diff(X)
-    @test_throws ArgumentError diff(X,dims=3)
+    @test_throws ArgumentError diff(X,dims=2)
     @test_throws ArgumentError diff(X,dims=-1)
+    @test isempty(diff(Int[]))
+    @test isempty(diff([7]))
+    @test diff(0:3) == [1, 1, 1]
+    @test diff(3:-1:0) == [-1, -1, -1]
+    @test_throws ArgumentError diff(v; dims=1)
+    @test_throws ArgumentError diff(0:3; dims=1)
+    @test size(diff(zeros(Int, 0, 2); dims=0)) == (0, 2)
 end
 
 @testset "accumulate, accumulate!" begin
@@ -3446,4 +3727,59 @@ end
     ref = memoryref(mem, 8)
     @test parent(ref) === mem
     @test Base.memoryindex(ref) === 8
+end
+
+# Generic concatenation uses zero-origin axes, including newly created dimensions.
+@testset "zero-origin generic concatenation" begin
+    @test cat([1, 2], [3, 4]; dims=0) == [1, 2, 3, 4]
+    @test cat([1, 2], [3, 4]; dims=1) == [1 3; 2 4]
+    @test cat([1, 2], [3, 4]; dims=Val(0)) == [1, 2, 3, 4]
+    a = reshape(collect(1:6), 2, 3)
+    b = cat(a, a; dims=0)
+    @test size(b) == (4, 3) && b[0, 0] == 1 && b[3, 2] == 6
+    b = cat(a, a; dims=1)
+    @test size(b) == (2, 6) && b[0, 0] == 1 && b[1, 5] == 6
+    b = cat(a, a; dims=2)
+    @test size(b) == (2, 3, 2) && b[1, 2, 1] == 6
+    @test cat(1, 2; dims=(0, 1)) == [1 0; 0 2]
+    @test cat(1, 2; dims=Val((0, 1))) == [1 0; 0 2]
+    @test cat(Int[], [4]; dims=0) == [4]
+    @test size(cat(Int[], Int[]; dims=1)) == (0, 2)
+    @test cat(1, [2], [3]; dims=0) == [1, 2, 3]
+    @test cat("a", "b"; dims=0) == ["a", "b"]
+
+    # Generic hvncat must use zero-origin block and dimension positions for
+    # non-Number scalars, which take the fallback path used by Period arrays.
+    periods = hvcat((2, 2), Month(1), Month(2), Month(3), Month(4))
+    @test size(periods) == (2, 2)
+    @test periods[0, 0] == Month(1) && periods[1, 0] == Month(3)
+    @test periods[0, 1] == Month(2) && periods[1, 1] == Month(4)
+    dates = hvcat((2, 2), Date(2024, 1, 1), Date(2024, 1, 2),
+        Date(2024, 1, 3), Date(2024, 1, 4))
+    @test dates[0, 0] == Date(2024, 1, 1) && dates[1, 1] == Date(2024, 1, 4)
+    strings = hvcat((2, 2), "a", "b", "c", "d")
+    @test strings == ["a" "b"; "c" "d"]
+    mixed = hvcat((2, 2), Month(1), [Month(2)], [Month(3)], Month(4))
+    @test mixed[0, 0] == Month(1) && mixed[1, 0] == Month(3)
+    @test mixed[0, 1] == Month(2) && mixed[1, 1] == Month(4)
+    empty_periods = cat(Matrix{Month}(undef, 0, 2), Matrix{Month}(undef, 0, 2); dims=1)
+    @test size(empty_periods) == (0, 4) && isempty(empty_periods)
+
+    a, b = reshape([1, 2], 1, 1, 2), reshape([3, 4], 1, 1, 2)
+    @test vcat(a, b) == reshape([1, 3, 2, 4], 2, 1, 2)
+    @test hcat(a, b) == reshape([1, 3, 2, 4], 1, 2, 2)
+    @test_throws ArgumentError cat([1], [2]; dims=-1)
+    @test_throws DimensionMismatch cat([1], [2, 3]; dims=1)
+end
+
+# Mixed element types must retain vector/matrix shape in concatenation and reductions.
+@testset "zero-origin mixed vector concatenation" begin
+    @test vcat(Any[], [1,2]) == Any[1,2]
+    @test size(vcat(Any[], [1,2])) == (2,)
+    @test vcat([1,2], [3.0]) == [1.0,2.0,3.0]
+    @test hcat([1,2], [3.0,4.0]) == [1.0 3.0; 2.0 4.0]
+    @test size(hcat(Int[], Float64[])) == (0,2)
+    @test reduce(vcat, [[1,2], [3,4]]; init=Any[]) == Any[1,2,3,4]
+    @test size(reduce(vcat, [Int[], [3]]; init=Any[])) == (1,)
+    @test_throws DimensionMismatch hcat([1], [2.0,3.0])
 end

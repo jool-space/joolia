@@ -52,7 +52,7 @@ end
 
 function abstract_eval_invoke_inst(interp::AbstractInterpreter, inst::Instruction, irsv::IRInterpretationState)
     stmt = inst[:stmt]::Expr
-    ci = stmt.args[1]
+    ci = stmt.args[0]
     if ci isa MethodInstance
         mi_cache = code_cache(interp)
         code = get(mi_cache, ci, nothing)
@@ -63,7 +63,7 @@ function abstract_eval_invoke_inst(interp::AbstractInterpreter, inst::Instructio
     end
     update_valid_age!(irsv, get_inference_world(interp), proof_worlds(code))
     add_inference_proof!(irsv.edges, code)
-    argtypes = collect_argtypes(interp, stmt.args[2:end], StatementState(nothing, false), irsv)
+    argtypes = collect_argtypes(interp, stmt.args[1:end], StatementState(nothing, false), irsv)
     argtypes === nothing && return Pair{Any,Tuple{Bool,Bool}}(Bottom, (false, false))
     return concrete_eval_invoke(interp, code, argtypes, irsv)
 end
@@ -86,7 +86,7 @@ end
 
 function kill_block!(ir::IRCode, bb::Int)
     # Kill the entire block
-    stmts = ir.cfg.blocks[bb].stmts
+    stmts = ir.cfg.blocks[bb-1].stmts
     for bidx = stmts
         inst = ir[SSAValue(bidx)]
         inst[:stmt] = nothing
@@ -100,10 +100,10 @@ kill_block!(ir::IRCode) = (bb::Int)->kill_block!(ir, bb)
 
 function update_phi!(irsv::IRInterpretationState, from::Int, to::Int)
     ir = irsv.ir
-    if length(ir.cfg.blocks[to].preds) == 0
+    if length(ir.cfg.blocks[to-1].preds) == 0
         kill_block!(ir, to)
     end
-    for sidx = ir.cfg.blocks[to].stmts
+    for sidx = ir.cfg.blocks[to-1].stmts
         stmt = ir[SSAValue(sidx)][:stmt]
         isa(stmt, Nothing) && continue # allowed between `PhiNode`s
         isa(stmt, PhiNode) || break
@@ -176,7 +176,7 @@ function reprocess_instruction!(interp::AbstractInterpreter, inst::Instruction, 
             reverse!(irsv.tasks)
             while true
                 if length(irsv.callstack) > irsv.frameid
-                    typeinf(interp, irsv.callstack[irsv.frameid + 1])
+                    typeinf(interp, irsv.callstack[irsv.frameid])
                 elseif !doworkloop(interp, irsv)
                     break
                 end
@@ -194,7 +194,7 @@ function reprocess_instruction!(interp::AbstractInterpreter, inst::Instruction, 
                 add_flag!(inst, IR_FLAG_NOUB)
             end
         elseif head === :throw_undef_if_not
-            condval = maybe_extract_const_bool(argextype(stmt.args[2], ir))
+            condval = maybe_extract_const_bool(argextype(stmt.args[1], ir))
             condval isa Bool || return false
             if condval
                 inst[:stmt] = nothing
@@ -300,7 +300,7 @@ function scan!(callback, scanner::BBScanner, forwards_only::Bool)
     bbs = ir.cfg.blocks
     while !isempty(bb_ip)
         bb = popfirst!(bb_ip)
-        stmts = bbs[bb].stmts
+        stmts = bbs[bb-1].stmts
         lstmt = last(stmts)
         for idx = stmts
             inst = ir[SSAValue(idx)]
@@ -329,7 +329,7 @@ populate_def_use_map!(tpdum::TwoPhaseDefUseMap, ir::IRCode) =
 
 function is_all_const_call(@nospecialize(stmt), interp::AbstractInterpreter, irsv::IRInterpretationState)
     isexpr(stmt, :call) || return false
-    @inbounds for i = 2:length(stmt.args)
+    @inbounds for i = 1:length(stmt.args)-1
         argtype = abstract_eval_value(interp, stmt.args[i], StatementState(nothing, false), irsv)
         is_const_argtype(argtype) || return false
     end
@@ -367,7 +367,7 @@ function ir_abstract_constant_propagation(interp::AbstractInterpreter, irsv::IRI
         for ur in userefs(stmt)
             val = ur[]
             if isa(val, Argument)
-                any_refined |= irsv.argtypes_refined[val.n]
+                any_refined |= irsv.argtypes_refined[val.n-1]
             elseif isa(val, SSAValue)
                 any_refined |= val.id in ssa_refined
                 count!(tpdum, val)
@@ -419,7 +419,7 @@ function ir_abstract_constant_propagation(interp::AbstractInterpreter, irsv::IRI
             for ur in userefs(stmt)
                 val = ur[]
                 if isa(val, Argument)
-                    if irsv.argtypes_refined[val.n]
+                    if irsv.argtypes_refined[val.n-1]
                         push!(stmt_ip, idx)
                     end
                 elseif isa(val, SSAValue)
@@ -456,7 +456,7 @@ function ir_abstract_constant_propagation(interp::AbstractInterpreter, irsv::IRI
     ultimate_rt = Bottom
     for idx in all_rets
         bb = block_for_inst(ir.cfg, idx)
-        if bb != 1 && length(ir.cfg.blocks[bb].preds) == 0
+        if bb != 1 && length(ir.cfg.blocks[bb-1].preds) == 0
             # Could have discovered this block is dead after the initial scan
             continue
         end

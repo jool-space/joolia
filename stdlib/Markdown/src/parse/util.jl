@@ -168,7 +168,7 @@ i.e. `*word word*` but not `*word * word`.
 Escaped delimiters are not yet supported.
 """
 function parse_inline_wrapper(stream::IO, delimiter::AbstractString; rep::Bool = false)
-    delimiter, nmin = string(delimiter[1]), length(delimiter)
+    delimiter, nmin = string(delimiter[0]), length(delimiter)
     withstream(stream) do
         if position(stream) >= 1
             # check the previous byte isn't a delimiter

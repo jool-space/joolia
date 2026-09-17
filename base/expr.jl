@@ -47,7 +47,7 @@ function copy(x::PhiNode)
     values = x.values
     nvalues = length(values)
     new_values = Vector{Any}(undef, nvalues)
-    @inbounds for i = 1:nvalues
+    @inbounds for i = 0:(nvalues-1)
         isassigned(values, i) || continue
         new_values[i] = copy_exprs(values[i])
     end
@@ -57,7 +57,7 @@ function copy(x::PhiCNode)
     values = x.values
     nvalues = length(values)
     new_values = Vector{Any}(undef, nvalues)
-    @inbounds for i = 1:nvalues
+    @inbounds for i = 0:(nvalues-1)
         isassigned(values, i) || continue
         new_values[i] = copy_exprs(values[i])
     end
@@ -118,7 +118,7 @@ end
 function isequal_exprargs(x::Array{Any,1}, y::Array{Any,1})
     l = length(x)
     l == length(y) || return false
-    for i = 1:l
+    for i = 0:(l-1)
         if !isassigned(x, i)
             # phi and phic values are permitted to be undef
             isassigned(y, i) && return false
@@ -141,7 +141,7 @@ end
 ==(stmt1::Core.PhiCNode, stmt2::Core.PhiCNode) = isequal_exprargs(stmt1.values, stmt2.values)
 
 function ==(stmt1::CodeInfo, stmt2::CodeInfo)
-    for i in 1:nfields(stmt1)
+    for i in 0:(nfields(stmt1)-1)
         if !isdefined(stmt1, i)
             isdefined(stmt2, i) && return false
         else
@@ -158,7 +158,7 @@ function ==(stmt1::CodeInfo, stmt2::CodeInfo)
                 # misc data
                 l = length(f1)
                 l == length(f2::Vector) || return false
-                for i = 1:l
+                for i = 0:(l-1)
                     f1[i] === f2[i] || return false
                 end
             else
@@ -171,7 +171,7 @@ function ==(stmt1::CodeInfo, stmt2::CodeInfo)
 end
 
 function ==(x::DebugInfo, y::DebugInfo)
-    for i in 1:nfields(x)
+    for i in 0:(nfields(x)-1)
         getfield(x, i) == getfield(y, i) || return false
     end
     return true
@@ -896,7 +896,7 @@ the call is generally total, it may however throw.
 macro assume_effects(args...)
     lastex = args[end]
     settings = args[begin:end-1]
-    if isexpr(lastex, :macrocall) && lastex.args[1] === Symbol("@ccall")
+    if isexpr(lastex, :macrocall) && lastex.args[0] === Symbol("@ccall")
         # `:reset_safe` is a foreigncall-only setting (it marks the call for
         # the cancellation lowering, not the enclosing method): peel it off
         # and carry it in a dedicated bit above the standard effects
@@ -913,8 +913,8 @@ macro assume_effects(args...)
         override = compute_assumed_settings(rest)
         word = encode_effects_override(override)
         reset_safe && (word |= CCALL_EFFECT_RESET_SAFE)
-        lastex.args[1] = GlobalRef(Base, Symbol("@ccall_effects"))
-        insert!(lastex.args, 3, word)
+        lastex.args[0] = GlobalRef(Base, Symbol("@ccall_effects"))
+        insert!(lastex.args, 2, word)
         return esc(lastex)
     end
     override = compute_assumed_settings(settings)
@@ -993,8 +993,8 @@ const NUM_EFFECTS_OVERRIDES = 11 # sync with julia.h
 const CCALL_EFFECT_RESET_SAFE = 0x0800
 
 function compute_assumed_setting(override::EffectsOverride, @nospecialize(setting), val::Bool=true)
-    if isexpr(setting, :call) && setting.args[1] === :(!)
-        return compute_assumed_setting(override, setting.args[2], !val)
+    if isexpr(setting, :call) && setting.args[0] === :(!)
+        return compute_assumed_setting(override, setting.args[1], !val)
     elseif isa(setting, QuoteNode)
         return compute_assumed_setting(override, setting.value, val)
     end
@@ -1065,7 +1065,7 @@ end
 
 function form_purity_expr(override::EffectsOverride)
     ex = Expr(:purity)
-    for i = 1:NUM_EFFECTS_OVERRIDES
+    for i = 0:(NUM_EFFECTS_OVERRIDES-1)
         push!(ex.args, getfield(override, i))
     end
     return ex
@@ -1087,7 +1087,7 @@ This can be used to limit the number of compiler-generated specializations durin
 julia> f(A::AbstractArray) = g(A)
 f (generic function with 1 method)
 
-julia> @noinline Base.@nospecializeinfer g(@nospecialize(A::AbstractArray)) = A[1]
+julia> @noinline Base.@nospecializeinfer g(@nospecialize(A::AbstractArray)) = A[0]
 g (generic function with 1 method)
 
 julia> @code_typed f([1.0])
@@ -1148,11 +1148,11 @@ end
 function pushmeta!(ex::Expr, tag::Union{Symbol,Expr})
     inner = unwrap_macrocalls(ex)
     idx, exargs = findmeta(inner)
-    if idx != 0
+    if idx != -1
         metastmt = exargs[idx]::Expr
         push!(metastmt.args, tag)
     else
-        body = inner.args[2]::Expr
+        body = inner.args[1]::Expr
         pushfirst!(body.args, Expr(:meta, tag))
     end
     return ex
@@ -1167,13 +1167,13 @@ function _getmeta(body::Expr, sym::Symbol, delete::Bool)
 end
 _getmeta(arg, sym, delete::Bool) = (false, [])
 function _getmeta(body::Array{Any,1}, sym::Symbol, delete::Bool)
-    idx, blockargs = findmeta_block(body, args -> findmetaarg(args,sym)!=0)
-    if idx == 0
+    idx, blockargs = findmeta_block(body, args -> findmetaarg(args,sym)!=-1)
+    if idx == -1
         return false, []
     end
     metaargs = blockargs[idx].args
     i = findmetaarg(blockargs[idx].args, sym)
-    if i == 0
+    if i == -1
         return false, []
     end
     ret = isa(metaargs[i], Expr) ? (metaargs[i]::Expr).args : []
@@ -1184,16 +1184,16 @@ function _getmeta(body::Array{Any,1}, sym::Symbol, delete::Bool)
     true, ret
 end
 
-# Find index of `sym` in a meta expression argument list, or 0.
+# Find index of `sym` in a meta expression argument list, or -1.
 function findmetaarg(metaargs, sym)
-    for i = 1:length(metaargs)
+    for i = 0:(length(metaargs)-1)
         arg = metaargs[i]
         if (isa(arg, Symbol) && (arg::Symbol)    == sym) ||
            (isa(arg, Expr)   && (arg::Expr).head == sym)
             return i
         end
     end
-    return 0
+    return -1
 end
 
 function annotate_meta_def_or_block(@nospecialize(ex), meta::Symbol)
@@ -1213,10 +1213,10 @@ end
 
 function is_short_function_def(@nospecialize(ex))
     isexpr(ex, :(=)) || return false
-    while length(ex.args) >= 1 && isa(ex.args[1], Expr)
-        (ex.args[1].head === :call) && return true
-        (ex.args[1].head === :where || ex.args[1].head === :(::)) || return false
-        ex = ex.args[1]
+    while length(ex.args) >= 1 && isa(ex.args[0], Expr)
+        (ex.args[0].head === :call) && return true
+        (ex.args[0].head === :where || ex.args[0].head === :(::)) || return false
+        ex = ex.args[0]
     end
     return false
 end
@@ -1225,7 +1225,7 @@ is_function_def(@nospecialize(ex)) =
 
 function findmeta(ex::Expr)
     if is_function_def(ex)
-        body = ex.args[2]::Expr
+        body = ex.args[1]::Expr
         body.head === :block || error(body, " is not a block expression")
         return findmeta_block(ex.args)
     end
@@ -1235,20 +1235,20 @@ end
 findmeta(ex::Array{Any,1}) = findmeta_block(ex)
 
 function findmeta_block(exargs, argsmatch=args->true)
-    for i = 1:length(exargs)
+    for i = 0:(length(exargs)-1)
         a = exargs[i]
         if isa(a, Expr)
             if a.head === :meta && argsmatch(a.args)
                 return i, exargs
             elseif a.head === :block
                 idx, exa = findmeta_block(a.args, argsmatch)
-                if idx != 0
+                if idx != -1
                     return idx, exa
                 end
             end
         end
     end
-    return 0, []
+    return -1, []
 end
 
 """
@@ -1330,10 +1330,10 @@ julia> bar("baz")
 """
 macro generated(f)
     if isa(f, Expr) && (f.head === :function || is_short_function_def(f))
-        body = f.args[2]
-        lno = body.args[1]
+        body = f.args[1]
+        lno = body.args[0]
         return Expr(:escape,
-                    Expr(f.head, f.args[1],
+                    Expr(f.head, f.args[0],
                          Expr(:block,
                               lno,
                               Expr(:if, Expr(:generated),
@@ -1371,8 +1371,8 @@ or, in case of reference, to a `setindex_atomic!(m, order, new, idx)` call,
 with `order` defaulting to `:sequentially_consistent`.
 
 With any modifying operator this operation translates to a
-`modifyproperty!(a.b, :x, op, addend)[2]` or, in case of reference, to a
-`modifyindex_atomic!(m, order, op, addend, idx...)[2]` call,
+`modifyproperty!(a.b, :x, op, addend)[1]` or, in case of reference, to a
+`modifyindex_atomic!(m, order, op, addend, idx...)[1]` call,
 with `order` defaulting to `:sequentially_consistent`.
 
     @atomic a.b.x max arg2
@@ -1430,25 +1430,25 @@ julia> @atomic a.x max 5 # again change field x of a to the max value, with sequ
 ```jldoctest
 julia> mem = AtomicMemory{Int}(undef, 2);
 
-julia> @atomic mem[1] = 2 # set mem[1] to value 2 with sequential consistency
+julia> @atomic mem[0] = 2 # set mem[0] to value 2 with sequential consistency
 2
 
-julia> @atomic :monotonic mem[1] # fetch the first value of mem, with monotonic consistency
+julia> @atomic :monotonic mem[0] # fetch the first value of mem, with monotonic consistency
 2
 
-julia> @atomic mem[1] += 1 # increment the first value of mem, with sequential consistency
+julia> @atomic mem[0] += 1 # increment the first value of mem, with sequential consistency
 3
 
-julia> @atomic mem[1] + 1 # increment the first value of mem, with sequential consistency
+julia> @atomic mem[0] + 1 # increment the first value of mem, with sequential consistency
 3 => 4
 
-julia> @atomic mem[1] # fetch the first value of mem, with sequential consistency
+julia> @atomic mem[0] # fetch the first value of mem, with sequential consistency
 4
 
-julia> @atomic max(mem[1], 10) # change the first value of mem to the max value, with sequential consistency
+julia> @atomic max(mem[0], 10) # change the first value of mem to the max value, with sequential consistency
 4 => 10
 
-julia> @atomic mem[1] max 5 # again change the first value of mem to the max value, with sequential consistency
+julia> @atomic mem[0] max 5 # again change the first value of mem to the max value, with sequential consistency
 10 => 10
 ```
 
@@ -1479,20 +1479,20 @@ function make_atomic(order, ex)
     @nospecialize
     if ex isa Expr
         if isexpr(ex, :., 2)
-            l, r = esc(ex.args[1]), esc(ex.args[2])
+            l, r = esc(ex.args[0]), esc(ex.args[1])
             return :(getproperty($l, $r, $order))
         elseif isexpr(ex, :call, 3)
-            return make_atomic(order, ex.args[2], ex.args[1], ex.args[3])
+            return make_atomic(order, ex.args[1], ex.args[0], ex.args[2])
         elseif isexpr(ex, :ref)
-            x, idcs = esc(ex.args[1]), map(esc, ex.args[2:end])
+            x, idcs = esc(ex.args[0]), map(esc, ex.args[1:end])
             return :(getindex_atomic($x, $order, $(idcs...)))
         elseif ex.head === :(=)
-            l, r = ex.args[1], esc(ex.args[2])
+            l, r = ex.args[0], esc(ex.args[1])
             if is_expr(l, :., 2)
-                ll, lr = esc(l.args[1]), esc(l.args[2])
+                ll, lr = esc(l.args[0]), esc(l.args[1])
                 return :(setproperty!($ll, $lr, $r, $order))
             elseif is_expr(l, :ref)
-                x, idcs = esc(l.args[1]), map(esc, l.args[2:end])
+                x, idcs = esc(l.args[0]), map(esc, l.args[1:end])
                 return :(setindex_atomic!($x, $order, $r, $(idcs...)))
             end
         end
@@ -1514,11 +1514,11 @@ function make_atomic(order, ex)
             elseif @isdefined string
                 shead = string(ex.head)
                 if endswith(shead, '=')
-                    op = Symbol(shead[1:prevind(shead, end)])
+                    op = Symbol(shead[0:prevind(shead, end)])
                 end
             end
             if @isdefined(op)
-                return Expr(:ref, make_atomic(order, ex.args[1], op, ex.args[2]), 2)
+                return Expr(:ref, make_atomic(order, ex.args[0], op, ex.args[1]), 1)
             end
         end
     end
@@ -1527,10 +1527,10 @@ end
 function make_atomic(order, a1, op, a2)
     @nospecialize
     if is_expr(a1, :., 2)
-        a1l, a1r, op, a2 = esc(a1.args[1]), esc(a1.args[2]), esc(op), esc(a2)
+        a1l, a1r, op, a2 = esc(a1.args[0]), esc(a1.args[1]), esc(op), esc(a2)
         return :(modifyproperty!($a1l, $a1r, $op, $a2, $order))
     elseif is_expr(a1, :ref)
-        x, idcs, op, a2 = esc(a1.args[1]), map(esc, a1.args[2:end]), esc(op), esc(a2)
+        x, idcs, op, a2 = esc(a1.args[0]), map(esc, a1.args[1:end]), esc(op), esc(a2)
         return :(modifyindex_atomic!($x, $order, $op, $a2, $(idcs...)))
     end
     error("@atomic modify expression missing field access or indexing")
@@ -1569,12 +1569,12 @@ julia> @atomic a.x # fetch field x of a, with sequential consistency
 ```jldoctest
 julia> mem = AtomicMemory{Int}(undef, 2);
 
-julia> @atomic mem[1] = 1;
+julia> @atomic mem[0] = 1;
 
-julia> @atomicswap mem[1] = 4 # replace the first value of `mem` with 4, with sequential consistency
+julia> @atomicswap mem[0] = 4 # replace the first value of `mem` with 4, with sequential consistency
 1
 
-julia> @atomic mem[1] # fetch the first value of mem, with sequential consistency
+julia> @atomic mem[0] # fetch the first value of mem, with sequential consistency
 4
 ```
 
@@ -1594,12 +1594,12 @@ end
 function make_atomicswap(order, ex)
     @nospecialize
     is_expr(ex, :(=), 2) || error("@atomicswap expression missing assignment")
-    l, val = ex.args[1], esc(ex.args[2])
+    l, val = ex.args[0], esc(ex.args[1])
     if is_expr(l, :., 2)
-        ll, lr = esc(l.args[1]), esc(l.args[2])
+        ll, lr = esc(l.args[0]), esc(l.args[1])
         return :(swapproperty!($ll, $lr, $val, $order))
     elseif is_expr(l, :ref)
-        x, idcs = esc(l.args[1]), map(esc, l.args[2:end])
+        x, idcs = esc(l.args[0]), map(esc, l.args[1:end])
         return :(swapindex_atomic!($x, $order, $val, $(idcs...)))
     end
     error("@atomicswap expression missing field access or indexing")
@@ -1653,23 +1653,23 @@ julia> @atomic a.x # fetch field x of a, with sequential consistency
 ```jldoctest
 julia> mem = AtomicMemory{Int}(undef, 2);
 
-julia> @atomic mem[1] = 1;
+julia> @atomic mem[0] = 1;
 
-julia> @atomicreplace mem[1] 1 => 2 # replace the first value of mem with 2 if it was 1, with sequential consistency
+julia> @atomicreplace mem[0] 1 => 2 # replace the first value of mem with 2 if it was 1, with sequential consistency
 (old = 1, success = true)
 
-julia> @atomic mem[1] # fetch the first value of mem, with sequential consistency
+julia> @atomic mem[0] # fetch the first value of mem, with sequential consistency
 2
 
-julia> @atomicreplace mem[1] 1 => 3 # replace field x of a with 2 if it was 1, with sequential consistency
+julia> @atomicreplace mem[0] 1 => 3 # replace field x of a with 2 if it was 1, with sequential consistency
 (old = 2, success = false)
 
 julia> xchg = 2 => 0; # replace field x of a with 0 if it was 2, with sequential consistency
 
-julia> @atomicreplace mem[1] xchg
+julia> @atomicreplace mem[0] xchg
 (old = 2, success = true)
 
-julia> @atomic mem[1] # fetch the first value of mem, with sequential consistency
+julia> @atomic mem[0] # fetch the first value of mem, with sequential consistency
 0
 ```
 
@@ -1694,18 +1694,18 @@ end
 function make_atomicreplace(success_order, fail_order, ex, old_new)
     @nospecialize
     if is_expr(ex, :., 2)
-        ll, lr = esc(ex.args[1]), esc(ex.args[2])
-        if is_expr(old_new, :call, 3) && old_new.args[1] === :(=>)
-            exp, rep = esc(old_new.args[2]), esc(old_new.args[3])
+        ll, lr = esc(ex.args[0]), esc(ex.args[1])
+        if is_expr(old_new, :call, 3) && old_new.args[0] === :(=>)
+            exp, rep = esc(old_new.args[1]), esc(old_new.args[2])
             return :(replaceproperty!($ll, $lr, $exp, $rep, $success_order, $fail_order))
         else
             old_new = esc(old_new)
             return :(replaceproperty!($ll, $lr, $old_new::Pair..., $success_order, $fail_order))
         end
     elseif is_expr(ex, :ref)
-        x, idcs = esc(ex.args[1]), map(esc, ex.args[2:end])
-        if is_expr(old_new, :call, 3) && old_new.args[1] === :(=>)
-            exp, rep = esc(old_new.args[2]), esc(old_new.args[3])
+        x, idcs = esc(ex.args[0]), map(esc, ex.args[1:end])
+        if is_expr(old_new, :call, 3) && old_new.args[0] === :(=>)
+            exp, rep = esc(old_new.args[1]), esc(old_new.args[2])
             return :(replaceindex_atomic!($x, $success_order, $fail_order, $exp, $rep, $(idcs...)))
         else
             old_new = esc(old_new)
@@ -1758,20 +1758,20 @@ julia> mem = AtomicMemory{Vector{Int}}(undef, 1);
 julia> isassigned(mem, 1)
 false
 
-julia> @atomiconce mem[1] = [1] # set the first value of mem to [1], if unset, with sequential consistency
+julia> @atomiconce mem[0] = [1] # set the first value of mem to [1], if unset, with sequential consistency
 true
 
 julia> isassigned(mem, 1)
 true
 
-julia> @atomic mem[1] # fetch the first value of mem, with sequential consistency
+julia> @atomic mem[0] # fetch the first value of mem, with sequential consistency
 1-element Vector{Int64}:
  1
 
-julia> @atomiconce :monotonic mem[1] = [2] # set the first value of mem to [2], if unset, with monotonic
+julia> @atomiconce :monotonic mem[0] = [2] # set the first value of mem to [2], if unset, with monotonic
 false
 
-julia> @atomic mem[1]
+julia> @atomic mem[0]
 1-element Vector{Int64}:
  1
 ```
@@ -1797,12 +1797,12 @@ end
 function make_atomiconce(success_order, fail_order, ex)
     @nospecialize
     is_expr(ex, :(=), 2) || error("@atomiconce expression missing assignment")
-    l, val = ex.args[1], esc(ex.args[2])
+    l, val = ex.args[0], esc(ex.args[1])
     if is_expr(l, :., 2)
-        ll, lr = esc(l.args[1]), esc(l.args[2])
+        ll, lr = esc(l.args[0]), esc(l.args[1])
         return :(setpropertyonce!($ll, $lr, $val, $success_order, $fail_order))
     elseif is_expr(l, :ref)
-        x, idcs = esc(l.args[1]), map(esc, l.args[2:end])
+        x, idcs = esc(l.args[0]), map(esc, l.args[1:end])
         return :(setindexonce_atomic!($x, $success_order, $fail_order, $val, $(idcs...)))
     end
     error("@atomiconce expression missing field access or indexing")
@@ -1856,10 +1856,10 @@ quoted(@nospecialize(x)) = isa_ast_node(x) ? QuoteNode(x) : x
 # Implementation of generated functions
 function generated_body_to_codeinfo(ex::Expr, defmod::Module, isva::Bool, loc::LineNumberNode)
     ci = ccall(:jl_fl_lower, Any, (Any, Any, Ptr{UInt8}, Csize_t, Csize_t, Cint),
-               ex, defmod, loc.file, loc.line, typemax(Csize_t), 0)[1]
+               ex, defmod, loc.file, loc.line, typemax(Csize_t), 0)[0]
     if !isa(ci, CodeInfo)
         if isa(ci, Expr) && ci.head === :error
-            msg = ci.args[1]
+            msg = ci.args[0]
             error(msg isa String ? strcat("syntax: ", msg) : msg)
         end
         error("The function body AST defined by this @generated function is not pure. This likely means it contains a closure, a comprehension or a generator.")
@@ -1867,7 +1867,7 @@ function generated_body_to_codeinfo(ex::Expr, defmod::Module, isva::Bool, loc::L
     ci.isva = isva
     code = ci.code
     bindings = IdSet{Core.Binding}()
-    for i = 1:length(code)
+    for i = 0:(length(code)-1)
         stmt = code[i]
         if isa(stmt, GlobalRef)
             push!(bindings, convert(Core.Binding, stmt))

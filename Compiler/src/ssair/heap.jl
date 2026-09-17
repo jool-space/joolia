@@ -4,15 +4,15 @@
 # -------------------------------
 
 # Binary heap indexing
-heapleft(i::Integer) = 2i
-heapright(i::Integer) = 2i + 1
-heapparent(i::Integer) = div(i, 2)
+heapleft(i::Integer) = 2i + 1
+heapright(i::Integer) = 2i + 2
+heapparent(i::Integer) = div(i - 1, 2)
 
 # Binary min-heap percolate down.
 function percolate_down!(xs::Vector, i::Integer, x, o::Ordering, len::Integer=length(xs))
-    @inbounds while (l = heapleft(i)) <= len
+    @inbounds while (l = heapleft(i)) < len
         r = heapright(i)
-        j = r > len || lt(o, xs[l], xs[r]) ? l : r
+        j = r >= len || lt(o, xs[l], xs[r]) ? l : r
         lt(o, xs[j], x) || break
         xs[i] = xs[j]
         i = j
@@ -22,7 +22,7 @@ end
 
 # Binary min-heap percolate up.
 function percolate_up!(xs::Vector, i::Integer, x, o::Ordering)
-    @inbounds while (j = heapparent(i)) >= 1
+    @inbounds while i > 0 && (j = heapparent(i)) >= 0
         lt(o, x, xs[j]) || break
         xs[i] = xs[j]
         i = j
@@ -37,10 +37,10 @@ Given a binary heap-ordered array, remove and return the lowest ordered element.
 For efficiency, this function does not check that the array is indeed heap-ordered.
 """
 function heappop!(xs::Vector, o::Ordering)
-    x = xs[1]
+    x = xs[0]
     y = pop!(xs)
     if !isempty(xs)
-        percolate_down!(xs, 1, y, o)
+        percolate_down!(xs, 0, y, o)
     end
     return x
 end
@@ -64,8 +64,10 @@ end
 Turn an arbitrary vector into a binary min-heap in linear time.
 """
 function heapify!(xs::Vector, o::Ordering)
-    for i in heapparent(lastindex(xs)):-1:1
-        percolate_down!(xs, i, @inbounds(xs[i]), o)
+    if !isempty(xs)
+        for i in heapparent(lastindex(xs)):-1:0
+            percolate_down!(xs, i, @inbounds(xs[i]), o)
+        end
     end
     return xs
 end

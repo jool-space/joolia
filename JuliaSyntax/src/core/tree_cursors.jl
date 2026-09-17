@@ -21,10 +21,10 @@ struct GreenTreeCursor
     parser_output::Vector{RawGreenNode}
     position::UInt32
 end
-GreenTreeCursor(stream::ParseStream) = GreenTreeCursor(stream.output, length(stream.output))
+GreenTreeCursor(stream::ParseStream) = GreenTreeCursor(stream.output, length(stream.output)-1)
 this(node::GreenTreeCursor) = node.parser_output[node.position]
 
-const SENTINEL_INDEX = UInt32(1)
+const SENTINEL_INDEX = UInt32(0)
 function prev_sibling_assumed(cursor::GreenTreeCursor)
     next_idx = cursor.position - this(cursor).node_span - UInt32(1)
     next_idx == SENTINEL_INDEX && return nothing
@@ -87,28 +87,28 @@ in the original source text.
 struct RedTreeCursor
     green::GreenTreeCursor
     # The last byte that is still part of the node
-    byte_end::UInt32
+    byte_end::Int
 end
 RedTreeCursor(stream::ParseStream) = RedTreeCursor(
-    GreenTreeCursor(stream), stream.next_byte - UInt32(1))
+    GreenTreeCursor(stream), stream.next_byte - 1)
 
 function prev_sibling_assumed(cursor::RedTreeCursor)
     prevgreen = prev_sibling_assumed(cursor.green)
     if prevgreen === nothing
         return nothing
     end
-    return RedTreeCursor(prevgreen, cursor.byte_end - span(cursor))
+    return RedTreeCursor(prevgreen, cursor.byte_end - Int(span(cursor)))
 end
 
 
 Base.reverse(node::RedTreeCursor) = Base.Iterators.Reverse(node)
 Base.IteratorSize(::Type{Reverse{RedTreeCursor}}) = Base.SizeUnknown()
-@inline function Base.iterate(node::Reverse{RedTreeCursor})::Union{Nothing, Tuple{RedTreeCursor, NTuple{3, UInt32}}}
+@inline function Base.iterate(node::Reverse{RedTreeCursor})::Union{Nothing, Tuple{RedTreeCursor, Tuple{Int, UInt32, UInt32}}}
     r = iterate(Reverse(node.itr.green))
     return _iterate_red_cursor(r, node.itr.byte_end)
 end
 
-@inline function Base.iterate(node::Reverse{RedTreeCursor}, state::NTuple{3, UInt32})::Union{Nothing, Tuple{RedTreeCursor, NTuple{3, UInt32}}}
+@inline function Base.iterate(node::Reverse{RedTreeCursor}, state::Tuple{Int, UInt32, UInt32})::Union{Nothing, Tuple{RedTreeCursor, Tuple{Int, UInt32, UInt32}}}
     r = iterate(Reverse(node.itr.green), Base.tail(state))
     return _iterate_red_cursor(r, first(state))
 end
@@ -117,13 +117,13 @@ end
     r === nothing && return nothing
     next_node, next_idx = r
     return RedTreeCursor(next_node, byte_end),
-           (byte_end - span(next_node), next_idx...)
+           (byte_end - Int(span(next_node)), next_idx...)
 end
 
 is_leaf(node::RedTreeCursor)     = is_leaf(node.green)
 head(node::RedTreeCursor)        = head(node.green)
 span(node::RedTreeCursor)        = span(node.green)
-byte_range(node::RedTreeCursor)  = (node.byte_end - span(node.green) + UInt32(1)):node.byte_end
+byte_range(node::RedTreeCursor)  = (node.byte_end - Int(span(node.green)) + 1):node.byte_end
 treesize(node::RedTreeCursor)    = treesize(node.green)
 is_non_terminal(node::RedTreeCursor) = is_non_terminal(node.green)
 
@@ -140,12 +140,12 @@ struct TopLevelSiblingIterator{C}
 end
 
 function reverse_toplevel_siblings(cursor::RedTreeCursor)
-    @assert cursor.green.position == length(cursor.green.parser_output)
+    @assert cursor.green.position == length(cursor.green.parser_output)-1
     TopLevelSiblingIterator(cursor)
 end
 
 function reverse_toplevel_siblings(cursor::GreenTreeCursor)
-    @assert cursor.position == length(cursor.parser_output)
+    @assert cursor.position == length(cursor.parser_output)-1
     TopLevelSiblingIterator(cursor)
 end
 
@@ -163,10 +163,10 @@ end
 @inline function Base.iterate(f::Iterators.Filter{<:Any, Iterators.Reverse{T}}, state...) where {T<:Union{RedTreeCursor, GreenTreeCursor}}
     y = iterate(f.itr, state...)
     while y !== nothing
-        if f.flt(y[1])
+        if f.flt(y[0])
             return y
         end
-        y = iterate(f.itr, y[2])
+        y = iterate(f.itr, y[1])
     end
     nothing
 end

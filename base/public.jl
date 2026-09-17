@@ -11,6 +11,7 @@ public
 # Types
     AbstractLock,
     AbstractOneTo,
+    AbstractZeroTo,
     AbstractPipe,
     AsyncCondition,
     CodeUnits,
@@ -21,6 +22,7 @@ public
     Generator,
     ImmutableDict,
     OneTo,
+    ZeroTo,
     Pairs,
     LogRange,
     UUID,
@@ -34,6 +36,7 @@ public
 # arrays
     has_offset_axes,
     require_one_based_indexing,
+    require_zero_based_indexing,
     memoryindex,
     unsetindex!,
     unsetindex_atomic!,

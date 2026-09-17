@@ -40,7 +40,7 @@ const RangeIndex = Union{<:BitInteger, AbstractRange{<:BitInteger}}
 const DimOrInd = Union{Integer, AbstractUnitRange}
 const IntOrInd = Union{Int, AbstractUnitRange}
 const DimsOrInds{N} = NTuple{N,DimOrInd}
-const NeedsShaping = Union{Tuple{Integer,Vararg{Integer}}, Tuple{OneTo,Vararg{OneTo}}}
+const NeedsShaping = Union{Tuple{Integer,Vararg{Integer}}, Tuple{Union{OneTo,ZeroTo},Vararg{Union{OneTo,ZeroTo}}}}
 
 """
     Array{T,N} <: AbstractArray{T,N}
@@ -135,12 +135,12 @@ end
 function _safeindex(ex)
     isa(ex, Expr) || return ex
     if ex.head === :(=)
-        lhs = ex.args[1]
+        lhs = ex.args[0]
         if isa(lhs, Expr) && lhs.head === :ref # xs[i] = x
-            rhs = ex.args[2]
-            xs = lhs.args[1]
+            rhs = ex.args[1]
+            xs = lhs.args[0]
             args = Vector{Any}(undef, length(lhs.args)-1)
-            for i = 2:length(lhs.args)
+            for i = 1:length(lhs.args)-1
                 args[i-1] = _safeindex(lhs.args[i])
             end
             return Expr(:call, GlobalRef(@__MODULE__, :__safe_setindex!), xs, _safeindex(rhs), args...)
@@ -149,7 +149,7 @@ function _safeindex(ex)
         return Expr(:call, GlobalRef(@__MODULE__, :__safe_getindex), ex.args...)
     end
     args = Vector{Any}(undef, length(ex.args))
-    for i = 1:length(ex.args)
+    for i = 0:length(ex.args)-1
         args[i] = _safeindex(ex.args[i])
     end
     return Expr(ex.head, args...)
@@ -159,7 +159,7 @@ vect() = Vector{Any}()
 function vect(X::T...) where T
     @_terminates_locally_meta
     vec = Vector{T}(undef, length(X))
-    @_safeindex for i = 1:length(X)
+    @_safeindex for i = 0:length(X)-1
         vec[i] = X[i]
     end
     return vec
@@ -185,7 +185,7 @@ function vect(X...)
     return T[X...]
 end
 
-asize_from(a::Array, n) = n > ndims(a) ? () : (size(a,n), asize_from(a, n+1)...)
+asize_from(a::Array, n) = n >= ndims(a) ? () : (size(a,n), asize_from(a, n+1)...)
 
 allocatedinline(@nospecialize T::Type) = (@_total_meta; ccall(:jl_stored_inline, Cint, (Any,), T) != Cint(0))
 
@@ -266,7 +266,7 @@ end
     unsafe_copyto!(dest::Array, doffs, src::Array, soffs, n)
 
 Copy `n` elements from a source array to a destination, starting at the linear index `soffs` in the
-source and `doffs` in the destination (1-indexed).
+source and `doffs` in the destination (zero-indexed).
 
 The `unsafe` prefix on this function indicates that no validation is performed to ensure
 that n is inbounds on either array. Incorrect usage may corrupt or segfault your program, in
@@ -300,9 +300,9 @@ function _copyto_impl!(dest::Union{Array,Memory}, doffs::Integer, src::Union{Arr
     n == 0 && return dest
     n > 0 || _throw_argerror("Number of elements to copy must be non-negative.")
     @boundscheck checkbounds(dest, doffs)
-    @boundscheck n <= length(dest) - doffs + 1 || throw(BoundsError(dest, length(dest) + 1))
+    @boundscheck n <= length(dest) - doffs || throw(BoundsError(dest, length(dest)))
     @boundscheck checkbounds(src, soffs)
-    @boundscheck n <= length(src) - soffs + 1 || throw(BoundsError(src, length(src) + 1))
+    @boundscheck n <= length(src) - soffs || throw(BoundsError(src, length(src)))
     doffs = Int(doffs)
     soffs = Int(soffs)
     n = Int(n)
@@ -410,10 +410,10 @@ end
 
 ## Constructors ##
 
-similar(a::Vector{T}) where {T}                    = Vector{T}(undef, size(a,1))
-similar(a::Matrix{T}) where {T}                    = Matrix{T}(undef, size(a,1), size(a,2))
-similar(a::Vector{T}, S::Type) where {T}           = Vector{S}(undef, size(a,1))
-similar(a::Matrix{T}, S::Type) where {T}           = Matrix{S}(undef, size(a,1), size(a,2))
+similar(a::Vector{T}) where {T}                    = Vector{T}(undef, size(a,0))
+similar(a::Matrix{T}) where {T}                    = Matrix{T}(undef, size(a,0), size(a,1))
+similar(a::Vector{T}, S::Type) where {T}           = Vector{S}(undef, size(a,0))
+similar(a::Matrix{T}, S::Type) where {T}           = Matrix{S}(undef, size(a,0), size(a,1))
 similar(a::Array{T}, m::Int) where {T}              = Vector{T}(undef, m)
 similar(a::Array, T::Type, dims::Dims{N}) where {N} = Array{T,N}(undef, dims)
 similar(a::Array{T}, dims::Dims{N}) where {T,N}     = Array{T,N}(undef, dims)
@@ -446,12 +446,12 @@ function getindex(::Type{T}, vals...) where T
     @_effect_free_terminates_locally_meta
     a = Vector{T}(undef, length(vals))
     if vals isa NTuple
-        @_safeindex for i in 1:length(vals)
+        @_safeindex for i in 0:length(vals)-1
             a[i] = vals[i]
         end
     else
         # use afoldl to avoid type instability inside loop
-        afoldl(1, vals...) do i, v
+        afoldl(0, vals...) do i, v
             @inbounds a[i] = v
             return i + 1
         end
@@ -462,7 +462,7 @@ end
 function getindex(::Type{Any}, @nospecialize vals...)
     @_effect_free_terminates_locally_meta
     a = Vector{Any}(undef, length(vals))
-    @_safeindex for i = 1:length(vals)
+    @_safeindex for i = 0:length(vals)-1
         a[i] = vals[i]
     end
     return a
@@ -767,7 +767,7 @@ julia> [rand(Bool) ? 1 : missing for _ in [""]]
  1
 ```
 """
-collect(itr) = _collect(1:1 #= Array =#, itr, IteratorEltype(itr), IteratorSize(itr))
+collect(itr) = _collect(0:0 #= Array =#, itr, IteratorEltype(itr), IteratorSize(itr))
 
 collect(A::AbstractArray) = _collect_indices(axes(A), A)
 
@@ -789,7 +789,7 @@ function _collect_indices(::Tuple{}, A)
     isempty(A) && return dest
     return copyto_unaliased!(IndexStyle(dest), dest, IndexStyle(A), A)
 end
-function _collect_indices(indsA::Tuple{Vararg{OneTo}}, A)
+function _collect_indices(indsA::Tuple{Vararg{Union{OneTo,ZeroTo}}}, A)
     dest = Array{eltype(A)}(undef, length.(indsA))
     isempty(A) && return dest
     return copyto_unaliased!(IndexStyle(dest), dest, IndexStyle(A), A)
@@ -804,11 +804,11 @@ end
 function _iterator_upper_bound(itr)
     x = iterate(itr)
     while x !== nothing
-        val = getfield(x, 1)
+        val = getfield(x, 0)
         if inferencebarrier(nothing)
             return val
         end
-        x = iterate(itr, getfield(x, 2))
+        x = iterate(itr, getfield(x, 1))
     end
     throw(nothing)
 end
@@ -934,9 +934,9 @@ end
 function grow_to!(dest, itr)
     y = iterate(itr)
     y === nothing && return dest
-    dest2 = empty(dest, typeof(y[1]))
-    push!(dest2, y[1])
-    grow_to!(dest2, itr, y[2])
+    dest2 = empty(dest, typeof(getfield(y, 0)))
+    push!(dest2, getfield(y, 0))
+    grow_to!(dest2, itr, getfield(y, 1))
 end
 
 function push_widen(dest, el)
@@ -1016,7 +1016,7 @@ function getindex(A::Array, c::Colon)
     lI = length(A)
     X = similar(A, lI)
     if lI > 0
-        unsafe_copyto!(X, 1, A, 1, lI)
+        unsafe_copyto!(X, 0, A, 0, lI)
     end
     return X
 end
@@ -1087,7 +1087,7 @@ function setindex!(A::Array, X::AbstractArray, I::AbstractVector{Int})
     require_one_based_indexing(X)
     X′ = unalias(A, X)
     I′ = unalias(A, I)
-    count = 1
+    count = 0
     for i in I′
         @inbounds A[i] = X′[count]
         count += 1
@@ -1102,7 +1102,7 @@ function setindex!(A::Array{T}, X::Array{T}, I::AbstractUnitRange{Int}) where T
     lI = length(I)
     @boundscheck setindex_shape_check(X, lI)
     if lI > 0
-        unsafe_copyto!(A, first(I), X, 1, lI)
+        unsafe_copyto!(A, first(I), X, 0, lI)
     end
     return A
 end
@@ -1111,7 +1111,7 @@ function setindex!(A::Array{T}, X::Array{T}, c::Colon) where T
     lI = length(A)
     @boundscheck setindex_shape_check(X, lI)
     if lI > 0
-        unsafe_copyto!(A, 1, X, 1, lI)
+        unsafe_copyto!(A, 0, X, 0, lI)
     end
     return A
 end
@@ -1141,19 +1141,19 @@ function _growbeg_internal!(a::Vector, delta::Int, len::Int)
     offset = memoryrefoffset(ref)
     newlen = checked_add(len, delta)
     memlen = length(mem)
-    if offset < 1 || offset - 1 > memlen || len > memlen - (offset - 1)
+    if offset < 0 || offset > memlen || len > memlen - offset
         throw(ConcurrencyViolationError("Vector has invalid state. Don't modify internal fields incorrectly, or resize without correct locks"))
     end
     # since we will allocate the array in the middle of the memory we need at least 2*delta extra space
     # the +1 is because I didn't want to have an off by 1 error.
-    newmemlen = max(overallocation(len), checked_add(len, checked_mul(2, delta), 1))
-    newoffset = div(newmemlen - newlen, 2) + 1
+    newmemlen = max(overallocation(len), checked_add(len, checked_mul(2, delta)))
+    newoffset = div(newmemlen - newlen, 2)
     # If there is extra data after the end of the array we can use that space so long as there is enough
     # space at the end that there won't be quadratic behavior with a mix of growth from both ends.
     # Specifically, we want to ensure that we will only do this operation once before
     # increasing the size of the array, and that we leave enough space at both the beginning and the end.
     if newlen < memlen && newoffset < memlen - newlen
-        newoffset = div(memlen - newlen, 2) + 1
+        newoffset = div(memlen - newlen, 2)
         newmem = mem
         unsafe_copyto!(newmem, newoffset + delta, mem, offset, len)
         for j in offset:newoffset+delta-1
@@ -1179,8 +1179,8 @@ function _growbeg!(a::Vector, delta::Integer)
     offset = memoryrefoffset(ref)
     newlen = checked_add(len, delta)
     # if offset is far enough advanced to fit data in existing memory without copying
-    if delta <= offset - 1
-        setfield!(a, :ref, @inbounds memoryref(ref, 1 - delta))
+    if delta <= offset
+        setfield!(a, :ref, @inbounds memoryref(ref, -delta))
         setfield!(a, :size, (newlen,))
     else
         @noinline _growbeg_internal!(a, delta, len)
@@ -1195,18 +1195,18 @@ function _growend_internal!(a::Vector, delta::Int, len::Int)
     memlen = length(mem)
     newlen = checked_add(len, delta)
     offset = memoryrefoffset(ref)
-    if offset < 1 || offset - 1 > memlen || len > memlen - (offset - 1)
+    if offset < 0 || offset > memlen || len > memlen - offset
         throw(ConcurrencyViolationError("Vector has invalid state. Don't modify internal fields incorrectly, or resize without correct locks"))
     end
-    newmemlen = checked_add(offset - 1, newlen)
+    newmemlen = checked_add(offset, newlen)
 
-    if offset - 1 > newlen && offset - 1 - newlen > div(newlen, 4)
+    if offset > newlen && offset - newlen > div(newlen, 4)
         # If the offset is far enough that we can copy without resizing
         # while maintaining proportional spacing on both ends of the array
         # note that this branch prevents infinite growth when doing combinations
         # of push! and popfirst! (i.e. when using a Vector as a queue)
         newmem = mem
-        newoffset = div(newlen, 8) + 1
+        newoffset = div(newlen, 8)
     else
         # grow either by our computed overallocation factor
         # or exactly the requested size, whichever is larger
@@ -1234,7 +1234,7 @@ function _growend!(a::Vector, delta::Integer)
     len = length(a)
     newlen = checked_add(len, delta)
     offset = memoryrefoffset(ref)
-    newmemlen = checked_add(offset - 1, newlen)
+    newmemlen = checked_add(offset, newlen)
     if memlen < newmemlen
         @noinline _growend_internal!(a, delta, len)
     end
@@ -1246,22 +1246,22 @@ function _growat!(a::Vector, i::Integer, delta::Integer)
     @_terminates_globally_noub_meta
     delta = Int(delta)
     i = Int(i)
-    i == 1 && return _growbeg!(a, delta)
+    i == 0 && return _growbeg!(a, delta)
     len = length(a)
-    len < typemax(Int) && i == len + 1 && return _growend!(a, delta)
+    len < typemax(Int) && i == len && return _growend!(a, delta)
     delta >= 0 || throw(ArgumentError("grow requires delta >= 0"))
-    1 < i <= len || throw(BoundsError(a, i))
+    0 < i < len || throw(BoundsError(a, i))
     ref = a.ref
     mem = ref.mem
     memlen = length(mem)
     newlen = checked_add(len, delta)
     offset = memoryrefoffset(ref)
-    newmemlen = checked_add(offset - 1, newlen)
+    newmemlen = checked_add(offset, newlen)
 
     # which side would we rather grow into?
     prefer_start = i <= div(len, 2)
     # if offset is far enough advanced to fit data in beginning of the memory
-    if prefer_start && delta <= offset - 1
+    if prefer_start && delta <= offset
         newref = @inbounds memoryref(mem, offset - delta)
         unsafe_copyto!(newref, ref, i)
         setfield!(a, :ref, newref)
@@ -1270,7 +1270,7 @@ function _growat!(a::Vector, i::Integer, delta::Integer)
             @inbounds unsetindex!(a, j)
         end
     elseif !prefer_start && memlen >= newmemlen
-        unsafe_copyto!(mem, offset - 1 + delta + i, mem, offset - 1 + i, len - i + 1)
+        unsafe_copyto!(mem, offset + delta + i, mem, offset + i, len - i)
         setfield!(a, :size, (newlen,))
         for j in i:i+delta-1
             @inbounds unsetindex!(a, j)
@@ -1278,12 +1278,12 @@ function _growat!(a::Vector, i::Integer, delta::Integer)
     else
         # since we will allocate the array in the middle of the memory we need at least 2*delta extra space
         # the +1 is because I didn't want to have an off by 1 error.
-        newmemlen = max(overallocation(memlen), checked_add(len, checked_mul(2, delta), 1))
-        newoffset = (newmemlen - newlen) ÷ 2 + 1
+        newmemlen = max(overallocation(memlen), checked_add(len, checked_mul(2, delta)))
+        newoffset = (newmemlen - newlen) ÷ 2
         newmem = array_new_memory(mem, newmemlen)
         newref = @inbounds memoryref(newmem, newoffset)
-        unsafe_copyto!(newref, ref, i-1)
-        unsafe_copyto!(newmem, newoffset + delta + i - 1, mem, offset + i - 1, len - i + 1)
+        unsafe_copyto!(newref, ref, i)
+        unsafe_copyto!(newmem, newoffset + delta + i, mem, offset + i, len - i)
         setfield!(a, :ref, newref)
         setfield!(a, :size, (newlen,))
     end
@@ -1297,13 +1297,13 @@ function _deletebeg!(a::Vector, delta::Integer)
     if unsigned(delta) > unsigned(len)
         throw(ArgumentError("_deletebeg! requires delta in 0:length(a)"))
     end
-    for i in 1:delta
+    for i in 0:delta-1
         @inbounds unsetindex!(a, i)
     end
     newlen = len - delta
     setfield!(a, :size, (newlen,))
     if newlen != 0 # if newlen==0 we could accidentally index past the memory
-        newref = @inbounds memoryref(a.ref, delta + 1)
+        newref = @inbounds memoryref(a.ref, delta)
         setfield!(a, :ref, newref)
     end
     return
@@ -1318,7 +1318,7 @@ function _deleteend!(a::Vector, delta::Integer)
         throw(ArgumentError("_deleteend! requires delta in 0:length(a)"))
     end
     newlen = len - delta
-    for i in newlen+1:len
+    for i in newlen:len-1
         @inbounds unsetindex!(a, i)
     end
     setfield!(a, :size, (newlen,))
@@ -1328,14 +1328,14 @@ function _deleteat!(a::Vector, i::Integer, delta::Integer)
     i = Int(i)
     len = length(a)
     0 <= delta || throw(ArgumentError("_deleteat! requires delta >= 0"))
-    1 <= i <= len || throw(BoundsError(a, i))
-    i + delta <= len + 1 || throw(BoundsError(a, i + delta - 1))
+    0 <= i < len || throw(BoundsError(a, i))
+    i + delta <= len || throw(BoundsError(a, i + delta - 1))
     newa = a
     if 2*i + delta <= len
-        unsafe_copyto!(newa, 1 + delta, a, 1, i - 1)
+        unsafe_copyto!(newa, delta, a, 0, i)
         _deletebeg!(a, delta)
     else
-        unsafe_copyto!(newa, i, a, i + delta, len + 1 - delta - i)
+        unsafe_copyto!(newa, i, a, i + delta, len - delta - i)
         _deleteend!(a, delta)
     end
     return
@@ -1380,14 +1380,14 @@ function push!(a::Vector{T}, item) where T
 end
 function _push!(a::Vector{T}, item::T) where T
     _growend!(a, 1)
-    @_safeindex a[length(a)] = item
+    @_safeindex a[length(a)-1] = item
     return a
 end
 
 # specialize and optimize the single argument case
 function push!(a::Vector{Any}, @nospecialize x)
     _growend!(a, 1)
-    @_safeindex a[length(a)] = x
+    @_safeindex a[length(a)-1] = x
     return a
 end
 function push!(a::Vector{Any}, @nospecialize x...)
@@ -1395,7 +1395,7 @@ function push!(a::Vector{Any}, @nospecialize x...)
     na = length(a)
     nx = length(x)
     _growend!(a, nx)
-    @_safeindex for i = 1:nx
+    @_safeindex for i = 0:nx-1
         a[na+i] = x[i]
     end
     return a
@@ -1443,7 +1443,7 @@ function append!(a::Vector{T}, items::Union{AbstractVector{<:T},Tuple}) where T
     items isa Tuple && (items = map(x -> convert(T, x), items))
     n = Int(length(items))::Int
     _growend!(a, n)
-    copyto!(a, length(a)-n+1, items, firstindex(items), n)
+    copyto!(a, length(a)-n, items, firstindex(items), n)
     return a
 end
 
@@ -1503,7 +1503,7 @@ function prepend!(a::Vector{T}, items::Union{AbstractVector{<:T},Tuple}) where T
     _growbeg!(a, n)
     # in case of aliasing, the _growbeg might have shifted our data, so copy
     # just the last n elements instead of all of them from the first
-    copyto!(a, 1, items, lastindex(items)-n+1, n)
+    copyto!(a, 0, items, lastindex(items)-n+1, n)
     return a
 end
 
@@ -1513,7 +1513,7 @@ prepend!(a::AbstractVector, iter...) = (for v = reverse(iter); prepend!(a, v); e
 
 function _prepend!(a::Vector, ::Union{HasLength,HasShape}, iter)
     @_terminates_locally_meta
-    require_one_based_indexing(a)
+
     n = Int(length(iter))::Int
     sizehint!(a, length(a) + n; first=true, shrink=false)
     n = 0
@@ -1521,7 +1521,7 @@ function _prepend!(a::Vector, ::Union{HasLength,HasShape}, iter)
         n += 1
         pushfirst!(a, item)
     end
-    reverse!(a, 1, n)
+    reverse!(a, 0, n-1)
     a
 end
 function _prepend!(a::Vector, ::IteratorSize, iter)
@@ -1530,7 +1530,7 @@ function _prepend!(a::Vector, ::IteratorSize, iter)
         n += 1
         pushfirst!(a, item)
     end
-    reverse!(a, 1, n)
+    reverse!(a, 0, n-1)
     a
 end
 
@@ -1631,7 +1631,7 @@ function sizehint!(a::Vector, sz::Integer; first::Bool=false, shrink::Bool=true)
         end
         newmem = array_new_memory(mem, sz)
         if first
-            newref = memoryref(newmem, inc + 1)
+            newref = memoryref(newmem, inc)
         else
             newref = memoryref(newmem)
         end
@@ -1640,7 +1640,7 @@ function sizehint!(a::Vector, sz::Integer; first::Bool=false, shrink::Bool=true)
     elseif first
         _growbeg!(a, inc)
         newref = getfield(a, :ref)
-        newref = memoryref(newref, inc + 1)
+        newref = memoryref(newref, inc)
         setfield!(a, :size, (len,)) # undo the size change from _growbeg!
         setfield!(a, :ref, newref) # undo the offset change from _growbeg!
     else # last
@@ -1749,7 +1749,7 @@ function popat!(a::Vector, i::Integer)
 end
 
 function popat!(a::Vector, i::Integer, default)
-    if 1 <= i <= length(a)
+    if 0 <= i < length(a)
         x = @inbounds a[i]
         _deleteat!(a, i, 1)
         x
@@ -1784,21 +1784,21 @@ function pushfirst!(a::Vector{T}, item) where T
 end
 function _pushfirst!(a::Vector{T}, item::T) where T
     _growbeg!(a, 1)
-    @_safeindex a[1] = item
+    @_safeindex a[0] = item
     return a
 end
 
 # specialize and optimize the single argument case
 function pushfirst!(a::Vector{Any}, @nospecialize x)
     _growbeg!(a, 1)
-    @_safeindex a[1] = x
+    @_safeindex a[0] = x
     return a
 end
 function pushfirst!(a::Vector{Any}, @nospecialize x...)
     @_terminates_locally_meta
     nx = length(x)
     _growbeg!(a, nx)
-    @_safeindex for i = 1:nx
+    @_safeindex for i = 0:nx-1
         a[i] = x[i]
     end
     return a
@@ -1840,7 +1840,7 @@ function popfirst!(a::Vector)
     if isempty(a)
         _throw_argerror("array must be non-empty")
     end
-    item = a[1]
+    item = a[0]
     _deletebeg!(a, 1)
     return item
 end
@@ -1946,7 +1946,7 @@ Stacktrace:
 ```
 """
 deleteat!(a::Vector, inds) = _deleteat!(a, inds)
-deleteat!(a::Vector, inds::AbstractVector) = _deleteat!(a, to_indices(a, (inds,))[1])
+deleteat!(a::Vector, inds::AbstractVector) = _deleteat!(a, to_indices(a, (inds,))[0])
 
 struct Nowhere; end
 push!(::Nowhere, _) = nothing
@@ -1982,7 +1982,7 @@ function _deleteat!(a::Vector, inds, dltd=Nowhere())
         y = iterate(inds, s)
         y === nothing && break
         (i,s) = y
-        if !(q <= i <= n)
+        if !(q <= i < n)
             if i < q
                 _throw_argerror("indices must be unique and sorted")
             else
@@ -1996,11 +1996,11 @@ function _deleteat!(a::Vector, inds, dltd=Nowhere())
         @inbounds _push_deleted!(dltd, a, i)
         q = i+1
     end
-    while q <= n
+    while q < n
         @inbounds _copy_item!(a, p, q)
         p += 1; q += 1
     end
-    _deleteend!(a, n-p+1)
+    _deleteend!(a, n-p)
     return a
 end
 
@@ -2008,12 +2008,12 @@ end
 function deleteat!(a::Vector, inds::AbstractVector{Bool})
     n = length(a)
     length(inds) == n || throw(BoundsError(a, inds))
-    p = 1
+    p = 0
     for (q, i) in enumerate(inds)
         @inbounds _copy_item!(a, p, q)
         p += !i
     end
-    _deleteend!(a, n-p+1)
+    _deleteend!(a, n-p)
     return a
 end
 
@@ -2079,9 +2079,9 @@ function splice!(a::Vector, i::Integer, ins=_default_splice)
         a[i] = only(ins)
     else
         _growat!(a, i, m-1)
-        k = 1
+        k = 0
         for x in ins
-            a[i+k-1] = x
+            a[i+k] = x
             k += 1
         end
     end
@@ -2140,14 +2140,14 @@ function splice!(a::Vector, r::AbstractUnitRange{<:Integer}, ins=_default_splice
 
     if m < d
         delta = d - m
-        _deleteat!(a, (f - 1 < n - l) ? f : (l - delta + 1), delta)
+        _deleteat!(a, (f < n - l - 1) ? f : (l - delta + 1), delta)
     elseif m > d
-        _growat!(a, (f - 1 < n - l) ? f : (l + 1), m - d)
+        _growat!(a, (f < n - l - 1) ? f : (l + 1), m - d)
     end
 
-    k = 1
+    k = 0
     for x in ins
-        a[f+k-1] = x
+        a[f+k] = x
         k += 1
     end
     return v
@@ -2275,7 +2275,7 @@ for (f,_f) in ((:reverse,:_reverse), (:reverse!,:_reverse!))
         $_f(A::AbstractVector, ::Colon) = $f(A, firstindex(A), lastindex(A))
         $_f(A::AbstractVector, dim::Tuple{Integer}) = $_f(A, first(dim))
         function $_f(A::AbstractVector, dim::Integer)
-            dim == 1 || _throw_argerror(LazyString("invalid dimension ", dim, " ≠ 1"))
+            dim == 0 || _throw_argerror(LazyString("invalid dimension ", dim, " ≠ 0"))
             return $_f(A, :)
         end
     end
@@ -2341,15 +2341,15 @@ vcat() = Vector{Any}()
 hcat() = Vector{Any}()
 
 function hcat(V::Vector{T}...) where T
-    height = length(V[1])
-    for j = 2:length(V)
+    height = length(V[0])
+    for j = 1:length(V)-1
         if length(V[j]) != height
             throw(DimensionMismatch("vectors must have same lengths"))
         end
     end
-    return [ V[j][i]::T for i=1:length(V[1]), j=1:length(V) ]
+    return [ V[j][i]::T for i=0:length(V[0])-1, j=0:length(V)-1 ]
 end
-hcat(A::Vector...) = cat(A...; dims=Val(2)) # more special than SparseArrays's hcat
+hcat(A::Vector...) = cat(A...; dims=Val(1)) # more special than SparseArrays's hcat
 
 function vcat(arrays::Vector{T}...) where T
     n = 0
@@ -2357,16 +2357,16 @@ function vcat(arrays::Vector{T}...) where T
         n += length(a)
     end
     arr = Vector{T}(undef, n)
-    nd = 1
+    nd = 0
     for a in arrays
         na = length(a)
-        @assert nd + na <= 1 + length(arr) "Concurrent modification of arrays?"
-        unsafe_copyto!(arr, nd, a, 1, na)
+        @assert nd + na <= length(arr) "Concurrent modification of arrays?"
+        unsafe_copyto!(arr, nd, a, 0, na)
         nd += na
     end
     return arr
 end
-vcat(A::Vector...) = cat(A...; dims=Val(1)) # more special than SparseArrays's vcat
+vcat(A::Vector...) = cat(A...; dims=Val(0)) # more special than SparseArrays's vcat
 
 _cat(n::Integer, x::Integer...) = reshape([x...], (ntuple(Returns(1), n-1)..., length(x)))
 
@@ -2535,10 +2535,10 @@ findfirst(testf::Function, A::Union{AbstractArray, AbstractString}) =
     findnext(testf, A, first(keys(A)))
 
 findfirst(p::Union{Fix2{typeof(isequal),T},Fix2{typeof(==),T}}, r::OneTo) where {T<:Integer} =
-    1 <= p.x <= r.stop ? convert(keytype(r), p.x) : nothing
+    1 <= p.x <= r.stop ? convert(keytype(r), p.x - oneunit(p.x)) : nothing
 
 findfirst(::typeof(iszero), ::OneTo) = nothing
-findfirst(::typeof(isone), r::OneTo) = isempty(r) ? nothing : oneunit(keytype(r))
+findfirst(::typeof(isone), r::OneTo) = isempty(r) ? nothing : zero(keytype(r))
 
 function findfirst(p::Union{Fix2{typeof(isequal),T},Fix2{typeof(==),T}}, r::AbstractUnitRange{<:Integer}) where {T<:Integer}
     first(r) <= p.x <= last(r) || return nothing
@@ -2551,7 +2551,7 @@ function findfirst(p::Union{Fix2{typeof(isequal),T},Fix2{typeof(==),T}}, r::Step
     minimum(r) <= p.x <= maximum(r) || return nothing
     d = p.x - first(r)
     iszero(d % step(r)) || return nothing
-    return convert(keytype(r), d ÷ step(r) + 1)
+    return convert(keytype(r), d ÷ step(r))
 end
 
 findfirst(::typeof(iszero), r::AbstractRange) = findfirst(==(zero(first(r))), r)
@@ -2846,7 +2846,7 @@ end
 function findall(A::AbstractArray{Bool})
     n = count(A)
     I = Vector{eltype(keys(A))}(undef, n)
-    cnt = 1
+    cnt = 0
     for (i,a) in pairs(A)
         if a
             I[cnt] = i
@@ -2856,9 +2856,9 @@ function findall(A::AbstractArray{Bool})
     I
 end
 
-findall(x::Bool) = x ? [1] : Vector{Int}()
-findall(testf::Function, x::Number) = testf(x) ? [1] : Vector{Int}()
-findall(p::Fix2{typeof(in)}, x::Number) = x in p.x ? [1] : Vector{Int}()
+findall(x::Bool) = x ? [0] : Vector{Int}()
+findall(testf::Function, x::Number) = testf(x) ? [0] : Vector{Int}()
+findall(p::Fix2{typeof(in)}, x::Number) = x in p.x ? [0] : Vector{Int}()
 
 # similar to Matlab's ismember
 """
@@ -2972,24 +2972,24 @@ findall(pred::Fix2{typeof(in)}, x::Tuple) = _findin(x, pred.x)
 # Copying subregions
 function indcopy(sz::Dims, I::Vector)
     n = length(I)
-    s = sz[n]
-    for i = n+1:length(sz)
-        s *= sz[i]
+    s = getfield(sz, n-1)
+    for i = n:length(sz)-1
+        s *= getfield(sz, i)
     end
-    dst = eltype(I)[_findin(I[i], i < n ? (1:sz[i]) : (1:s)) for i = 1:n]
-    src = eltype(I)[I[i][_findin(I[i], i < n ? (1:sz[i]) : (1:s))] for i = 1:n]
+    dst = eltype(I)[_findin(I[i], i < n ? (0:sz[i]-1) : (0:s-1)) for i = 0:n-1]
+    src = eltype(I)[I[i][_findin(I[i], i < n ? (0:sz[i]-1) : (0:s-1))] for i = 0:n-1]
     dst, src
 end
 
 function indcopy(sz::Dims, I::Tuple{Vararg{RangeIndex}})
     n = length(I)
-    _s = sz[n]
-    for i = n+1:length(sz)
-        _s *= sz[i]
+    _s = getfield(sz, n-1)
+    for i = n:length(sz)-1
+        _s *= getfield(sz, i)
     end
     s = _s
-    dst::typeof(I) = ntuple(i-> _findin(I[i], i < n ? (1:sz[i]) : (1:s)), n)::typeof(I)
-    src::typeof(I) = ntuple(i-> I[i][_findin(I[i], i < n ? (1:sz[i]) : (1:s))], n)::typeof(I)
+    dst::typeof(I) = ntuple(i-> _findin(I[i], i < n ? (0:sz[i]-1) : (0:s-1)), n)::typeof(I)
+    src::typeof(I) = ntuple(i-> I[i][_findin(I[i], i < n ? (0:sz[i]-1) : (0:s-1))], n)::typeof(I)
     dst, src
 end
 
@@ -3021,13 +3021,13 @@ julia> filter(isodd, a)
 ```
 """
 function filter(f, a::Array{T, N}) where {T, N}
-    j = 1
+    j = 0
     b = Vector{T}(undef, length(a))
     for ai in a
         @inbounds b[j] = ai
         j = ifelse(f(ai)::Bool, j+1, j)
     end
-    resize!(b, j-1)
+    resize!(b, j)
     sizehint!(b, length(b))
     b
 end
@@ -3035,14 +3035,14 @@ end
 function filter(f, a::AbstractArray)
     (IndexStyle(a) != IndexLinear()) && return a[map(f, a)::AbstractArray{Bool}]
 
-    j = 1
+    j = 0
     idxs = Vector{Int}(undef, length(a))
     for idx in eachindex(a)
         @inbounds idxs[j] = idx
         ai = @inbounds a[idx]
         j = ifelse(f(ai)::Bool, j+1, j)
     end
-    resize!(idxs, j-1)
+    resize!(idxs, j)
     res = a[idxs]
     empty!(idxs)
     sizehint!(idxs, 0)
@@ -3074,8 +3074,8 @@ function filter!(f, a::AbstractVector)
     end
     j > lastindex(a) && return a
     if a isa Vector
-        resize!(a, j-1)
-        sizehint!(a, j-1)
+        resize!(a, j)
+        sizehint!(a, j)
     else
         deleteat!(a, j:lastindex(a))
     end
@@ -3243,7 +3243,7 @@ function wrap end
 # validity checking for _wrap calls, separate from allocation of Array so that it can be more likely to inline into the caller
 function _wrap(ref::MemoryRef{T}, dims::NTuple{N, Int}) where {T, N}
     mem = ref.mem
-    mem_len = length(mem) + 1 - memoryrefoffset(ref)
+    mem_len = length(mem) - memoryrefoffset(ref)
     len = Core.checked_dims(dims...)
     @boundscheck mem_len >= len || invalid_wrap_err(mem_len, dims, len)
     return ref

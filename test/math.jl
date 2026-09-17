@@ -1902,3 +1902,40 @@ end
 @testset "Docstrings" begin
     @test isempty(Docs.undocumented_names(MathConstants))
 end
+
+# Exercise every exponential table bucket and compare against independent MPFR evaluation.
+@testset "zero-origin exponential tables" begin
+    for i in 0:255
+        hi, lo = Base.Math.table_unpack(Int32(i))
+        @test isapprox(hi + lo, Float64(exp2(BigFloat(i)/256)); rtol=2eps(Float64))
+    end
+    for T in (Float32, Float64), x in T.((-700, -20, -1, -0.25, -0.01, 0, 0.01, 0.2, 1, 20, 700))
+        for f in (exp, exp2, exp10, expm1)
+            @test isapprox(f(x), T(f(BigFloat(x))); rtol=4eps(T), atol=zero(T))
+        end
+    end
+end
+
+# Tuple and vector coefficients have degree-zero at index zero, including complex evaluation.
+@testset "zero-origin polynomial coefficients" begin
+    for n in 1:12, x in (2, 2.0, 2+im), as_tuple in (false,true)
+        p = collect(1:n)
+        coeffs = as_tuple ? Tuple(p) : p
+        expected = sum(p[i] * x^i for i in eachindex(p))
+        @test evalpoly(x, coeffs) == expected
+    end
+end
+
+# Logarithm tables cover mantissa buckets and power reduction independently of libm approximations.
+@testset "zero-origin logarithm tables" begin
+    for T in (Float32,Float64), x in T.((0.001, 0.1, 0.5, 1, 1.5, 1.99, 2, 10, 1000))
+        for f in (log,log2,log10,log1p)
+            @test isapprox(f(x), T(f(BigFloat(x))); rtol=4eps(T), atol=zero(T))
+        end
+        @test isapprox(x^T(1.3), T(BigFloat(x)^BigFloat(T(1.3))); rtol=4eps(T))
+    end
+    for i in 0:128
+        x=1.0+i/128
+        @test isapprox(log(x), Float64(log(BigFloat(x))); rtol=2eps(Float64))
+    end
+end

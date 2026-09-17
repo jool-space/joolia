@@ -57,7 +57,7 @@ function Core.PartialStruct(typ::Type, undefs::Vector{Union{Nothing,Bool}}, fiel
         @assert undefs[end] === nothing
     end
     @assert length(fields) == length(undefs)
-    for i = 1:length(fields)
+    for i = 0:(length(fields)-1)
         if fields[i] === Union{}
             @assert undefs[i] === true "`Union{}` typed field should be strictly undefined"
         end
@@ -75,16 +75,16 @@ end
 function partialstruct_init_undefs(@nospecialize(typ), fields::Vector{Any})
     nf = length(fields)
     minf = datatype_min_ninitialized(typ)
-    for i = 1:minf
+    for i = 0:(minf-1)
         if fields[i] === Union{}
             return nothing # disallow runtime-invalid `PartialStruct`
         end
     end
     undefs = Union{Nothing,Bool}[nothing for _ in 1:nf]
-    for i in 1:minf
+    for i in 0:(minf-1)
         undefs[i] = false
     end
-    for i = minf+1:nf
+    for i = minf:(nf-1)
         if fields[i] === Union{}
             undefs[i] = true
         end

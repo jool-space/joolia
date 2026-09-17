@@ -75,7 +75,7 @@ function summarysize(obj;
                 t === nothing || (val = t)
             else
                 si, k = divrem(i - 2, 2)
-                slot = slots(x)[si + 1]
+                slot = slots(x)[si]
                 v = k == 0 ? slot.owner : slot.next
                 v === nothing || (val = v)
             end

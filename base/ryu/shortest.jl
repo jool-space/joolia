@@ -232,7 +232,7 @@ function writeshortest(buf::AbstractVector{UInt8}, pos, x::T,
     pos = Int(pos)
     precision = Int(precision)
     precision >= -1 || throw(ArgumentError("precision must be at least -1"))
-    @assert 0 < pos <= length(buf) "invalid pos"
+    @assert 0 <= pos < length(buf) "invalid pos"
     # special cases
     if x == 0
         if typed && x isa Float16
@@ -384,7 +384,7 @@ function writeshortest(buf::AbstractVector{UInt8}, pos, x::T,
             buf_cconv = Base.cconvert(Ptr{UInt8}, buf)
             GC.@preserve buf_cconv begin
                 ptr = Base.unsafe_convert(Ptr{UInt8}, buf_cconv)
-                memmove(ptr + pos + pointoff, ptr + pos + pointoff - 1, (olength - pointoff)%Csize_t)
+                memmove(ptr + pos + pointoff + 1, ptr + pos + pointoff, (olength - pointoff)%Csize_t)
             end
             @inbounds buf[pos + pointoff] = decchar
             pos += olength + 1
@@ -436,13 +436,13 @@ function writeshortest(buf::AbstractVector{UInt8}, pos, x::T,
 
         if exp2 >= 100
             c = exp2 % 10
-            @inbounds d100 = DIGIT_TABLE16[(div(exp2, 10) % Int) + 1]
+            @inbounds d100 = DIGIT_TABLE16[div(exp2, 10) % Int]
             @inbounds buf[pos] = d100 % UInt8
             @inbounds buf[pos + 1] = (d100 >> 0x8) % UInt8
             @inbounds buf[pos + 2] = UInt8('0') + (c % UInt8)
             pos += 3
         elseif exp2 >= 10
-            @inbounds d100 = DIGIT_TABLE16[(exp2 % Int) + 1]
+            @inbounds d100 = DIGIT_TABLE16[exp2 % Int]
             @inbounds buf[pos] = d100 % UInt8
             @inbounds buf[pos + 1] = (d100 >> 0x8) % UInt8
             pos += 2

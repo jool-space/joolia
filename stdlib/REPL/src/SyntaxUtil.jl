@@ -23,7 +23,7 @@ end
 const CursorNode = TreeNode{CursorData}
 
 function CursorNode(source::SourceFile, raw::GreenNode{SyntaxHead};
-                    position::Integer=1)
+                    position::Integer=0)
     GC.@preserve source begin
         raw_offset, txtbuf = _unsafe_wrap_substring(source.code)
         offset = raw_offset - source.byte_offset
@@ -41,7 +41,7 @@ function _to_CursorNode(source::SourceFile, txtbuf::Vector{UInt8}, offset::Int,
     else
         cs = CursorNode[]
         pos = position
-        i_nt = 1
+        i_nt = 0
         for (i,rawchild) in enumerate(children(raw))
             push!(cs, _to_CursorNode(source, txtbuf, offset, rawchild, pos, i, i_nt))
             pos += Int(rawchild.span)

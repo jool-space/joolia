@@ -74,15 +74,15 @@ const longDecodedText = "name = \"Genie\"\nuuid = \"c43c736e-a2d1-11e8-161f-af95
     @test read(ipipe, String) == inputText
 
     # Decode with max line chars = 76 and no padding
-    #ipipe = Base64DecodePipe(IOBuffer(encodedMaxLine76[1:end-1]))
+    #ipipe = Base64DecodePipe(IOBuffer(encodedMaxLine76[0:end-1]))
     #@test read(ipipe, String) == inputText
 
     # Decode with two padding characters ("==")
-    ipipe = Base64DecodePipe(IOBuffer(string(encodedMaxLine76[1:end - 2], "==")))
-    @test read(ipipe, String) == inputText[1:end - 1]
+    ipipe = Base64DecodePipe(IOBuffer(string(encodedMaxLine76[0:end - 2], "==")))
+    @test read(ipipe, String) == inputText[0:end - 1]
 
     # Test incorrect format
-    ipipe = Base64DecodePipe(IOBuffer(encodedMaxLine76[1:end - 3]))
+    ipipe = Base64DecodePipe(IOBuffer(encodedMaxLine76[0:end - 3]))
     @test_throws ArgumentError read(ipipe, String)
 
     # issue #21314
@@ -132,12 +132,12 @@ function splace(in::String, p = 0.3)
     len = length(in)
     len == 0 && return in
     rc::String = ""
-    i = 1
-    for (x, v) in enumerate(sort(randsubseq(collect(1:len), p)))
+    i = firstindex(in)
+    for (x, v) in enumerate(sort(randsubseq(collect(eachindex(in)), p)))
         rc = rc * in[i:v] * rand(spaces)^rand(Int.(1:10))
         i = v + 1
     end
-    return rc * in[i:len] * rand(spaces)^rand(Int.(1:10))
+    return rc * in[i:lastindex(in)] * rand(spaces)^rand(Int.(1:10))
 end
 
 @testset "lstrsplaced" begin
@@ -148,4 +148,40 @@ end
 
 @testset "Docstrings" begin
     @test isempty(Docs.undocumented_names(Base64))
+end
+
+# Zero-origin lookup tables and pipe cursors include empty, byte, and buffer boundaries.
+@testset "zero-origin Base64" begin
+    for (plain, encoded) in (("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"),
+                             ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy"))
+        @test base64encode(plain) == encoded
+        @test String(base64decode(encoded)) == plain
+    end
+    bytes = collect(UInt8(0):UInt8(255))
+    encoded_bytes = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="
+    @test base64encode(bytes) == encoded_bytes
+    @test base64decode(encoded_bytes) == bytes
+    for n in (0, 1, 2, 3, 511, 512, 513, 1025)
+        data = UInt8[i % 256 for i in 0:n-1]
+        encoded = base64encode(data)
+        @test base64decode(encoded) == data
+        out = IOBuffer()
+        pipe = Base64EncodePipe(out)
+        for byte in data
+            write(pipe, byte)
+        end
+        close(pipe)
+        @test String(take!(out)) == encoded
+        pipe = Base64DecodePipe(IOBuffer(encoded))
+        decoded = UInt8[]
+        while !eof(pipe)
+            push!(decoded, read(pipe, UInt8))
+        end
+        @test decoded == data
+        pipe = Base64DecodePipe(IOBuffer(encoded))
+        dest = UInt8[]
+        @test readbytes!(pipe, dest, n) == n
+        @test dest == data
+    end
+    @test String(base64decode(" Z m\n9 v ")) == "foo"
 end

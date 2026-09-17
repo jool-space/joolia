@@ -46,27 +46,27 @@ elseif Sys.iswindows()
         # r"^$(S)$(S)\?$(S)UNC$(S)$(N)+$(S)$(N)+"sa
 
         if (ncodeunits(s) >= 11 &&
+            isseparator(codeunit(s, 0)) &&
             isseparator(codeunit(s, 1)) &&
-            isseparator(codeunit(s, 2)) &&
-            codeunit(s, 3) === UInt8('?') &&
-            isseparator(codeunit(s, 4)) &&
-            codeunit(s, 5) === UInt8('U') &&
-            codeunit(s, 6) === UInt8('N') &&
-            codeunit(s, 7) === UInt8('C') &&
-            isseparator(codeunit(s, 8))
+            codeunit(s, 2) === UInt8('?') &&
+            isseparator(codeunit(s, 3)) &&
+            codeunit(s, 4) === UInt8('U') &&
+            codeunit(s, 5) === UInt8('N') &&
+            codeunit(s, 6) === UInt8('C') &&
+            isseparator(codeunit(s, 7))
         )
             # Ensure we have [sequence of non-separator] - single separator - [sequence of non-separator].
-            # Since the prefix raw"\\?\UNC\" is always 8 codeunits, we start at index 9.
-            i = findnext(isseparator, s, 9)
+            # Since the prefix raw"\\?\UNC\" is always 8 codeunits, we start at index 8.
+            i = findnext(isseparator, s, 8)
             if (!isnothing(i) &&
-                i >= 10 && # implies !isseparator(s[9])
+                i >= 9 && # implies !isseparator(s[8])
                 ncodeunits(s) > i && # Need something after the separator
                 !isseparator(codeunit(s, i+1)) # Consecutive separators does not count
             )
                 # Stop just before next separator if it exists,
                 # otherwise the whole string is a drive
                 j = something(findnext(isseparator, s, i+1), lastindex(s)+1)
-                return s[1:prevind(s, j)], s[j:end]
+                return s[0:prevind(s, j)], s[j:end]
             end
         end
         return "", s
@@ -78,14 +78,14 @@ elseif Sys.iswindows()
         # S = raw"[\\/]"; N = raw"[^\\/]"; drive = "$(N):";
         # r"$(S)$(S)\?$(S)$(drive)"sa
         if (ncodeunits(s) >= 6 &&
+            isseparator(codeunit(s, 0)) &&
             isseparator(codeunit(s, 1)) &&
-            isseparator(codeunit(s, 2)) &&
-            codeunit(s, 3) === UInt8('?') &&
-            isseparator(codeunit(s, 4)) &&
-            !isseparator(codeunit(s, 5)) && # Any ascii char except separators passes as the drive letter
-            codeunit(s, 6) == UInt8(':') # This effectively limits codeunit(s, 5) to ascii
+            codeunit(s, 2) === UInt8('?') &&
+            isseparator(codeunit(s, 3)) &&
+            !isseparator(codeunit(s, 4)) && # Any ascii char except separators passes as the drive letter
+            codeunit(s, 5) == UInt8(':') # This effectively limits codeunit(s, 5) to ascii
         )
-            return s[1:6], s[nextind(s, 6):end]
+            return s[0:5], s[nextind(s, 5):end]
         end
         return "", s
     end
@@ -96,21 +96,21 @@ elseif Sys.iswindows()
         # S = raw"[\\/]"; N = raw"[^\\/]";
         # r"$(S)$(S)$(N)+$(S)$(N)+"sa
         if (ncodeunits(s) >= 5 && # Not shorter than `\\a\b`
-            isseparator(codeunit(s, 1)) &&
-            isseparator(codeunit(s, 2))
+            isseparator(codeunit(s, 0)) &&
+            isseparator(codeunit(s, 1))
         )
             # Ensure we have [sequence of non-separator] - single separator - [sequence of non-separator].
-            # Since the prefix raw"\\" is always 2 codeunits, we start at index 3.
-            i = findnext(isseparator, s, 3)
+            # Since the prefix raw"\\" is always 2 codeunits, we start at index 2.
+            i = findnext(isseparator, s, 2)
             if (!isnothing(i) &&
-                i >= 4 && # implies !isseparator(s[3])
+                i >= 3 && # implies !isseparator(s[2])
                 ncodeunits(s) > i && # Need something after the separator
                 !isseparator(codeunit(s, i+1)) # Consecutive separators does not count
             )
                 # Stop just before next separator if it exists,
                 # otherwise the whole string is a drive
                 j = something(findnext(isseparator, s, i+1), lastindex(s)+1)
-                return s[1:prevind(s, j)], s[j:end]
+                return s[0:prevind(s, j)], s[j:end]
             end
         end
         return "", s
@@ -119,14 +119,14 @@ elseif Sys.iswindows()
     function splitdrive(path::String)::Tuple{String, String}
         if !isempty(path)
             # Fast return if path does not contain a drive
-            if !isseparator(codeunit(path, 1)) && (codeunit(path, 1) < 0x80)
+            if !isseparator(codeunit(path, 0)) && (codeunit(path, 0) < 0x80)
                 # Drive letter, e.g. `C:`
                 # Any ascii char except separators passes as the drive letter
-                colonind = nextind(path, 1)
+                colonind = nextind(path, 0)
                 if checkbounds(Bool, path, colonind) && path[colonind] === ':'
-                    return path[1:colonind], path[colonind+1:end]
+                    return path[0:colonind], path[nextind(path, colonind):end]
                 end
-            elseif ncodeunits(path) >= 2 && isseparator(codeunit(path, 2))
+            elseif ncodeunits(path) >= 2 && isseparator(codeunit(path, 1))
                 # All other drive types must start with two separators
 
                 # Long UNC path, e.g. `\\?\UNC\server\share`
@@ -201,8 +201,8 @@ function isabspath(path::String)
     isempty(path) && return false
     # Paths starting with "/" are considered absolute also on windows
     # This captures e.g. UNC paths, but does not guarantee a valid path.
-    # Also note that isabspath(x) does not imply !isempty(splitdrive(x)[1])
-    isseparator(codeunit(path, 1) ) && return true
+    # Also note that isabspath(x) does not imply !isempty(splitdrive(x)[0])
+    isseparator(codeunit(path, 0) ) && return true
 
     @static if Sys.iswindows()
         # the letter before : in e.g. "C:\" must be a valid drive letter.
@@ -210,10 +210,10 @@ function isabspath(path::String)
         # accepted.
         firstsep = findfirst(isseparator, codeunits(path))
         if (!isnothing(firstsep) &&
-            firstsep >= 3 &&
+            firstsep >= 2 &&
             codeunit(path, firstsep-1) == UInt(':')
         )
-            for b in codeunits(path)[1:firstsep-2]
+            for b in codeunits(path)[0:firstsep-2]
                 !isdriveletter(b) && return false
             end
             return true
@@ -253,9 +253,9 @@ true
 ```
 """
 function isdirpath(path::String)::Bool
-    # Reimplements occursin(r"(?:^|/)\.{0,2}$"sa, splitdrive(path)[2])
+    # Reimplements occursin(r"(?:^|/)\.{0,2}$"sa, splitdrive(path)[1])
 
-    _, after_last_separator = _splitdir_nodrive("", splitdrive(path)[2])
+    _, after_last_separator = _splitdir_nodrive("", splitdrive(path)[1])
     return after_last_separator in ("", ".", "..")
 end
 
@@ -282,7 +282,7 @@ function _splitdir_nodrive(drive::String, path::String)::Tuple{String, String}
 
     isnothing(lastsepind) && return drive, path
 
-    dir = path[1:something(findprev(!isseparator, path, lastsepind), 1)]
+    dir = path[firstindex(path):something(findprev(!isseparator, path, lastsepind), firstindex(path))]
     tail = path[nextind(path, lastsepind):end]
 
     return drive * dir, tail
@@ -305,7 +305,7 @@ julia> dirname("/home/myuser/")
 
 See also [`basename`](@ref).
 """
-dirname(path::AbstractString) = splitdir(path)[1]
+dirname(path::AbstractString) = splitdir(path)[0]
 
 """
     basename(path::AbstractString)::String
@@ -327,7 +327,7 @@ julia> basename("/home/myuser/")
 
 See also [`dirname`](@ref).
 """
-basename(path::AbstractString) = splitdir(path)[2]
+basename(path::AbstractString) = splitdir(path)[1]
 
 """
     splitext(path::AbstractString) -> (path_without_extension::String, extension::String)
@@ -358,7 +358,7 @@ function splitext(path::String)::Tuple{String, String}
             prev = prevind(p, lastdot)
             if checkbounds(Bool, p, prev)
                 if !isseparator(p[prev])
-                    return drive * p[1:prev], p[lastdot:end]
+                    return drive * p[firstindex(p):prev], p[lastdot:end]
                 end
             end
         end
@@ -405,7 +405,7 @@ function splitpath(p::String)
         p = dir
     end
     if !isempty(drive)  # Tack the drive back on to the first element.
-        out[1] = drive*out[1]  # Note that length(out) is always >= 1.
+        out[0] = drive*out[0]  # Note that length(out) is always >= 1.
     end
     return out
 end
@@ -416,8 +416,8 @@ function joinpath(paths::Union{Tuple, AbstractVector})::String
     assertstring(x) = x isa AbstractString || throw(ArgumentError("path component is not a string: $(repr(x))"))
 
     isempty(paths) && throw(ArgumentError("collection of path components must be non-empty"))
-    assertstring(paths[1])
-    result_drive, result_path = splitdrive(paths[1])
+    assertstring(paths[firstindex(paths)])
+    result_drive, result_path = splitdrive(paths[firstindex(paths)])
 
     p_path = ""
     for i in firstindex(paths)+1:lastindex(paths)
@@ -450,7 +450,7 @@ function joinpath(paths::Union{Tuple, AbstractVector})::String
 
     # add separator between UNC and non-absolute path
     if (!isempty(p_path) &&
-        !isseparator(result_path[1]) &&
+        !isseparator(result_path[firstindex(result_path)]) &&
         !isempty(result_drive) &&
         result_drive[end] != ':'
     )
@@ -466,8 +466,8 @@ function joinpath(paths::Union{Tuple, AbstractVector})::String
     assertstring(x) = x isa AbstractString || throw(ArgumentError("path component is not a string: $(repr(x))"))
 
     isempty(paths) && throw(ArgumentError("collection of path components must be non-empty"))
-    assertstring(paths[1])
-    path = paths[1]
+    assertstring(paths[firstindex(paths)])
+    path = paths[firstindex(paths)]
     for i in firstindex(paths)+1:lastindex(paths)
         p = paths[i]
         assertstring(p)
@@ -518,7 +518,7 @@ function _split_at_separators(path::AbstractString; keepempty = true)
     # Since there is no split between consecutive separators, keepempty
     # only has an effect on strings starting or ending with separators.
     out = String[]
-    start = 1
+    start = firstindex(path)
 
     while true
         nextsep = findnext(isseparator, path, start)
@@ -560,7 +560,7 @@ function normpath(path::String)
     filter!(!=("."), parts)
     while true
         clean = true
-        for j = 1:length(parts)-1
+        for j = firstindex(parts):lastindex(parts)-1
             if parts[j] != ".." && parts[j+1] == ".."
                 deleteat!(parts, j:j+1)
                 clean = false
@@ -570,7 +570,7 @@ function normpath(path::String)
         clean && break
     end
     if isabs
-        while !isempty(parts) && parts[1] == ".."
+        while !isempty(parts) && parts[firstindex(parts)] == ".."
             popfirst!(parts)
         end
     elseif isempty(parts)
@@ -614,7 +614,7 @@ See also [`joinpath`](@ref), [`pwd`](@ref), [`expanduser`](@ref).
     if !isabspath(a)
         cwd = pwd()
         a_drive, a_nodrive = splitdrive(a)
-        if a_drive != "" && lowercase(splitdrive(cwd)[1]) != lowercase(a_drive)
+        if a_drive != "" && lowercase(splitdrive(cwd)[0]) != lowercase(a_drive)
             cwd = a_drive * path_separator
             a = joinpath(cwd, a_nodrive)
         else
@@ -749,8 +749,8 @@ function _win_profile_from_registry(username::AbstractString)
     ret != 0 && return nothing
     # Remove trailing null and convert to String.
     n = buf_size[] ÷ 2
-    n > 0 && buf[n] == 0 && (n -= 1)
-    home = transcode(String, buf[1:n])
+    n > 0 && buf[n-1] == 0 && (n -= 1)
+    home = transcode(String, buf[firstindex(buf):n-1])
     return isdir(home) ? home : nothing
 end
 function contractuser(path::Union{String, SubString{String}})::String
@@ -767,7 +767,7 @@ function contractuser(path::Union{String, SubString{String}})::String
     while true
         m = findnext(path_separator_re, path, nextind(path, last(m)))
         m === nothing && return path
-        prefix = SubString(path, 1, prevind(path, first(m)))
+        prefix = SubString(path, firstindex(path), prevind(path, first(m)))
         st = stat(prefix)
         ispath(st) || return path
         if samefile(st, home_st)
@@ -824,7 +824,7 @@ function contractuser(path::Union{String, SubString{String}})::String
     while true
         m = findnext(path_separator_re, path, nextind(path, last(m)))
         m === nothing && return path
-        prefix = SubString(path, 1, prevind(path, first(m)))
+        prefix = SubString(path, firstindex(path), prevind(path, first(m)))
         st = stat(prefix)
         ispath(st) || return path
         rest = SubString(path, first(m))
@@ -935,16 +935,16 @@ function relpath(path::String, startpath::String = ".")
         path_arr  = _split_at_separators(abspath(path))
         start_arr = _split_at_separators(abspath(startpath))
     end
-    i = 0
-    while i < min(length(path_arr), length(start_arr))
+    i = -1
+    while i + 1 < min(length(path_arr), length(start_arr))
         i += 1
         if path_arr[i] != start_arr[i]
             i -= 1
             break
         end
     end
-    pathpart = join(path_arr[i+1:something(findlast(x -> !isempty(x), path_arr), 0)], path_separator)
-    prefix_num = something(findlast(x -> !isempty(x), start_arr), 0) - i - 1
+    pathpart = join(path_arr[i+1:something(findlast(x -> !isempty(x), path_arr), -1)], path_separator)
+    prefix_num = something(findlast(x -> !isempty(x), start_arr), -1) - i - 1
     if prefix_num >= 0
         prefix = pardir * path_separator
         relpath_ = isempty(pathpart)     ?

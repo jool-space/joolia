@@ -469,7 +469,7 @@ end
 @testset "Equality and hashing between FixedPeriod types" begin
     let types = (Dates.Week, Dates.Day, Dates.Hour, Dates.Minute,
                  Dates.Second, Dates.Millisecond, Dates.Microsecond, Dates.Nanosecond)
-        for i in 1:length(types), j in i:length(types), x in (0, 1, 235, -4677, 15250)
+        for i in eachindex(types), j in i:lastindex(types), x in (0, 1, 235, -4677, 15250)
             local T, U, y, z
             T = types[i]
             U = types[j]
@@ -555,6 +555,21 @@ end
     @test_throws MethodError convert(Second, Month(1) + Second(30))
     @test_throws MethodError convert(Period, Minute(1) + Second(30))
     @test_throws MethodError convert(Dates.FixedPeriod, Minute(1) + Second(30))
+end
+
+# Merge and normalize periods across first, last, singleton, and empty storage.
+@testset "zero-origin compound period storage" begin
+    @test isempty(Dates.periods(Dates.CompoundPeriod(Period[])))
+    @test isempty(Dates.periods(Dates.CompoundPeriod(Day(0))))
+    @test Dates.periods(Dates.CompoundPeriod(Day(1))) == [Day(1)]
+    @test Dates.periods(Dates.CompoundPeriod(Day(1), Day(2), Hour(0))) == [Day(3)]
+    @test Dates.periods(Dates.CompoundPeriod(Day(1), Day(-1))) == Period[]
+    @test string(Dates.CompoundPeriod(Day(1), Hour(2))) == "1 day, 2 hours"
+    @test Dates.periods(canonicalize(Hour(25))) == [Day(1), Hour(1)]
+    @test Dates.periods(canonicalize(Dates.CompoundPeriod(Hour(-1), Minute(1)))) == [Minute(-59)]
+    @test Dates.periods(canonicalize(Dates.CompoundPeriod(Day(1), Hour(-1)))) == [Hour(23)]
+    @test isempty(Dates.periods(canonicalize(Dates.CompoundPeriod(Day(1), Hour(-24)))))
+    @test Dates.periods(canonicalize(Minute(50000))) == [Week(4), Day(6), Hour(17), Minute(20)]
 end
 
 end

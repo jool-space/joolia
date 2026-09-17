@@ -4,7 +4,7 @@ function writeexp(buf, pos, v::T,
     pos = Int(pos)
     precision = Int(precision)
     precision >= 0 || throw(ArgumentError("precision must be non-negative"))
-    @assert 0 < pos <= length(buf) "invalid pos"
+    @assert 0 <= pos < length(buf) "invalid pos"
     startpos = pos
     x = Float64(v)
     pos = append_sign(x, plus, space, buf, pos)
@@ -64,7 +64,7 @@ function writeexp(buf, pos, v::T,
         i = len - 1
         while i >= 0
             j = p10bits - e2
-            #=@inbounds=# mula, mulb, mulc = POW10_SPLIT[POW10_OFFSET[idx + 1] + i + 1]
+            #=@inbounds=# mula, mulb, mulc = POW10_SPLIT[POW10_OFFSET[idx] + i]
             digits = mulshiftmod1e9(m2 << 8, mula, mulb, mulc, j + 8)
             if !iszero(printedDigits)
                 if printedDigits + 9 > precision
@@ -97,14 +97,14 @@ function writeexp(buf, pos, v::T,
     end
     if e2 < 0 && iszero(availableDigits)
         idx = div(-e2, 16)
-        i = Int(MIN_BLOCK_2[idx + 1])
+        i = Int(MIN_BLOCK_2[idx])
         while i < 200
             j = 120 + (-e2 - 16 * idx)
-            p = POW10_OFFSET_2[idx + 1] + i - MIN_BLOCK_2[idx + 1]
-            if p >= POW10_OFFSET_2[idx + 2]
+            p = POW10_OFFSET_2[idx] + i - MIN_BLOCK_2[idx]
+            if p >= POW10_OFFSET_2[idx + 1]
                 digits = zero(UInt32)
             else
-                #=@inbounds=# mula, mulb, mulc = POW10_SPLIT_2[p + 1]
+                #=@inbounds=# mula, mulb, mulc = POW10_SPLIT_2[p]
                 digits = mulshiftmod1e9(m2 << 8, mula, mulb, mulc, j + 8)
             end
             if !iszero(printedDigits)
@@ -190,7 +190,7 @@ function writeexp(buf, pos, v::T,
                 e += 1
                 break
             end
-            c = roundPos > 0 ? (@inbounds buf[roundPos]) : 0x00
+            c = roundPos >= 0 ? (@inbounds buf[roundPos]) : 0x00
             if c == decchar
                 continue
             elseif c == UInt8('9')
@@ -226,13 +226,13 @@ function writeexp(buf, pos, v::T,
     end
     if e >= 100
         c = (e % 10) % UInt8
-        @inbounds d100 = DIGIT_TABLE16[div(e, 10) + 1]
+        @inbounds d100 = DIGIT_TABLE16[div(e, 10)]
         @inbounds buf[pos] = d100 % UInt8
         @inbounds buf[pos + 1] = (d100 >> 0x8) % UInt8
         @inbounds buf[pos + 2] = UInt8('0') + c
         pos += 3
     else
-        @inbounds d100 = DIGIT_TABLE16[e + 1]
+        @inbounds d100 = DIGIT_TABLE16[e]
         @inbounds buf[pos] = d100 % UInt8
         @inbounds buf[pos + 1] = (d100 >> 0x8) % UInt8
         pos += 2

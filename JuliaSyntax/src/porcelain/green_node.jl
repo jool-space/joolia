@@ -31,18 +31,18 @@ span(node::GreenNode) = node.span
 
 Base.getindex(node::GreenNode, i::Int) = children(node)[i]
 Base.getindex(node::GreenNode, rng::UnitRange) = view(children(node), rng)
-Base.firstindex(::GreenNode) = 1
-Base.lastindex(node::GreenNode) = children(node) === nothing ? 0 : length(children(node))
+Base.firstindex(::GreenNode) = 0
+Base.lastindex(node::GreenNode) = children(node) === nothing ? -1 : length(children(node))-1
 
 """
 Get absolute position and span of the child of `node` at the given tree `path`.
 """
 function child_position_span(node::GreenNode, path::Int...)
     n = node
-    p = 1
+    p = 0
     for index in path
         cs = children(n)
-        for i = 1:index-1
+        for i = 0:index-1
             p += span(cs[i])
         end
         n = cs[index]
@@ -111,11 +111,11 @@ function _show_green_node(io, node, indent, pos, str, show_trivia)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", node::GreenNode)
-    _show_green_node(io, node, "", 1, nothing, true)
+    _show_green_node(io, node, "", 0, nothing, true)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", node::GreenNode, str::AbstractString; show_trivia=true)
-    _show_green_node(io, node, "", 1, str, show_trivia)
+    _show_green_node(io, node, "", 0, str, show_trivia)
 end
 
 function _show_green_node_sexpr(io, node::GreenNode, position)
@@ -134,7 +134,7 @@ function _show_green_node_sexpr(io, node::GreenNode, position)
 end
 
 function Base.show(io::IO, node::GreenNode)
-    _show_green_node_sexpr(io, node, 1)
+    _show_green_node_sexpr(io, node, 0)
 end
 
 function GreenNode(cursor::GreenTreeCursor)
@@ -168,7 +168,7 @@ function build_tree(::Type{GreenNode}, stream::ParseStream;
             end
         end
         @assert @isdefined(cs) && length(cs) != 1
-        return GreenNode(SyntaxHead(K"wrapper", NON_TERMINAL_FLAG), stream.next_byte-1, cs)
+        return GreenNode(SyntaxHead(K"wrapper", NON_TERMINAL_FLAG), stream.next_byte, cs)
     else
         return GreenNode(cursor)
     end

@@ -23,9 +23,9 @@ const heaps_lock = [SpinLock(), SpinLock()]
 """
     cong(max::UInt32)
 
-Return a random UInt32 in the range `1:max` except if max is 0, in that case return 0.
+Return a random UInt32 in the range `0:max-1` except if max is 0, in that case return 0.
 """
-cong(max::UInt32) = iszero(max) ? UInt32(0) : rand_ptls(max) + UInt32(1) #TODO: make sure users don't use 0 and remove this check
+cong(max::UInt32) = iszero(max) ? UInt32(0) : rand_ptls(max) #TODO: make sure users don't use 0 and remove this check
 
 get_ptls_rng() = ccall(:jl_get_ptls_rng, UInt64, ())
 
@@ -77,8 +77,8 @@ end
 
 
 function multiq_sift_up(heap::taskheap, idx::Int32)
-    while idx > Int32(1)
-        parent = (idx - Int32(2)) ÷ heap_d + Int32(1)
+    while idx > Int32(0)
+        parent = (idx - Int32(1)) ÷ heap_d
         if heap.tasks[idx].priority < heap.tasks[parent].priority
             t = heap.tasks[parent]
             heap.tasks[parent] = heap.tasks[idx]
@@ -92,10 +92,10 @@ end
 
 
 function multiq_sift_down(heap::taskheap, idx::Int32)
-    if idx <= heap.ntasks
-        for child = (heap_d * idx - heap_d + 2):(heap_d * idx + 1)
+    if idx < heap.ntasks
+        for child = (heap_d * idx + 1):(heap_d * idx + heap_d)
             child = Int(child)
-            child > length(heap.tasks) && break
+            child >= heap.ntasks && break
             if isassigned(heap.tasks, child) &&
                     heap.tasks[child].priority < heap.tasks[idx].priority
                 t = heap.tasks[idx]
@@ -115,7 +115,7 @@ function multiq_size(tpid::Int8)
         # instead of indexing an empty heap vector.
         nt = UInt32(1)
     end
-    tp = tpid + 1
+    tp = tpid
     tpheaps = heaps[tp]
     heap_c = UInt32(2)
     heap_p = UInt32(length(tpheaps))
@@ -140,7 +140,7 @@ function multiq_size(tpid::Int8)
         heap_p += heap_c * nt
         newheaps = Vector{taskheap}(undef, heap_p)
         copyto!(newheaps, tpheaps)
-        for i = (1 + length(tpheaps)):heap_p
+        for i = length(tpheaps):length(newheaps)-1
             newheaps[i] = taskheap()
         end
         heaps[tp] = newheaps
@@ -153,7 +153,7 @@ function multiq_insert(task::Task, priority::UInt16)
     tpid = ccall(:jl_get_task_threadpoolid, Int8, (Any,), task)
     @assert tpid > -1 "invalid tpid"
     heap_p = multiq_size(tpid)
-    tp = tpid + 1
+    tp = tpid
 
     task.priority = priority
 
@@ -170,8 +170,8 @@ function multiq_insert(task::Task, priority::UInt16)
 
     ntasks = heap.ntasks + Int32(1)
     @atomic :monotonic heap.ntasks = ntasks
-    heap.tasks[ntasks] = task
-    multiq_sift_up(heap, ntasks)
+    heap.tasks[ntasks-1] = task
+    multiq_sift_up(heap, ntasks-Int32(1))
     priority = heap.priority
     if task.priority < priority
         @atomic :monotonic heap.priority = task.priority
@@ -186,8 +186,8 @@ function multiq_deletemin()
     local heap, task
 
     tid = Threads.threadid()
-    tp = ccall(:jl_threadpoolid, Int8, (Int16,), tid-1) + 1
-    if tp == 0 # Foreign thread
+    tp = ccall(:jl_threadpoolid, Int8, (Int16,), tid)
+    if tp == -1 # Foreign thread
         return nothing
     end
     tpheaps = heaps[tp]
@@ -220,8 +220,8 @@ function multiq_deletemin()
         @assert @isdefined(rn1) "Assertion to tell the compiler about the definedness of this variable"
 
         heap = tpheaps[rn1]
-        task = heap.tasks[1]
-        if ccall(:jl_set_task_tid, Cint, (Any, Cint), task, tid-1) == 0
+        task = heap.tasks[0]
+        if ccall(:jl_set_task_tid, Cint, (Any, Cint), task, tid) == 0
             # This task is sticky to a different thread, so we can't run it.
             # Wake that thread so it can come pick up its own work, then keep
             # looking for something we are allowed to run.
@@ -236,12 +236,12 @@ function multiq_deletemin()
     end
     ntasks = heap.ntasks
     @atomic :monotonic heap.ntasks = ntasks - Int32(1)
-    heap.tasks[1] = heap.tasks[ntasks]
-    Base.unsetindex!(heap.tasks, Int(ntasks))
+    heap.tasks[0] = heap.tasks[ntasks-1]
+    Base.unsetindex!(heap.tasks, Int(ntasks)-1)
     prio1 = typemax(UInt16)
     if ntasks > 1
-        multiq_sift_down(heap, Int32(1))
-        prio1 = heap.tasks[1].priority
+        multiq_sift_down(heap, Int32(0))
+        prio1 = heap.tasks[0].priority
     end
     @atomic :monotonic heap.priority = prio1
     unlock(heap.lock)
@@ -251,11 +251,11 @@ end
 
 function multiq_check_empty()
     tid = Threads.threadid()
-    tp = ccall(:jl_threadpoolid, Int8, (Int16,), tid-1) + 1
-    if tp == 0 # Foreign thread
+    tp = ccall(:jl_threadpoolid, Int8, (Int16,), tid)
+    if tp == -1 # Foreign thread
         return true
     end
-    for i = UInt32(1):length(heaps[tp])
+    for i in eachindex(heaps[tp])
         if heaps[tp][i].ntasks != 0
             return false
         end

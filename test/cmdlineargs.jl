@@ -311,13 +311,13 @@ end
 
 let exename = `$(Base.julia_cmd()) --startup-file=no --color=no`
     # --version
-    let v = split(read(`$exename -v`, String), "julia version ")[end]
+    let v = split(read(`$exename -v`, String), "joolia version ")[end]
         @test Base.VERSION_STRING == chomp(v)
     end
     @test read(`$exename -v`, String) == read(`$exename --version`, String)
 
     # --help
-    let header = "\n    julia [switches] -- [programfile] [args...]"
+    let header = "\n    joolia [switches] -- [programfile] [args...]"
         @test startswith(read(`$exename -h`, String), header)
         @test startswith(read(`$exename --help`, String), header)
     end

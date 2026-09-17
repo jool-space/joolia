@@ -29,19 +29,19 @@ macro isexpr(ex, head, nargs)
 end
 
 function _reorder_parameters!(args::Vector{Any}, params_pos::Int)
-    p = 0
-    for i = length(args):-1:1
+    p = -1
+    for i = lastindex(args):-1:0
         ai = args[i]
         if !@isexpr(ai, :parameters)
             break
         end
         p = i
     end
-    if p == 0
+    if p == -1
         return
     end
     # nest frankentuples parameters sections
-    for i = length(args)-1:-1:p
+    for i = lastindex(args)-1:-1:p
         pushfirst!((args[i]::Expr).args, pop!(args))
     end
     # Move parameters to args[params_pos]
@@ -52,7 +52,7 @@ function _strip_parens(ex::Expr)
     while true
         if @isexpr(ex, :parens)
             if length(ex.args) == 1
-                ex = ex.args[1]
+                ex = ex.args[0]
             else
                 # Only for error cases
                 return Expr(:block, ex.args...)
@@ -130,7 +130,7 @@ function _string_to_Expr(cursor, source, txtbuf::Vector{UInt8}, txtbuf_offset::U
         r = iterate(it, state)
     end
 
-    if length(ret.args) == 1 && ret.args[1] isa String
+    if length(ret.args) == 1 && ret.args[0] isa String
         # If there's a single string remaining after joining, we unwrap
         # to give a string literal.
         #   """\n  a\n  b""" ==>  "a\nb"
@@ -156,15 +156,15 @@ function fixup_Expr_child(::Type, head::SyntaxHead, @nospecialize(arg), first::B
     arg = _strip_parens(arg)
     if @isexpr(arg, :(=)) && eq_to_kw_in_call && !first
         arg = Expr(:kw, arg.args...)
-    elseif k != K"parens" && @isexpr(arg, :., 1) && arg.args[1] isa Tuple
+    elseif k != K"parens" && @isexpr(arg, :., 1) && arg.args[0] isa Tuple
         # This undoes the "Hack" below"
-        h, a = arg.args[1]::Tuple{SyntaxHead,Any}
+        h, a = arg.args[0]::Tuple{SyntaxHead,Any}
         arg = ((!was_parens && coalesce_dot && first) ||
                 is_syntactic_operator(h)) ?
             Symbol(".", a) : Expr(:., a)
     elseif @isexpr(arg, :parameters) && eq_to_kw_in_params
         pargs = arg.args
-        for j = 1:length(pargs)
+        for j in eachindex(pargs)
             pj = pargs[j]
             if @isexpr(pj, :(=))
                 pargs[j] = Expr(:kw, pj.args...)
@@ -198,7 +198,7 @@ end
 function parseargs!(retexpr::Expr, loc::LineNumberNode, cursor, source, txtbuf::Vector{UInt8}, txtbuf_offset::UInt32)
     args = retexpr.args
     firstchildhead = secondchildhead = head(cursor)
-    firstchildrange::UnitRange{UInt32} = byte_range(cursor)
+    firstchildrange = byte_range(cursor)
     itr = reverse_nontrivia_children(cursor)
     r = iterate(itr)
     while r !== nothing
@@ -235,7 +235,7 @@ function node_to_expr(cursor, source, txtbuf::Vector{UInt8}, txtbuf_offset::UInt
 
     nodehead = head(cursor)
     k = kind(cursor)
-    srcrange::UnitRange{UInt32} = byte_range(cursor)
+    srcrange = byte_range(cursor)
     if is_leaf(cursor)
         if is_error(k)
             return k == K"error" ?
@@ -311,9 +311,9 @@ function adjust_macro_name!(retexpr::Union{Expr, Symbol})
     else
         retexpr::Expr
         if length(retexpr.args) == 2 && retexpr.head == :(.)
-            arg2 = retexpr.args[2]
+            arg2 = retexpr.args[1]
             if isa(arg2, QuoteNode) && arg2.value isa Symbol
-                retexpr.args[2] = QuoteNode(lower_identifier_name(arg2.value, K"macro_name"))
+                retexpr.args[1] = QuoteNode(lower_identifier_name(arg2.value, K"macro_name"))
             end
         end
         return retexpr
@@ -323,9 +323,9 @@ end
 # Split out from `node_to_expr` for codesize reasons, to avoid specialization on multiple
 # tree types.
 @noinline function _node_to_expr(retexpr::Expr, loc::LineNumberNode,
-                                 srcrange::UnitRange{UInt32},
+                                 srcrange::AbstractUnitRange{<:Integer},
                                  firstchildhead::SyntaxHead, secondchildhead::SyntaxHead,
-                                 firstchildrange::UnitRange{UInt32},
+                                 firstchildrange::AbstractUnitRange{<:Integer},
                                  nodehead::SyntaxHead,
                                  source)
     args = retexpr.args
@@ -335,9 +335,9 @@ end
         # `var` and `char` nodes have a single argument which is the value.
         # However, errors can add additional errors tokens which we represent
         # as e.g. `Expr(:var, ..., Expr(:error))`.
-        return retexpr.args[1]
+        return retexpr.args[0]
     elseif k == K"macro_name"
-        return adjust_macro_name!(retexpr.args[1])
+        return adjust_macro_name!(retexpr.args[0])
     elseif k == K"?"
         retexpr.head = :if
     elseif k == K"DotsIdentifier"
@@ -345,47 +345,47 @@ end
         return n == 2 ? :(..) : :(...)
     elseif k == K"op="
         if length(args) == 3
-            lhs = args[1]
-            op = args[2]
-            rhs = args[3]
-            headstr = string(args[2], '=')
+            lhs = args[0]
+            op = args[1]
+            rhs = args[2]
+            headstr = string(args[1], '=')
             retexpr.head = Symbol(headstr)
             retexpr.args = Any[lhs, rhs]
         elseif length(args) == 1
-            return Symbol(string(args[1], '='))
+            return Symbol(string(args[0], '='))
         end
     elseif k == K".op="
         if length(args) == 3
-            lhs = args[1]
-            op = args[2]
-            rhs = args[3]
-            headstr = '.' * string(args[2], '=')
+            lhs = args[0]
+            op = args[1]
+            rhs = args[2]
+            headstr = '.' * string(args[1], '=')
             retexpr.head = Symbol(headstr)
             retexpr.args = Any[lhs, rhs]
         else
-            return Symbol(string('.', args[1], '='))
+            return Symbol(string('.', args[0], '='))
         end
     elseif k == K"macrocall"
         if length(args) >= 2
-            a2 = args[2]
+            a2 = args[1]
             if @isexpr(a2, :macrocall) && kind(firstchildhead) == K"CmdMacroName"
                 # Fix up for custom cmd macros like foo`x`
-                args[2] = a2.args[3]
+                args[1] = a2.args[2]
             end
             if kind(secondchildhead) == K"VERSION"
                 # Encode the syntax version into `loc` so that the argument order
                 # matches what ordinary macros expect.
                 # Core.MacroSource was added in Julia 1.13+; fall back to plain loc on older versions.
                 @static if isdefined(Core, :MacroSource)
-                    loc = Core.MacroSource(loc, popat!(args, 2))
+                    loc = Core.MacroSource(loc, popat!(args, 1))
                 else
-                    popat!(args, 2)  # discard the version argument
+                    popat!(args, 1)  # discard the version argument
                 end
             end
         end
         do_lambda = _extract_do_lambda!(args)
-        _reorder_parameters!(args, 2)
-        insert!(args, 2, loc)
+        _reorder_parameters!(args, 1)
+        insert!(args, 1, loc)
         if do_lambda isa Expr
             return Expr(:do, retexpr, do_lambda)
         end
@@ -397,26 +397,26 @@ end
         # order which is not always source order. We permute the children
         # here as necessary to get the canonical order.
         if is_infix_op_call(nodehead) || is_postfix_op_call(nodehead)
-            args[2], args[1] = args[1], args[2]
+            args[1], args[0] = args[0], args[1]
         end
         # Lower (call x ') to special ' head
-        if is_postfix_op_call(nodehead) && args[1] == Symbol("'")
+        if is_postfix_op_call(nodehead) && args[0] == Symbol("'")
             popfirst!(args)
             retexpr.head = Symbol("'")
         end
         do_lambda = _extract_do_lambda!(args)
-        # Move parameters blocks to args[2]
-        _reorder_parameters!(args, 2)
+        # Move parameters blocks to args[1]
+        _reorder_parameters!(args, 1)
         if retexpr.head === :dotcall
-            funcname = args[1]
+            funcname = args[0]
             if is_prefix_call(nodehead)
                 retexpr.head = :.
-                retexpr.args = Any[funcname, Expr(:tuple, args[2:end]...)]
+                retexpr.args = Any[funcname, Expr(:tuple, args[1:end]...)]
             else
                 # operator calls
                 retexpr.head = :call
                 if funcname isa Symbol
-                    args[1] = Symbol(:., funcname)
+                    args[0] = Symbol(:., funcname)
                 end # else funcname could be an Expr(:error), just propagate it
             end
         end
@@ -425,58 +425,58 @@ end
         end
     elseif k == K"."
         if length(args) == 2
-            a2 = args[2]
+            a2 = args[1]
             if !@isexpr(a2, :quote) && !(a2 isa QuoteNode)
-                args[2] = QuoteNode(a2)
+                args[1] = QuoteNode(a2)
             end
         elseif length(args) == 1
             # Hack: Here we preserve the head of the operator to determine whether
             # we need to coalesce it with the dot into a single symbol later on.
-            args[1] = (firstchildhead, args[1])
+            args[0] = (firstchildhead, args[0])
         end
     elseif k == K"ref" || k == K"curly"
-        # Move parameters blocks to args[2]
-        _reorder_parameters!(args, 2)
-    elseif k == K"for"
-        iters = _append_iterspec!([], args[1])
-        args[1] = length(iters) == 1 ? only(iters) : Expr(:block, iters...)
-        # Add extra line number node for the `end` of the block. This may seem
-        # useless but it affects code coverage.
-        push!(args[2].args, endloc)
-    elseif k == K"while"
-        # Line number node for the `end` of the block as in `for` loops.
-        push!(args[2].args, endloc)
-    elseif k in KSet"tuple vect braces"
         # Move parameters blocks to args[1]
         _reorder_parameters!(args, 1)
+    elseif k == K"for"
+        iters = _append_iterspec!([], args[0])
+        args[0] = length(iters) == 1 ? only(iters) : Expr(:block, iters...)
+        # Add extra line number node for the `end` of the block. This may seem
+        # useless but it affects code coverage.
+        push!(args[1].args, endloc)
+    elseif k == K"while"
+        # Line number node for the `end` of the block as in `for` loops.
+        push!(args[1].args, endloc)
+    elseif k in KSet"tuple vect braces"
+        # Move parameters blocks to args[0]
+        _reorder_parameters!(args, 0)
     elseif k == K"where"
         if length(args) == 2
-            a2 = args[2]
+            a2 = args[1]
             if @isexpr(a2, :braces)
                 a2a = a2.args
-                _reorder_parameters!(a2a, 2)
-                retexpr.args = Any[args[1], a2a...]
+                _reorder_parameters!(a2a, 1)
+                retexpr.args = Any[args[0], a2a...]
             end
         end
     elseif k == K"catch"
         if kind(firstchildhead) == K"Placeholder"
-            args[1] = false
+            args[0] = false
         end
     elseif k == K"try"
         # Try children in source order:
         #   try_block catch_var catch_block else_block finally_block
         # Expr ordering:
         #   try_block catch_var catch_block [finally_block] [else_block]
-        try_ = args[1]
+        try_ = args[0]
         catch_var = false
         catch_ = false
         else_ = false
         finally_ = false
-        for i in 2:length(args)
+        for i in 1:lastindex(args)
             a = args[i]
             if @isexpr(a, :catch)
-                catch_var = a.args[1]
-                catch_ = a.args[2]
+                catch_var = a.args[0]
+                catch_ = a.args[1]
             elseif @isexpr(a, :else)
                 else_ = only(a.args)
             elseif @isexpr(a, :finally)
@@ -498,11 +498,11 @@ end
     elseif k == K"generator"
         # Reconstruct the nested Expr form for generator from our flatter
         # source-ordered `generator` format.
-        gen = args[1]
-        for j = length(args):-1:2
+        gen = args[0]
+        for j = lastindex(args):-1:1
             gen = Expr(:generator, gen)
             _append_iterspec!(gen.args, args[j])
-            if j < length(args)
+            if j < lastindex(args)
                 # Additional `for`s flatten the inner generator
                 gen = Expr(:flatten, gen)
             end
@@ -510,18 +510,18 @@ end
         return gen
     elseif k == K"filter"
         @assert length(args) == 2
-        retexpr.args = _append_iterspec!(Any[args[2]], args[1])
+        retexpr.args = _append_iterspec!(Any[args[1]], args[0])
     elseif k == K"nrow" || k == K"ncat"
         # For lack of a better place, the dimension argument to nrow/ncat
         # is stored in the flags
         pushfirst!(args, numeric_flags(flags(nodehead)))
     elseif k == K"typed_ncat"
-        insert!(args, 2, numeric_flags(flags(nodehead)))
+        insert!(args, 1, numeric_flags(flags(nodehead)))
     elseif k == K"elseif"
         # Block for conditional's source location
-        args[1] = Expr(:block, loc, args[1])
+        args[0] = Expr(:block, loc, args[0])
     elseif k == K"->"
-        a1 = args[1]
+        a1 = args[0]
         if @isexpr(a1, :tuple)
             # TODO: This makes the Expr form objectively worse for the sake of
             # compatibility. We should consider deleting this special case in
@@ -529,61 +529,61 @@ end
             if length(a1.args) == 1 &&
                     (!has_flags(firstchildhead, PARENS_FLAG) ||
                      !has_flags(firstchildhead, TRAILING_COMMA_FLAG)) &&
-                    !Meta.isexpr(a1.args[1], :parameters)
+                    !Meta.isexpr(a1.args[0], :parameters)
                 # `(a) -> c` is parsed without tuple on lhs in Expr form
-                args[1] = a1.args[1]
-            elseif length(a1.args) == 2 && (a11 = a1.args[1]; @isexpr(a11, :parameters) &&
-                                            length(a11.args) <= 1 && !Meta.isexpr(a1.args[2], :(...)))
+                args[0] = a1.args[0]
+            elseif length(a1.args) == 2 && (a11 = a1.args[0]; @isexpr(a11, :parameters) &&
+                                            length(a11.args) <= 1 && !Meta.isexpr(a1.args[1], :(...)))
                 # `(a; b=1) -> c`  parses args as `block` in Expr form :-(
                 if length(a11.args) == 0
-                    args[1] = Expr(:block, a1.args[2])
+                    args[0] = Expr(:block, a1.args[1])
                 else
                     a111 = only(a11.args)
                     assgn = @isexpr(a111, :kw) ? Expr(:(=), a111.args...) : a111
                     argloc = source_location(LineNumberNode, source, last(firstchildrange))
-                    args[1] = Expr(:block, a1.args[2], argloc, assgn)
+                    args[0] = Expr(:block, a1.args[1], argloc, assgn)
                 end
             end
         end
-        a2 = args[2]
+        a2 = args[1]
         # Add function source location to rhs; add block if necessary
         if @isexpr(a2, :block)
             pushfirst!(a2.args, loc)
         else
-            args[2] = Expr(:block, loc, args[2])
+            args[1] = Expr(:block, loc, args[1])
         end
     elseif k == K"function"
         if length(args) > 1
             if has_flags(nodehead, SHORT_FORM_FUNCTION_FLAG)
-                a1 = args[1]
-                a2 = args[2]
+                a1 = args[0]
+                a2 = args[1]
                 if !@isexpr(a2, :block) && !@isexpr(a1, Symbol("'"))
-                    args[2] = Expr(:block, a2)
+                    args[1] = Expr(:block, a2)
                 end
                 retexpr.head = :(=)
             else
-                a1 = args[1]
+                a1 = args[0]
                 if @isexpr(a1, :tuple) &&
                     !has_flags(firstchildhead, TRAILING_COMMA_FLAG)
                     # Convert to weird Expr forms for long-form anonymous functions.
                     #
                     # (function (tuple (... xs)) body) ==> (function (... xs) body)
-                    if length(a1.args) == 1 && (a11 = a1.args[1]; @isexpr(a11, :...))
+                    if length(a1.args) == 1 && (a11 = a1.args[0]; @isexpr(a11, :...))
                         # function (xs...) \n body end
-                        args[1] = a11
+                        args[0] = a11
                     end
                 end
             end
-            arg2 = args[2]
+            arg2 = args[1]
             # Add location if not ErrorVal or unwrapped block
             @isexpr(arg2, :block) && pushfirst!(arg2.args, loc)
         end
     elseif k == K"macro"
         if length(args) > 1
-            pushfirst!((args[2]::Expr).args, loc)
+            pushfirst!((args[1]::Expr).args, loc)
         end
     elseif k == K"module"
-        insert!(args, kind(firstchildhead) == K"VERSION" ? 2 : 1, !has_flags(nodehead, BARE_MODULE_FLAG))
+        insert!(args, kind(firstchildhead) == K"VERSION" ? 1 : 0, !has_flags(nodehead, BARE_MODULE_FLAG))
         pushfirst!((args[end]::Expr).args, loc)
     elseif k == K"quote"
         if length(args) == 1
@@ -598,24 +598,24 @@ end
         # Temporary head which is picked up by _extract_do_lambda
         retexpr.head = :do_lambda
     elseif k == K"let"
-        a1 = args[1]
+        a1 = args[0]
         if @isexpr(a1, :block)
-            a1a = (args[1]::Expr).args
+            a1a = (args[0]::Expr).args
             filter!(a -> !(a isa LineNumberNode), a1a)
             # Ugly logic to strip the Expr(:block) in certain cases for compatibility
             if length(a1a) == 1
-                a = a1a[1]
+                a = a1a[0]
                 if a isa Symbol || @isexpr(a, :(=)) || @isexpr(a, :(::))
-                    args[1] = a
+                    args[0] = a
                 end
             end
         end
     elseif k == K"local" || k === K"global"
         if length(args) == 1
-            a1 = args[1]
+            a1 = args[0]
             if @isexpr(a1, :const)
                 # Normalize `local const` to `const local`
-                args[1] = Expr(retexpr.head, (a1::Expr).args...)
+                args[0] = Expr(retexpr.head, (a1::Expr).args...)
                 retexpr.head = :const
             elseif @isexpr(a1, :tuple)
                 # Normalize `global (x, y)` to `global x, y`
@@ -628,23 +628,23 @@ end
         retexpr.head = :call
         pushfirst!(args, :*)
     elseif k == K"struct"
-        @assert args[2].head == :block
-        orig_fields = args[2].args
+        @assert args[1].head == :block
+        orig_fields = args[1].args
         fields = Expr(:block)
         for field in orig_fields
-            if @isexpr(field, :macrocall) && field.args[1] == GlobalRef(Core, Symbol("@doc"))
+            if @isexpr(field, :macrocall) && field.args[0] == GlobalRef(Core, Symbol("@doc"))
                 # @doc macro calls don't occur within structs, in Expr form.
+                push!(fields.args, field.args[2])
                 push!(fields.args, field.args[3])
-                push!(fields.args, field.args[4])
             else
                 push!(fields.args, field)
             end
         end
-        args[2] = fields
+        args[1] = fields
         pushfirst!(args, has_flags(nodehead, MUTABLE_FLAG))
     elseif k == K"importpath"
         retexpr.head = :.
-        for i = 1:length(args)
+        for i in eachindex(args)
             ai = args[i]
             if ai isa QuoteNode
                 # Permit nonsense additional quoting such as
@@ -657,10 +657,10 @@ end
         # been single statements or atoms - represent these as blocks.
         retexpr.head = :block
     elseif k == K"comparison"
-        for i = 2:2:length(args)
+        for i = 1:2:lastindex(args)
             arg = args[i]
             if @isexpr(arg, :., 1)
-                args[i] = Symbol(".", arg.args[1])
+                args[i] = Symbol(".", arg.args[0])
             end
         end
     elseif k == K"meta"

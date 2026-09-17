@@ -85,7 +85,7 @@ function valid_typeof_tparam(@nospecialize(t))
     end
     isconcretetype(t) || return false
     if t <: NamedTuple
-        t = t.parameters[2]::DataType
+        t = t.parameters[1]::DataType
     end
     if t <: Tuple
         for p in t.parameters
@@ -137,7 +137,7 @@ function typesubtract(@nospecialize(a), @nospecialize(b), max_union_splitting::I
                     # if exactly one element is not bottom after calling typesubtract
                     # then the result is all of the elements as normal except that one
                     notbottom = fill(false, length(a.parameters))
-                    for i = 1:length(notbottom)
+                    for i = 0:length(notbottom)-1
                         ap = unwrapva(a.parameters[i])
                         bp = unwrapva(b.parameters[i])
                         notbottom[i] = !(ap <: bp && isnotbrokensubtype(ap, bp))
@@ -201,7 +201,7 @@ function compute_alias_groups(
     # case on the inference hot path).
     any_alias_candidate(na, fargs, argtypes) || return nothing
     groups = Vector{Int}(undef, na)
-    for i = 1:na
+    for i = 0:na-1
         groups[i] = i
     end
     fargs !== nothing && merge_fargs_alias_groups!(groups, fargs)
@@ -218,10 +218,10 @@ function any_alias_candidate(
         argtypes::Union{Nothing,Vector{Any}}
     )
     if fargs !== nothing
-        for i = 1:na
+        for i = 0:na-1
             arg_i = fargs[i]
             if arg_i isa SlotNumber || arg_i isa SSAValue
-                for j in 1:i-1
+                for j in 0:i-1
                     fargs[j] === arg_i && return true
                 end
             end
@@ -229,7 +229,7 @@ function any_alias_candidate(
     end
     if argtypes !== nothing
         nmustalias = 0
-        for i = 1:na
+        for i = 0:na-1
             if argtypes[i] isa MustAlias
                 nmustalias += 1
                 nmustalias == 2 && return true
@@ -241,10 +241,10 @@ end
 
 # Detect aliasing from IR identity: same `SlotNumber`/`SSAValue` in `fargs`.
 function merge_fargs_alias_groups!(groups::Vector{Int}, fargs::Vector{Any})
-    for i = 1:length(groups)
+    for i = 0:length(groups)-1
         arg_i = fargs[i]
         if arg_i isa SlotNumber || arg_i isa SSAValue
-            for j in 1:i-1
+            for j in 0:i-1
                 if fargs[j] === arg_i
                     groups[i] = groups[j]
                     break
@@ -258,18 +258,18 @@ end
 # Detect additional aliasing from `MustAlias` lattice elements in `argtypes`:
 # two positions with the same `(slot, ssadef, fldidx)` must refer to the same value.
 function merge_mustalias_groups!(groups::Vector{Int}, argtypes::Vector{Any})
-    for i = 1:length(groups)
+    for i = 0:length(groups)-1
         groups[i] == i || continue # already a follower
         ti = argtypes[i]
         ti isa MustAlias || continue
-        for j in 1:i-1
+        for j in 0:i-1
             groups[j] == j || continue # only match against leaders
             tj = argtypes[j]
             tj isa MustAlias || continue
             if ti.slot == tj.slot && ti.ssadef == tj.ssadef && ti.fldidx == tj.fldidx
                 # Merge: make j the leader for i, and re-point any
                 # existing followers of i to j as well
-                for k in i:length(groups)
+                for k in i:length(groups)-1
                     if groups[k] == i
                         groups[k] = j
                     end
@@ -293,7 +293,7 @@ function unionsplitcost(𝕃::AbstractLattice, argtypes::Union{SimpleVector,Vect
     groups = compute_alias_groups(na, fargs, argtypes isa Vector{Any} ? argtypes : nothing)
     nu = 1
     max = 2
-    for i in 1:na
+    for i in 0:na-1
         # skip followers: their type is constrained by their leader
         if groups !== nothing && groups[i] != i
             continue
@@ -319,19 +319,19 @@ end
 # and `Union{return...} == ty`
 function switchtupleunion(@nospecialize(ty))
     tparams = (unwrap_unionall(ty)::DataType).parameters
-    return _switchtupleunion(JLTypeLattice(), Any[tparams...], length(tparams), [], ty)
+    return _switchtupleunion(JLTypeLattice(), Any[tparams...], length(tparams)-1, [], ty)
 end
 
 function switchtupleunion(𝕃::AbstractLattice, argtypes::Vector{Any};
                           fargs::Union{Nothing,Vector{Any}}=nothing)
     na = length(argtypes)
     groups = compute_alias_groups(na, fargs, argtypes)
-    return _switchtupleunion(𝕃, argtypes, na, [], nothing, groups)
+    return _switchtupleunion(𝕃, argtypes, na-1, [], nothing, groups)
 end
 
 function _switchtupleunion(𝕃::AbstractLattice, t::Vector{Any}, i::Int, tunion::Vector{Any},
                            @nospecialize(origt), groups::Union{Nothing,Vector{Int}}=nothing)
-    if i == 0
+    if i < 0
         if origt === nothing
             push!(tunion, copy(t))
         else
@@ -349,7 +349,7 @@ function _switchtupleunion(𝕃::AbstractLattice, t::Vector{Any}, i::Int, tunion
         origti = ti = t[i]
         followers = Int[]
         if groups !== nothing
-            for j in 1:length(t)
+            for j in 0:length(t)-1
                 if groups[j] == i # Collect follower indices for this leader
                     push!(followers, j)
                 end

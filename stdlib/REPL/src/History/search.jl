@@ -30,7 +30,7 @@ function fullselection(state::SelectorState)
     for act in state.selection.active
         push!(entries, state.candidates[act])
     end
-    if isempty(entries) && state.hover ∈ axes(state.candidates, 1)
+    if isempty(entries) && 1 ≤ state.hover ≤ length(state.candidates)
         push!(entries, state.candidates[end-state.hover+1])
     end
     sort!(entries, by = e -> e.index)
@@ -169,7 +169,7 @@ function run_display!((; term, pstate), events::Channel{Symbol}, hist::Vector{Hi
                 filter_idx = filterchunkrev!(
                     state, cands_current, filter_seen;
                     maxtime = time() + 0.01,
-                    maxresults = outsize[1])
+                    maxresults = outsize[0])
             end
             if filter_idx == 0
                 cands_cachestate = addcache!(
@@ -208,7 +208,7 @@ function run_display!((; term, pstate), events::Channel{Symbol}, hist::Vector{Hi
             end
             # If there are now new candidates in the view, update
             length(state.candidates) != length(prevstate.candidates) &&
-                length(prevstate.candidates) - state.hover < outsize[1] &&
+                length(prevstate.candidates) - state.hover < outsize[0] &&
                 redisplay_all(out, prevstate, state, pstate; buf)
         elseif isnothing(event)
             yield()
@@ -224,7 +224,7 @@ function filterchunkrev!(state::SelectorState, candidates::DenseVector{HistEntry
     idx = filterchunkrev!(state.candidates, candidates, state.filter, seen, idx;
                           maxtime = maxtime, maxresults = maxresults)
     newlen = length(state.candidates)
-    newcands = view(state.candidates, (oldlen + 1):newlen)
+    newcands = view(state.candidates, oldlen:(newlen - 1))
     gfound = Int[]
     for (i, g) in enumerate(state.selection.gathered)
         cind = searchsorted(newcands, g, by = e -> e.index)
@@ -287,8 +287,8 @@ Vary the selection of the current candidate (selected by hover) in `state`.
 """
 function toggleselection(state::SelectorState)
     newselection = if state.hover > 0
-        hoveridx = length(state.candidates) - state.hover + 1
-        hoveridx ∈ axes(state.candidates, 1) || return state
+        hoveridx = length(state.candidates) - state.hover
+        hoveridx ∈ axes(state.candidates, 0) || return state
         activecopy = copy(state.selection.active)
         selsearch = searchsorted(activecopy, hoveridx)
         if isempty(selsearch)
@@ -301,9 +301,10 @@ function toggleselection(state::SelectorState)
         end
         (active = activecopy, gathered = state.selection.gathered)
     elseif state.hover < 0
-        -state.hover ∈ axes(state.selection.gathered, 1) || return state
+        gidx = -state.hover - 1
+        gidx ∈ axes(state.selection.gathered, 0) || return state
         gatheredcopy = copy(state.selection.gathered)
-        deleteat!(gatheredcopy, -state.hover)
+        deleteat!(gatheredcopy, gidx)
         (active = state.selection.active, gathered = gatheredcopy)
     else
         return state
@@ -335,7 +336,7 @@ function addcache!(cache::Vector{T}, state::Unsigned, new::T) where {T}
     end
     for b in 1:(maxsize - 1)
         iszero(shift & (0x1 << (maxsize - b))) && continue
-        cache[b - uninitialised] = cache[b - uninitialised + 1]
+        cache[b - uninitialised - 1] = cache[b - uninitialised]
     end
     cache[end] = new
     nextstate

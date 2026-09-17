@@ -929,3 +929,36 @@ let
 end
 
 end
+
+# Binary terminfo offsets and extension labels start at zero, including empty tables.
+@testset "zero-origin terminfo tables" begin
+    @test Base._terminfo_read_strings(UInt8[0x61, 0, 0x62, 0], Int16[0, 2]) == ["a", "b"]
+    @test Base._terminfo_read_strings(UInt8[0], Int16[0]) == [""]
+    @test Base._terminfo_read_strings(UInt8[], Int16[-1, -2]) == [nothing, nothing]
+    @test isempty(Base._terminfo_read_strings(UInt8[], Int16[]))
+    @test_throws ArgumentError Base._terminfo_read_strings(UInt8[0x61], Int16[0])
+    @test_throws ArgumentError Base._terminfo_read_strings(UInt8[], Int16[-3])
+    io = IOBuffer()
+    write(io, Int16[0, 0, 1, 2, 6])
+    write(io, Int16[0, 0])
+    write(io, "hi\0xx\0")
+    seekstart(io)
+    @test Base.extendedterminfo(io, Int16) == Dict(:xx => "hi")
+    io = IOBuffer()
+    write(io, Int16[1, 0, 0, 1, 3])
+    write(io, UInt8[1, 0])
+    write(io, Int16[0])
+    write(io, "bw\0")
+    seekstart(io)
+    @test Base.extendedterminfo(io, Int16) == Dict(:bw => true)
+end
+
+# Terminal geometry stores height and width at tuple positions zero and one.
+@testset "zero-origin terminal display dimensions" begin
+    for (rows, cols) in ((24, 80), (2, 3))
+        output = IOContext(IOBuffer(), :displaysize => (rows, cols))
+        terminal = Base.Terminals.TTYTerminal("dumb", IOBuffer(), output, IOBuffer())
+        @test Base.Terminals.height(terminal) == rows
+        @test Base.Terminals.width(terminal) == cols
+    end
+end

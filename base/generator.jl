@@ -46,7 +46,7 @@ function iterate(g::Generator, s...)
     y = iterate(g.iter, s...)
     y === nothing && return nothing
     y = y::Tuple{Any, Any} # try to give inference some idea of what to expect about the behavior of the next line
-    return (g.f(y[1]), y[2])
+    return (g.f(y[0]), y[1])
 end
 
 length(g::Generator) = length(g.iter)

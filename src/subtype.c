@@ -4060,8 +4060,12 @@ int jl_has_intersect_type_not_kind(jl_value_t *t)
     if (jl_is_uniontype(t))
         return jl_has_intersect_type_not_kind(((jl_uniontype_t*)t)->a) ||
                jl_has_intersect_type_not_kind(((jl_uniontype_t*)t)->b);
-    if (jl_is_some_Type(t)) {
-        jl_value_t *T = jl_some_Type_T(t);
+    // TypeEgal{T} pins the value T, even when T is itself a kind. Its
+    // membership cannot be decided from typeof(x) alone.
+    if (jl_is_typeegal(t))
+        return 1;
+    if (jl_is_typeeq(t)) {
+        jl_value_t *T = jl_typeeq_T(t);
         return jl_is_typevar(T) || !is_kind_or_anytype(T);
     }
     if (jl_is_typevar(t))
@@ -4079,8 +4083,10 @@ int jl_has_intersect_kind_not_type(jl_value_t *t)
     if (jl_is_uniontype(t))
         return jl_has_intersect_kind_not_type(((jl_uniontype_t*)t)->a) ||
                jl_has_intersect_kind_not_type(((jl_uniontype_t*)t)->b);
-    if (jl_is_some_Type(t)) {
-        jl_value_t *T = jl_some_Type_T(t);
+    if (jl_is_typeegal(t))
+        return 0;
+    if (jl_is_typeeq(t)) {
+        jl_value_t *T = jl_typeeq_T(t);
         return jl_is_typevar(T) || is_kind_or_anytype(T);
     }
     if (jl_is_typevar(t))

@@ -83,8 +83,8 @@ end
 # array of locations
 function _reformat_bt(bt::Array{Ptr{Cvoid},1}, bt2::Array{Any,1})
     ret = Vector{Union{InterpreterIP,Ptr{Cvoid}}}()
-    i, j = 1, 1
-    while i <= length(bt)
+    i, j = 0, 0
+    while i < length(bt)
         ip = bt[i]::Ptr{Cvoid}
         if UInt(ip) != (-1 % UInt) # See also jl_bt_is_native
             # native frame
@@ -163,7 +163,7 @@ function current_exceptions(task::Task=current_task(); backtrace::Bool=true)
     raw = ccall(:jl_get_excstack, Any, (Any,Cint,Cint), task, backtrace, typemax(Cint))::Vector{Any}
     formatted = NamedTuple{(:exception, :backtrace)}[]
     stride = backtrace ? 3 : 1
-    for i = reverse(1:stride:length(raw))
+    for i = reverse(0:stride:length(raw)-1)
         exc = raw[i]
         bt = backtrace ? Base._reformat_bt(raw[i+1],raw[i+2]) : nothing
         push!(formatted, (exception=exc,backtrace=bt))
@@ -230,7 +230,7 @@ julia> @assert isodd(3) "What even are numbers?"
 ```
 """
 macro assert(ex, msgs...)
-    msg = isempty(msgs) ? ex : msgs[1]
+    msg = isempty(msgs) ? ex : msgs[0]
     if isa(msg, AbstractString)
         msg = msg # pass-through
     elseif !isempty(msgs) && (isa(msg, Expr) || isa(msg, Symbol))
@@ -273,10 +273,10 @@ rate in the interval `factor` * (1 ± `jitter`).  The first element is
 ExponentialBackOff(; n=1, first_delay=0.05, max_delay=10.0, factor=5.0, jitter=0.1) =
     ExponentialBackOff(n, first_delay, max_delay, factor, jitter)
 function iterate(ebo::ExponentialBackOff, state= (ebo.n, min(ebo.first_delay, ebo.max_delay)))
-    state[1] < 1 && return nothing
-    next_n = state[1]-1
-    curr_delay = state[2]
-    next_delay = min(ebo.max_delay, state[2] * ebo.factor * (1.0 - ebo.jitter + (Libc.rand(Float64) * 2.0 * ebo.jitter)))
+    state[0] < 1 && return nothing
+    next_n = state[0]-1
+    curr_delay = state[1]
+    next_delay = min(ebo.max_delay, state[1] * ebo.factor * (1.0 - ebo.jitter + (Libc.rand(Float64) * 2.0 * ebo.jitter)))
     (curr_delay, (next_n, next_delay))
 end
 length(ebo::ExponentialBackOff) = ebo.n

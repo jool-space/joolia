@@ -2497,4 +2497,16 @@ let mi = Compiler.specialize_method(only(methods(ndims, (Matrix{Float64},))),
     @test Compiler.ci_get_source(interp, codeinst) isa Core.CodeInfo
 end
 
+# Splat iteration metadata starts after the builtin, iterator, and target function.
+joolia_scalar_splat(x) = (x...,)
+joolia_mixed_splat(x, t, y) = (()..., x..., t..., ()..., y..., ()...)
+joolia_empty_splat() = Core._apply_iterate(iterate, tuple)
+@test @inferred(joolia_scalar_splat(1.25)) === (1.25,)
+@test @inferred(joolia_scalar_splat(7)) === (7,)
+@test @inferred(joolia_scalar_splat(())) === ()
+@test @inferred(joolia_scalar_splat((2, 3))) === (2, 3)
+@test @inferred(joolia_mixed_splat(1.25, (2, 3), 4.5)) === (1.25, 2, 3, 4.5)
+@test @inferred(joolia_mixed_splat(1.25, (), 4.5)) === (1.25, 4.5)
+@test @inferred(joolia_empty_splat()) === ()
+
 end # module inline_tests

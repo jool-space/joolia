@@ -116,7 +116,7 @@ end
 function unsafe_wrap(::Union{Type{GenericMemory{kind,<:Any,Core.CPU}},Type{GenericMemory{kind,T,Core.CPU}}},
                      p::Ptr{T}, dims::Tuple{Int}; own::Bool = false) where {kind,T}
     ccall(:jl_ptr_to_genericmemory, Ref{GenericMemory{kind,T,Core.CPU}},
-          (Any, Ptr{Cvoid}, Csize_t, Cint), GenericMemory{kind,T,Core.CPU}, p, dims[1], own)
+          (Any, Ptr{Cvoid}, Csize_t, Cint), GenericMemory{kind,T,Core.CPU}, p, getfield(dims, 0), own)
 end
 function unsafe_wrap(::Union{Type{GenericMemory{kind,<:Any,Core.CPU}},Type{GenericMemory{kind,T,Core.CPU}}},
                      p::Ptr{T}, d::Integer; own::Bool = false) where {kind,T}
@@ -129,12 +129,12 @@ unsafe_wrap(Atype::Union{Type{Array},Type{Array{T}},Type{Array{T,N}},Type{Generi
 
 
 """
-    unsafe_load(p::Ptr{T}, i::Integer=1)
+    unsafe_load(p::Ptr{T}, i::Integer=0)
     unsafe_load(p::Ptr{T}, order::Symbol)
     unsafe_load(p::Ptr{T}, i::Integer, order::Symbol)
 
-Load a value of type `T` from the address of the `i`th element (1-indexed) starting at `p`.
-This is equivalent to the C expression `p[i-1]`. Optionally, an atomic memory ordering can
+Load a value of type `T` from the address of the `i`th element (zero-indexed) starting at `p`.
+This is equivalent to the C expression `p[i]`. Optionally, an atomic memory ordering can
 be provided.
 
 The `unsafe` prefix on this function indicates that no validation is performed on the
@@ -148,19 +148,19 @@ memory region allocated as different type may be valid provided that the types a
 
 See also: [`atomic`](@ref)
 """
-unsafe_load(p::Ptr, i::Integer=1) = pointerref(p, Int(i), 1)
+unsafe_load(p::Ptr, i::Integer=0) = pointerref(p, Int(i), 1)
 unsafe_load(p::Ptr, order::Symbol) = atomic_pointerref(p, order)
 function unsafe_load(p::Ptr, i::Integer, order::Symbol)
-    unsafe_load(p + (elsize(typeof(p)) * (Int(i) - 1)), order)
+    unsafe_load(p + (elsize(typeof(p)) * (Int(i))), order)
 end
 
 """
-    unsafe_store!(p::Ptr{T}, x, i::Integer=1)
+    unsafe_store!(p::Ptr{T}, x, i::Integer=0)
     unsafe_store!(p::Ptr{T}, x, order::Symbol)
     unsafe_store!(p::Ptr{T}, x, i::Integer, order::Symbol)
 
-Store a value of type `T` to the address of the `i`th element (1-indexed) starting at `p`.
-This is equivalent to the C expression `p[i-1] = x`. Optionally, an atomic memory ordering
+Store a value of type `T` to the address of the `i`th element (zero-indexed) starting at `p`.
+This is equivalent to the C expression `p[i] = x`. Optionally, an atomic memory ordering
 can be provided.
 
 The `unsafe` prefix on this function indicates that no validation is performed on the
@@ -174,11 +174,11 @@ different type may be valid provided that the types are compatible.
 
 See also: [`atomic`](@ref)
 """
-unsafe_store!(p::Ptr{Any}, @nospecialize(x), i::Integer=1) = pointerset(p, x, Int(i), 1)
-unsafe_store!(p::Ptr{T}, x, i::Integer=1) where {T} = pointerset(p, convert(T,x), Int(i), 1)
+unsafe_store!(p::Ptr{Any}, @nospecialize(x), i::Integer=0) = pointerset(p, x, Int(i), 1)
+unsafe_store!(p::Ptr{T}, x, i::Integer=0) where {T} = pointerset(p, convert(T,x), Int(i), 1)
 unsafe_store!(p::Ptr{T}, x, order::Symbol) where {T} = atomic_pointerset(p, x isa T ? x : convert(T,x), order)
 function unsafe_store!(p::Ptr, x, i::Integer, order::Symbol)
-    unsafe_store!(p + (elsize(typeof(p)) * (Int(i) - 1)), x, order)
+    unsafe_store!(p + (elsize(typeof(p)) * (Int(i))), x, order)
 end
 
 """

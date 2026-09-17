@@ -27,16 +27,16 @@ dows = ["Tuesday", "Saturday", "Sunday", "Thursday", "Sunday", "Friday",
 daysinmonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 @testset "Name functions" begin
     for (i, dt) in enumerate([Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec])
-        @test Dates.month(dt) == i
+        @test Dates.month(dt) == i + 1
         @test Dates.monthname(dt) == monthnames[i]
-        @test Dates.monthname(i) == monthnames[i]
-        @test Dates.monthabbr(dt) == monthnames[i][1:3]
-        @test Dates.monthabbr(i) == monthnames[i][1:3]
+        @test Dates.monthname(i + 1) == monthnames[i]
+        @test Dates.monthabbr(dt) == monthnames[i][0:2]
+        @test Dates.monthabbr(i + 1) == monthnames[i][0:2]
         @test Dates.dayofweek(dt) == daysofweek[i]
         @test Dates.dayname(dt) == dows[i]
         @test Dates.dayname(Dates.dayofweek(dt)) == dows[i]
-        @test Dates.dayabbr(dt) == dows[i][1:3]
-        @test Dates.dayabbr(Dates.dayofweek(dt)) == dows[i][1:3]
+        @test Dates.dayabbr(dt) == dows[i][0:2]
+        @test Dates.dayabbr(Dates.dayofweek(dt)) == dows[i][0:2]
         @test Dates.daysinmonth(dt) == daysinmonth[i]
     end
 end
@@ -213,6 +213,25 @@ end
         @test Dates.dayofquarter(Dates.DateTime(y, 9, 30)) == 92
         @test Dates.dayofquarter(Dates.DateTime(y, 12, 31)) == 92
     end
+end
+
+# Calendar values retain their numbering while locale storage starts at zero.
+@testset "zero-origin locale storage" begin
+    @test Dates.ENGLISH.months[0] == "January"
+    @test Dates.ENGLISH.months[11] == "December"
+    @test Dates.locale_dict(["First", "Last"]) == Dict("First"=>1, "first"=>1, "Last"=>2, "last"=>2)
+    @test isempty(Dates.locale_dict(String[]))
+    @test monthname(1) == "January"
+    @test monthname(12) == "December"
+    @test monthabbr(12) == "Dec"
+    @test dayname(1) == "Monday"
+    @test dayname(7) == "Sunday"
+    @test dayabbr(7) == "Sun"
+    @test Dates.monthname_to_value("December", Dates.ENGLISH) == 12
+    @test Dates.dayname_to_value("sunday", Dates.ENGLISH) == 7
+    @test dayofyear(Date(2024, 1, 1)) == 1
+    @test dayofyear(Date(2024, 12, 31)) == 366
+    @test dayofquarter(Date(2024, 3, 31)) == 91
 end
 
 end

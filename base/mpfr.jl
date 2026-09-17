@@ -129,11 +129,11 @@ struct BigFloatLayout
     # possible padding
     p::Limb # Tuple{Vararg{Limb}}
 end
-const offset_prec = fieldoffset(BigFloatLayout, 1) % Int
-const offset_sign = fieldoffset(BigFloatLayout, 2) % Int
-const offset_exp = fieldoffset(BigFloatLayout, 3) % Int
-const offset_d = fieldoffset(BigFloatLayout, 4) % Int
-const offset_p_limbs = ((fieldoffset(BigFloatLayout, 5) % Int + sizeof(Limb) - 1) ÷ sizeof(Limb))
+const offset_prec = fieldoffset(BigFloatLayout, 0) % Int
+const offset_sign = fieldoffset(BigFloatLayout, 1) % Int
+const offset_exp = fieldoffset(BigFloatLayout, 2) % Int
+const offset_d = fieldoffset(BigFloatLayout, 3) % Int
+const offset_p_limbs = ((fieldoffset(BigFloatLayout, 4) % Int + sizeof(Limb) - 1) ÷ sizeof(Limb))
 const offset_p = offset_p_limbs * sizeof(Limb)
 
 """
@@ -229,17 +229,17 @@ end
 Base.unsafe_convert(::Type{Ptr{Limb}}, fd::BigFloatData) = Base.unsafe_convert(Ptr{Limb}, getfield(fd, :d)) + offset_p
 function Base.setindex!(fd::BigFloatData, v, i)
     d = getfield(fd, :d)
-    @boundscheck 1 <= i <= length(d) - offset_p_limbs || throw(BoundsError(fd, i))
+    @boundscheck 0 <= i < length(d) - offset_p_limbs || throw(BoundsError(fd, i))
     @inbounds d[i + offset_p_limbs] = v
     return fd
 end
 function Base.getindex(fd::BigFloatData, i)
     d = getfield(fd, :d)
-    @boundscheck 1 <= i <= length(d) - offset_p_limbs || throw(BoundsError(fd, i))
+    @boundscheck 0 <= i < length(d) - offset_p_limbs || throw(BoundsError(fd, i))
     @inbounds d[i + offset_p_limbs]
 end
 Base.length(fd::BigFloatData) = length(getfield(fd, :d)) - offset_p_limbs
-Base.copyto!(fd::BigFloatData, limbs) = copyto!(getfield(fd, :d), offset_p_limbs + 1, limbs) # for Random
+Base.copyto!(fd::BigFloatData, limbs) = copyto!(getfield(fd, :d), offset_p_limbs, limbs) # for Random
 
 include("rawbigfloats.jl")
 
@@ -357,16 +357,16 @@ function BigFloat(x::Float64, r::MPFRRoundingMode=rounding_raw(BigFloat); precis
     # Limb is a CLong which is a UInt32 on windows (thank M$) which makes this more complicated and slower.
     zd = z.d
     if Limb === UInt64
-        for i in 1:nlimbs-1
+        for i in 0:nlimbs-2
             @inbounds setindex!(zd, 0x0, i)
         end
-        @inbounds setindex!(zd, val, nlimbs)
+        @inbounds setindex!(zd, val, nlimbs-1)
     else
-        for i in 1:nlimbs-2
+        for i in 0:nlimbs-3
             @inbounds setindex!(zd, 0x0, i)
         end
-        @inbounds setindex!(zd, val % UInt32, nlimbs-1)
-        @inbounds setindex!(zd, (val >> 32) % UInt32, nlimbs)
+        @inbounds setindex!(zd, val % UInt32, nlimbs-2)
+        @inbounds setindex!(zd, (val >> 32) % UInt32, nlimbs-1)
     end
     z
 end
@@ -1224,7 +1224,7 @@ function string_mpfr(x::BigFloat, fmt::String)
               pc, fmt, x)
     p = pc[]
     # convert comma decimal separator to dot
-    for i = 1:n
+    for i = 0:n-1
         if unsafe_load(p, i) == UInt8(',')
             unsafe_store!(p, '.', i)
             break
@@ -1250,7 +1250,7 @@ function _prettify_bigfloat(s::String)::String
         int, frac = eachsplit(mantissa, '.')
         if expo > 0
             expo < length(frac) ?
-                string(int, frac[1:expo], '.', frac[expo+1:end]) :
+                string(int, frac[0:expo-1], '.', frac[expo:end]) :
                 string(int, frac, '0'^(expo-length(frac)), '.', '0')
         else
             neg = startswith(int, '-')

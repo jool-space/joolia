@@ -221,18 +221,18 @@ cd(@__DIR__) do
         try
             printstyled(master_stdout, test, color=:white)
             printstyled(master_stdout, lpad("($wrkr)", name_align - textwidth(test) + 1, " "), " | ", color=:white)
-            time_str = @sprintf("%7.2f",resp[2])
+            time_str = @sprintf("%7.2f",resp[1])
             printstyled(master_stdout, lpad(time_str, elapsed_align, " "), " | ", color=:white)
-            gc_str = @sprintf("%5.2f", resp[5].total_time / 10^9)
+            gc_str = @sprintf("%5.2f", resp[4].total_time / 10^9)
             printstyled(master_stdout, lpad(gc_str, gc_align, " "), " | ", color=:white)
 
             # since there may be quite a few digits in the percentage,
             # the left-padding here is less to make sure everything fits
-            percent_str = @sprintf("%4.1f", 100 * resp[5].total_time / (10^9 * resp[2]))
+            percent_str = @sprintf("%4.1f", 100 * resp[4].total_time / (10^9 * resp[1]))
             printstyled(master_stdout, lpad(percent_str, percent_align, " "), " | ", color=:white)
-            alloc_str = @sprintf("%5.2f", resp[3] / 2^20)
+            alloc_str = @sprintf("%5.2f", resp[2] / 2^20)
             printstyled(master_stdout, lpad(alloc_str, alloc_align, " "), " | ", color=:white)
-            rss_str = @sprintf("%5.2f", resp[6] / 2^20)
+            rss_str = @sprintf("%5.2f", resp[5] / 2^20)
             printstyled(master_stdout, lpad(rss_str, rss_align, " "), "\n", color=:white)
         finally
             unlock(print_lock)
@@ -350,7 +350,7 @@ cd(@__DIR__) do
                         return false    # already gone
                     end
                     # state is the field after the parenthesised comm
-                    state = split(stat[something(findlast(')', stat), 0)+1:end])[1]
+                    state = split(stat[something(findlast(')', stat), 0)+1:end])[0]
                     return state != "Z"
                 end
                 # Elsewhere, signal 0 cannot tell a zombie from a live process,
@@ -370,7 +370,7 @@ cd(@__DIR__) do
             start = time()
             while time() < deadline && any(alive, stuck)
                 Libc.systemsleep(1)
-                if !isempty(resignal) && time() - start >= resignal[1][1]
+                if !isempty(resignal) && time() - start >= resignal[0][0]
                     (after, sig) = popfirst!(resignal)
                     for pid in stuck
                         alive(pid) || continue
@@ -395,7 +395,7 @@ cd(@__DIR__) do
                             break
                         elseif c == '?'
                             println("Currently running: ")
-                            tests = sort(collect(running_tests), by=x->x[2])
+                            tests = sort(collect(running_tests), by=x->x[1])
                             foreach(tests) do (test, date)
                                 println(test, " (running for ", round(now()-date, Minute), ")")
                             end
@@ -464,7 +464,7 @@ cd(@__DIR__) do
                         end
                         push!(results, (test, resp, duration))
                         if length(resp) == 1
-                            print_testworker_errored(test, wrkr, exit_on_error ? nothing : resp[1])
+                            print_testworker_errored(test, wrkr, exit_on_error ? nothing : resp[0])
                             if exit_on_error
                                 skipped = length(tests)
                                 empty!(tests)
@@ -472,7 +472,7 @@ cd(@__DIR__) do
                                 # the worker encountered some failure, recycle it
                                 # so future tests get a fresh environment
                                 rmprocs_with_testenv(wrkr, waitfor=rmwait_timeout)
-                                p = addprocs_with_testenv(1)[1]
+                                p = only(addprocs_with_testenv(1))
                                 remotecall_fetch(include, p, "testdefs.jl")
                                 if use_revise
                                     Distributed.remotecall_eval(Main, p, revise_init_expr)
@@ -485,7 +485,7 @@ cd(@__DIR__) do
                                 # so future tests start with a smaller working set
                                 if n > 1
                                     rmprocs_with_testenv(wrkr, waitfor=rmwait_timeout)
-                                    p = addprocs_with_testenv(1)[1]
+                                    p = only(addprocs_with_testenv(1))
                                     remotecall_fetch(include, p, "testdefs.jl")
                                     if use_revise
                                         Distributed.remotecall_eval(Main, p, revise_init_expr)
@@ -526,7 +526,7 @@ cd(@__DIR__) do
                 end
             delete!(running_on, t)
             if length(resp) == 1
-                print_testworker_errored(t, 1, resp[1])
+                print_testworker_errored(t, 1, resp[0])
             else
                 print_testworker_stats(t, 1, resp)
             end
@@ -579,7 +579,7 @@ cd(@__DIR__) do
     run, where the test file is printed out as the "failed expression".
     =#
     @with Test.TESTSET_PRINT_ENABLE=>false begin
-        o_ts = Test.DefaultTestSet("Overall")
+        o_ts = Test.DefaultTestSet("Overall"; failfast=false)
         @atomic o_ts.time_end = o_ts.time_start + o_ts_duration # manually populate the timing
         BuildkiteTestJSON.write_testset_json_files(@__DIR__, o_ts)
         Test.@with_testset o_ts begin
@@ -592,7 +592,7 @@ cd(@__DIR__) do
                         Test.record(o_ts, resp)
                     end
                 elseif isa(resp, Test.TestSetException)
-                    fake = Test.DefaultTestSet(testname)
+                    fake = Test.DefaultTestSet(testname; failfast=false)
                     @atomic fake.time_end = fake.time_start + duration
                     for i in 1:resp.pass
                         Test.record(fake, Test.Pass(:test, nothing, nothing, nothing, LineNumberNode(@__LINE__, @__FILE__)))
@@ -614,7 +614,7 @@ cd(@__DIR__) do
                     # i.e. not a RemoteException capturing a TestSetException that means
                     # the test runner itself had some problem, so we may have hit a segfault,
                     # deserialization errors or something similar.  Record this testset as Errored.
-                    fake = Test.DefaultTestSet(testname)
+                    fake = Test.DefaultTestSet(testname; failfast=false)
                     @atomic fake.time_end = fake.time_start + duration
                     Test.record(fake, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = resp, backtrace = Union{Ptr{Nothing},Base.InterpreterIP}[])]), LineNumberNode(1), nothing))
                     Test.@with_testset fake begin

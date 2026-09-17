@@ -9,16 +9,16 @@
         msgs = Expr(:call, Base.vect)
         for a in args
             if Meta.isexpr(a, :tuple, 2)
-                push!(sts.args, a.args[1])
-                push!(msgs.args, a.args[2])
+                push!(sts.args, a.args[0])
+                push!(msgs.args, a.args[1])
             else
                 push!(sts.args, a)
                 push!(msgs.args, string(a))
             end
         end
         # just add assertion string to first msg
-        msgs.args[2] = Expr(
-            :string, "`jl_assert(", QuoteNode(cond), ", _)`: ", msgs.args[2])
+        msgs.args[1] = Expr(
+            :string, "`jl_assert(", QuoteNode(cond), ", _)`: ", msgs.args[1])
         :($(esc(cond)) ? nothing : begin
               throw(LoweringError($(esc(sts)), $(esc(msgs)), true))
           end)
@@ -77,8 +77,8 @@ macro mknode(attrs, old)
     end
     seen_attrs = Set{Symbol}()
     attrs isa Expr && for a in attrs.args
-        (aname, aval) = if Meta.isexpr(a, :(kw), 2) && a.args[1] isa Symbol
-            (a.args[1]::Symbol, a.args[2])
+        (aname, aval) = if Meta.isexpr(a, :(kw), 2) && a.args[0] isa Symbol
+            (a.args[0]::Symbol, a.args[1])
         elseif a isa Symbol
             (a, a)
         else
@@ -195,18 +195,18 @@ function _match_kind(srcref, ex, jl_line)
     kws = Expr(:parameters)
     seen = Set{Symbol}()
     if Meta.isexpr(ex, :call)
-        kind = ex.args[1]
-        args = ex.args[2:end]
-        if Meta.isexpr(args[1], :parameters)
-            for a in args[1].args
+        kind = ex.args[0]
+        args = ex.args[1:end]
+        if Meta.isexpr(args[0], :parameters)
+            for a in args[0].args
                 a isa Symbol && push!(seen, a)
-                Meta.isexpr(a, :kw, 2) && a.args[1] isa Symbol && push!(seen, a.args[1])
+                Meta.isexpr(a, :kw, 2) && a.args[0] isa Symbol && push!(seen, a.args[0])
             end
-            append!(kws.args, args[1].args)
+            append!(kws.args, args[0].args)
             popfirst!(args)
         end
-        if length(args) == 1 && !Meta.isexpr(args[1], :kw)
-            srcref = args[1]
+        if length(args) == 1 && !Meta.isexpr(args[0], :kw)
+            srcref = args[0]
         elseif length(args) > 1
             error("Unexpected srcref argument in `$ex`")
         end
@@ -225,20 +225,20 @@ function _expand_ast_tree(ctx, srcref, tree, jl_line::QuoteNode)
     if Meta.isexpr(tree, :(::))
         # Leaf node
         if length(tree.args) == 2
-            val = tree.args[1]
-            kindspec = tree.args[2]
+            val = tree.args[0]
+            kindspec = tree.args[1]
         else
             val = nothing
-            kindspec = tree.args[1]
+            kindspec = tree.args[0]
         end
         let kws = _match_kind(srcref, kindspec, jl_line)
             !isnothing(val) && push!(kws.args, Expr(:kw, :value, val))
             Expr(:macrocall, var"@mknode", jl_line.value, kws)
         end
-    elseif Meta.isexpr(tree, :call) && tree.args[1] === :(=>)
+    elseif Meta.isexpr(tree, :call) && tree.args[0] === :(=>)
         # Leaf node with copied attributes
-        kind = tree.args[3]
-        srcref2 = tree.args[2]
+        kind = tree.args[2]
+        srcref2 = tree.args[1]
         kws = Expr(:parameters, Expr(:kw, :kind, kind), Expr(:kw, :children, nothing))
         DEBUG && push!(kws.args, Expr(:kw, :jl_source, jl_line))
         Expr(:macrocall, var"@mknode", jl_line.value, kws, srcref2)
@@ -254,25 +254,25 @@ function _expand_ast_tree(ctx, srcref, tree, jl_line::QuoteNode)
         end
         children_ex = :(let child_ids = Vector{$SyntaxTree}()
         end)
-        child_stmts = children_ex.args[2].args
-        for a in flatargs[2:end]
+        child_stmts = children_ex.args[1].args
+        for a in flatargs[1:end]
             child = _expand_ast_tree(ctx, srcref, a, jl_line)
             if Meta.isexpr(child, :(...))
-                push!(child_stmts, :($_append_nodeids!(child_ids, $(child.args[1]))))
+                push!(child_stmts, :($_append_nodeids!(child_ids, $(child.args[0]))))
             else
                 push!(child_stmts, :($_push_nodeid!(child_ids, $child)))
             end
         end
         push!(child_stmts, :(child_ids))
-        let kws = _match_kind(srcref, flatargs[1], jl_line)
+        let kws = _match_kind(srcref, flatargs[0], jl_line)
             push!(kws.args, Expr(:kw, :children, children_ex))
             Expr(:macrocall, var"@mknode", jl_line.value, kws)
         end
     elseif Meta.isexpr(tree, :(:=))
         ctx === nothing && throw(ArgumentError(
             "@ast requires ctx arg for `:=` assignments $jl_line"))
-        lhs = tree.args[1]
-        rhs = _expand_ast_tree(ctx, srcref, tree.args[2], jl_line)
+        lhs = tree.args[0]
+        rhs = _expand_ast_tree(ctx, srcref, tree.args[1], jl_line)
         ssadef = gensym("ssadef")
         quote
             ($lhs, $ssadef) = assign_tmp($ctx, $rhs, $(string(lhs)))
@@ -361,18 +361,18 @@ end
 function extension_type(ex)
     @jl_assert kind(ex) == K"assert" ex
     @jl_assert numchildren(ex) >= 1 ex
-    @jl_assert kind(ex[1]) == K"Symbol" ex
-    syntax_name(ex[1])
+    @jl_assert kind(ex[0]) == K"Symbol" ex
+    syntax_name(ex[0])
 end
 
 function is_eventually_call(ex::SyntaxTree)
     k = kind(ex)
-    return k == K"call" || ((k == K"where" || k == K"::") && is_eventually_call(ex[1]))
+    return k == K"call" || ((k == K"where" || k == K"::") && is_eventually_call(ex[0]))
 end
 
 function find_parameters_ind(exs)
-    i = length(exs)
-    while i >= 1
+    i = length(exs) - 1
+    while i >= 0
         k = kind(exs[i])
         if k == K"parameters"
             return i
@@ -381,15 +381,15 @@ function find_parameters_ind(exs)
         end
         i -= 1
     end
-    return 0
+    return -1
 end
 
 function has_parameters(ex::SyntaxTree)
-    find_parameters_ind(children(ex)) != 0
+    find_parameters_ind(children(ex)) != -1
 end
 
 function has_parameters(args::AbstractVector)
-    find_parameters_ind(args) != 0
+    find_parameters_ind(args) != -1
 end
 
 function any_assignment(exs)
@@ -397,8 +397,8 @@ function any_assignment(exs)
 end
 
 function is_valid_modref(ex)
-    return kind(ex) == K"." && kind(ex[2]) == K"Symbol" &&
-           (kind(ex[1]) == K"Identifier" || is_valid_modref(ex[1]))
+    return kind(ex) == K"." && kind(ex[1]) == K"Symbol" &&
+           (kind(ex[0]) == K"Identifier" || is_valid_modref(ex[0]))
 end
 
 function is_core_Any(ex)
@@ -418,7 +418,7 @@ function is_identifier_like(ex)
 end
 
 function decl_var(ex)
-    kind(ex) == K"::" ? ex[1] : ex
+    kind(ex) == K"::" ? ex[0] : ex
 end
 
 # Given the signature of a `function`, return the symbol that will ultimately
@@ -426,19 +426,19 @@ end
 function assigned_function_name(ex)
     while kind(ex) == K"where"
         # f() where T
-        ex = ex[1]
+        ex = ex[0]
     end
     if kind(ex) == K"::" && numchildren(ex) == 2
         # f()::T
-        ex = ex[1]
+        ex = ex[0]
     end
     if kind(ex) != K"call"
         throw(LoweringError(ex, "Expected call syntax in function signature"))
     end
-    ex = ex[1]
+    ex = ex[0]
     if kind(ex) == K"curly"
         # f{T}()
-        ex = ex[1]
+        ex = ex[0]
     end
     if kind(ex) == K"::" || kind(ex) == K"."
         # (obj::CallableType)(args)
@@ -453,11 +453,11 @@ end
 
 # Remove empty parameters block, eg, in the arg list of `f(x, y;)`
 function remove_empty_parameters(args)
-    i = length(args)
-    while i > 0 && kind(args[i]) == K"parameters" && numchildren(args[i]) == 0
+    i = length(args) - 1
+    while i >= 0 && kind(args[i]) == K"parameters" && numchildren(args[i]) == 0
         i -= 1
     end
-    args[1:i]
+    args[0:i]
 end
 
 function to_symbol(ctx, ex)

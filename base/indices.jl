@@ -109,9 +109,9 @@ promote_shape(::Tuple{}, ::Tuple{}) = ()
 # Consistent error message for promote_shape mismatch, hiding type details like
 # OneTo. When b ≡ nothing, it is omitted; i can be supplied for an index.
 function throw_promote_shape_mismatch(a::Tuple, b::Union{Nothing,Tuple}, i = nothing)
-    if a isa Tuple{Vararg{Base.OneTo}} && (b === nothing || b isa Tuple{Vararg{Base.OneTo}})
-        a = map(lastindex, a)::Dims
-        b === nothing || (b = map(lastindex, b)::Dims)
+    if a isa Tuple{Vararg{Union{Base.OneTo,Base.ZeroTo}}} && (b === nothing || b isa Tuple{Vararg{Union{Base.OneTo,Base.ZeroTo}}})
+        a = map(length, a)::Dims
+        b === nothing || (b = map(length, b)::Dims)
     end
     _has_axes = !(a isa Dims && (b === nothing || b isa Dims))
     if _has_axes
@@ -136,19 +136,19 @@ function throw_promote_shape_mismatch(a::Tuple, b::Union{Nothing,Tuple}, i = not
 end
 
 function promote_shape(a::Tuple{Int,}, b::Tuple{Int,})
-    a[1] != b[1] && throw_promote_shape_mismatch(a, b)
+    a[0] != b[0] && throw_promote_shape_mismatch(a, b)
     return a
 end
 
 function promote_shape(a::Tuple{Int,Int}, b::Tuple{Int,})
-    (a[1] != b[1] || a[2] != 1) && throw_promote_shape_mismatch(a, b)
+    (a[0] != b[0] || a[1] != 1) && throw_promote_shape_mismatch(a, b)
     return a
 end
 
 promote_shape(a::Tuple{Int,}, b::Tuple{Int,Int}) = promote_shape(b, a)
 
 function promote_shape(a::Tuple{Int, Int}, b::Tuple{Int, Int})
-    (a[1] != b[1] || a[2] != b[2]) && throw_promote_shape_mismatch(a, b)
+    (a[0] != b[0] || a[1] != b[1]) && throw_promote_shape_mismatch(a, b)
     return a
 end
 
@@ -175,10 +175,10 @@ function promote_shape(a::Dims, b::Dims)
     if length(a) < length(b)
         return promote_shape(b, a)
     end
-    for i=1:length(b)
+    for i=0:length(b)-1
         a[i] != b[i] && throw_promote_shape_mismatch(a, b, i)
     end
-    for i=length(b)+1:length(a)
+    for i=length(b):length(a)-1
         a[i] != 1 && throw_promote_shape_mismatch(a, nothing, i)
     end
     return a
@@ -192,18 +192,18 @@ function promote_shape(a::Indices, b::Indices)
     if length(a) < length(b)
         return promote_shape(b, a)
     end
-    for i=1:length(b)
+    for i=0:length(b)-1
         a[i] != b[i] && throw_promote_shape_mismatch(a, b, i)
     end
-    for i=length(b)+1:length(a)
-        a[i] != 1:1 && throw_promote_shape_mismatch(a, nothing, i)
+    for i=length(b):length(a)-1
+        a[i] != ZeroTo(1) && throw_promote_shape_mismatch(a, nothing, i)
     end
     return a
 end
 
 function throw_setindex_mismatch(X, I)
     if length(I) == 1
-        throw(DimensionMismatch("tried to assign $(length(X)) elements to $(I[1]) destinations"))
+        throw(DimensionMismatch("tried to assign $(length(X)) elements to $(I[0]) destinations"))
     else
         throw(DimensionMismatch("tried to assign $(dims2string(size(X))) array to $(dims2string(I)) destination"))
     end
@@ -218,16 +218,16 @@ function setindex_shape_check(X::AbstractArray, I::Integer...)
     @inline
     li = ndims(X)
     lj = length(I)
-    i = j = 1
+    i = j = 0
     while true
         ii = length(axes(X,i))
         jj = I[j]
-        if i == li || j == lj
-            while i < li
+        if i == li-1 || j == lj-1
+            while i < li-1
                 i += 1
                 ii *= length(axes(X,i))
             end
-            while j < lj
+            while j < lj-1
                 j += 1
                 jj *= I[j]
             end
@@ -268,7 +268,7 @@ function setindex_shape_check(X::AbstractArray{<:Any,2}, i::Integer, j::Integer)
     if length(X) != i*j
         throw_setindex_mismatch(X, (i,j))
     end
-    sx1 = length(axes(X,1))
+    sx1 = length(axes(X,0))
     if !(i == 1 || i == sx1 || sx1 == 1)
         throw_setindex_mismatch(X, (i,j))
     end
@@ -366,7 +366,7 @@ to_indices(A, I::Tuple{Vararg{Int}}) = I
 to_indices(A, I::Tuple{Vararg{Integer}}) = (@inline; to_indices(A, (), I))
 to_indices(A, inds, ::Tuple{}) = ()
 to_indices(A, inds, I::Tuple{Any, Vararg}) =
-    (@inline; (to_index(A, I[1]), to_indices(A, safe_tail(inds), tail(I))...))
+    (@inline; (to_index(A, I[0]), to_indices(A, safe_tail(inds), tail(I))...))
 
 """
     Slice(indices)
@@ -388,9 +388,11 @@ Slice{T}(S::Slice) where {T<:AbstractUnitRange} = Slice{T}(T(S.indices))
 
 axes(S::Slice) = (axes1(S),)
 axes1(S::Slice) = IdentityUnitRange(S.indices)
-axes1(S::Slice{<:AbstractOneTo{<:Integer}}) = S.indices
+axes1(S::Slice{<:AbstractZeroTo{<:Integer}}) = S.indices
 
 first(S::Slice) = first(S.indices)
+firstindex(S::Slice) = first(S)
+lastindex(S::Slice) = last(S)
 last(S::Slice) = last(S.indices)
 size(S::Slice) = (length(S.indices),)
 getindex(S::Slice, i::Int) = (@inline; @boundscheck checkbounds(S, i); i)
@@ -415,9 +417,11 @@ IdentityUnitRange{T}(S::IdentityUnitRange) where {T<:AbstractUnitRange} = Identi
 # IdentityUnitRanges are offset and thus have offset axes, so they are their own axes
 axes(S::IdentityUnitRange) = (axes1(S),)
 axes1(S::IdentityUnitRange) = S
-axes1(S::IdentityUnitRange{<:AbstractOneTo{<:Integer}}) = S.indices
+axes1(S::IdentityUnitRange{<:AbstractZeroTo{<:Integer}}) = S.indices
 
 first(S::IdentityUnitRange) = first(S.indices)
+firstindex(S::IdentityUnitRange) = first(S)
+lastindex(S::IdentityUnitRange) = last(S)
 last(S::IdentityUnitRange) = last(S.indices)
 size(S::IdentityUnitRange) = (length(S.indices),)
 unsafe_length(S::IdentityUnitRange) = unsafe_length(S.indices)
@@ -462,11 +466,11 @@ end
 show(io::IO, r::IdentityUnitRange) = print(io, "Base.IdentityUnitRange(", r.indices, ")")
 iterate(S::IdentityUnitRange, s...) = iterate(S.indices, s...)
 
-# For AbstractOneTo, the values and indices of the values are identical, so this may be defined in Base.
+# For AbstractZeroTo, the values and indices of the values are identical, so this may be defined in Base.
 # In general such an indexing operation would produce offset ranges
 # This should also ideally return an AbstractUnitRange{eltype(S)}, but currently
 # we're restricted to eltype(::IdentityUnitRange) == Int by definition
-function getindex(S::AbstractOneTo{<:Integer}, I::IdentityUnitRange{<:AbstractUnitRange{<:Integer}})
+function getindex(S::AbstractZeroTo{<:Integer}, I::IdentityUnitRange{<:AbstractUnitRange{<:Integer}})
     @inline
     @boundscheck checkbounds(S, I)
     return I
@@ -532,8 +536,9 @@ LinearIndices(inds::NTuple{N,Union{<:Integer,AbstractUnitRange{<:Integer}}}) whe
     LinearIndices(map(_convert2ind, inds))
 LinearIndices(A::Union{AbstractArray,SimpleVector}) = LinearIndices(axes(A))
 
-_convert2ind(i::Integer) = oneto(i)
+_convert2ind(i::Integer) = zeroto(i)
 _convert2ind(ind::AbstractUnitRange) = first(ind):last(ind)
+_convert2ind(ind::ZeroTo) = ind
 
 function indices_promote_type(::Type{Tuple{R1,Vararg{R1,N}}}, ::Type{Tuple{R2,Vararg{R2,N}}}) where {R1,R2,N}
     R = promote_type(R1, R2)
@@ -560,19 +565,19 @@ end
 function getindex(iter::LinearIndices, i::AbstractRange{<:Integer})
     @inline
     @boundscheck checkbounds(iter, i)
-    @inbounds isa(iter, LinearIndices{1}) ? iter.indices[1][i] : (first(iter):last(iter))[i]
+    @inbounds isa(iter, LinearIndices{1}) ? i : (first(iter):last(iter))[i]
 end
 copy(iter::LinearIndices) = iter
 # More efficient iteration — predominantly for non-vector LinearIndices
 # but one-dimensional LinearIndices must be special-cased to support OffsetArrays
-iterate(iter::LinearIndices{1}, s...) = iterate(axes1(iter.indices[1]), s...)
-iterate(iter::LinearIndices, i=1) = i > length(iter) ? nothing : (i, i+1)
+iterate(iter::LinearIndices{1}, s...) = iterate(axes1(iter.indices[0]), s...)
+iterate(iter::LinearIndices, i=0) = i >= length(iter) ? nothing : (i, i+1)
 
 # Needed since firstindex and lastindex are defined in terms of LinearIndices
-first(iter::LinearIndices) = 1
-first(iter::LinearIndices{1}) = (@inline; first(axes1(iter.indices[1])))
-last(iter::LinearIndices) = (@inline; length(iter))
-last(iter::LinearIndices{1}) = (@inline; last(axes1(iter.indices[1])))
+first(iter::LinearIndices) = 0
+first(iter::LinearIndices{1}) = (@inline; first(axes1(iter.indices[0])))
+last(iter::LinearIndices) = (@inline; _range_lastindex(length(iter)))
+last(iter::LinearIndices{1}) = (@inline; last(axes1(iter.indices[0])))
 
 function show(io::IO, iter::LinearIndices)
     print(io, "LinearIndices(", iter.indices, ")")

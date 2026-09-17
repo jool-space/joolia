@@ -180,7 +180,7 @@ end
 
 Compute `pHi = (a*b)>>128` where `b = bLo + bHi<<64`.
 """
-umul256_hi(a::UInt128, bHi::UInt64, bLo::UInt64) = umul256(a, bHi, bLo)[2]
+umul256_hi(a::UInt128, bHi::UInt64, bLo::UInt64) = umul256(a, bHi, bLo)[1]
 
 function mod1e9(v::UInt128)
     # TODO: Fix LLVM to perform this optimization itself on 128 bit integers
@@ -245,16 +245,16 @@ function generateinversetables()
     POW10_SPLIT_2 = Tuple{UInt64, UInt64, UInt64}[]
     lowerCutoff = big(1) << (54 + 8)
     for idx = 0:67
-        POW10_OFFSET_2[idx + 1] = length(POW10_SPLIT_2)
+        POW10_OFFSET_2[idx] = length(POW10_SPLIT_2)
         i = 0
         while true
             v = ((big(10)^(9 * (i + 1)) >> (-(120 - 16 * idx))) % (big(10)^9) << (120 + 16))
-            if MIN_BLOCK_2[idx + 1] == 0xff && ((v * lowerCutoff) >> 128) == 0
+            if MIN_BLOCK_2[idx] == 0xff && ((v * lowerCutoff) >> 128) == 0
                 i += 1
                 continue
             end
-            if MIN_BLOCK_2[idx + 1] == 0xff
-                MIN_BLOCK_2[idx + 1] = i
+            if MIN_BLOCK_2[idx] == 0xff
+                MIN_BLOCK_2[idx] = i
             end
             v == 0 && break
             push!(POW10_SPLIT_2, ((v & BIG_MASK) % UInt64, ((v >> 64) & BIG_MASK) % UInt64, ((v >> 128) & BIG_MASK) % UInt64))
@@ -294,7 +294,7 @@ for T in (Float64, Float32, Float16)
     i_max = log10pow2(e2_max)
     table_sym = Symbol("pow5invsplit_table_", string(T))
     @eval const $table_sym = Tuple(Any[pow5invsplit($T, i) for i = 0:$i_max])
-    @eval pow5invsplit_lookup(::Type{$T}, i) = @inbounds($table_sym[i+1])
+    @eval pow5invsplit_lookup(::Type{$T}, i) = @inbounds($table_sym[i])
 end
 
 
@@ -322,7 +322,7 @@ for T in (Float64, Float32, Float16)
     i_max = 1 - e2_min - log10pow5(-e2_min)
     table_sym = Symbol("pow5split_table_", string(T))
     @eval const $table_sym = Tuple(Any[pow5split($T, i) for i = 0:$i_max])
-    @eval pow5split_lookup(::Type{$T}, i) = @inbounds($table_sym[i+1])
+    @eval pow5split_lookup(::Type{$T}, i) = @inbounds($table_sym[i])
 end
 
 const DIGIT_TABLE16 = Base._dec_d100

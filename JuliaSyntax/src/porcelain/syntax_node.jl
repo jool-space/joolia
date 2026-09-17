@@ -57,16 +57,16 @@ const AbstractSyntaxNode = TreeNode{<:AbstractSyntaxData}
 struct SyntaxData <: AbstractSyntaxData
     source::SourceFile
     raw::GreenNode{SyntaxHead}
-    byte_end::UInt32
+    byte_end::Int
     val::Any
 end
 function Base.getproperty(data::SyntaxData, name::Symbol)
     if name === :position
         # Previous versions of JuliaSyntax had `position::Int`.
         # Allow access for compatibility. It was renamed (with changed semantics)
-        # to `byte_end::UInt32` to match the rest of the code base, which identified
+        # to `byte_end::Int` to match the rest of the code base, which identified
         # nodes, by their last byte.
-        return Int(getfield(data, :byte_end) - getfield(data, :raw).span + UInt32(1))
+        return getfield(data, :byte_end) - Int(getfield(data, :raw).span) + 1
     end
     return getfield(data, name)
 end
@@ -134,12 +134,12 @@ function _to_SyntaxNode(source::SourceFile, txtbuf::Vector{UInt8}, offset::Int,
 
         for (i, child_cursor) in enumerate(reverse(cursor))
             if should_include_node(child_cursor)
-                pushfirst!(cs, _to_SyntaxNode(source, txtbuf, offset, child_cursor, green[end-i+1], keep_parens))
+                pushfirst!(cs, _to_SyntaxNode(source, txtbuf, offset, child_cursor, green[end-i], keep_parens))
             end
         end
 
         if !keep_parens && kind(cursor) == K"parens" && length(cs) == 1
-            return cs[1]
+            return cs[0]
         end
         node = SyntaxNode(nothing, cs, SyntaxData(source, green, cursor.byte_end, nothing))
         for c in cs
@@ -173,9 +173,9 @@ numchildren(node::TreeNode) = (isnothing(node.children) ? 0 : length(node.childr
 
 Base.getindex(node::AbstractSyntaxNode, i::Int) = children(node)[i]
 Base.getindex(node::AbstractSyntaxNode, rng::UnitRange) = view(children(node), rng)
-Base.firstindex(::AbstractSyntaxNode) = 1
+Base.firstindex(::AbstractSyntaxNode) = 0
 Base.length(node::AbstractSyntaxNode) = length(children(node))
-Base.lastindex(node::AbstractSyntaxNode) = length(node)
+Base.lastindex(node::AbstractSyntaxNode) = length(node)-1
 
 function Base.setindex!(node::SN, x::SN, i::Int) where {SN<:AbstractSyntaxNode}
     children(node)[i] = x
@@ -191,7 +191,7 @@ head(node::AbstractSyntaxNode) = head(node.raw)
 
 span(node::AbstractSyntaxNode) = node.raw.span
 
-byte_range(node::AbstractSyntaxNode) = (node.byte_end - span(node) + 1):node.byte_end
+byte_range(node::AbstractSyntaxNode) = (node.byte_end - Int(span(node)) + 1):node.byte_end
 
 first_byte(node::AbstractSyntaxNode) = first(byte_range(node))
 last_byte(node::AbstractSyntaxNode) = last(byte_range(node))
@@ -327,7 +327,7 @@ function build_tree(::Type{SyntaxNode}, stream::ParseStream;
         cs = SyntaxNode[]
         for (i, child) in enumerate(reverse_toplevel_siblings(cursor))
             if should_include_node(child)
-                pushfirst!(cs, SyntaxNode(source, child, green[end-i+1], keep_parens=keep_parens))
+                pushfirst!(cs, SyntaxNode(source, child, green[end-i], keep_parens=keep_parens))
             end
         end
 

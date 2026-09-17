@@ -1,5 +1,31 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
+# Position zero must be parsed as data, including when forwarding byte offsets to C.
+@testset "zero-origin numeric parsing" begin
+    @test parse(Int, "0") === 0
+    @test parse(Int, "9") === 9
+    @test parse(Int, "-17") === -17
+    @test parse(Int, "0xff") === 255
+    @test parse(Int, "\u2003 12 ") === 12
+    @test tryparse(Int, "") === nothing
+    @test tryparse(Int, " ") === nothing
+    @test tryparse(Int, "+") === nothing
+    @test tryparse(Int, "0x") === nothing
+    @test parse(UInt8, "255") === UInt8(255)
+    @test tryparse(UInt8, "256") === nothing
+    @test parse(Bool, "true") === true
+    @test parse(Bool, "false") === false
+    @test parse(Bool, "1") === true
+    @test Base.tryparse_internal(Bool, "xtrue!", 1, 4, 0, false) === true
+    @test Base.tryparse_internal(Float64, "1.25!", 0, 3) === 1.25
+    @test Base.tryparse_internal(Float32, "x1.25!", 1, 4) === 1.25f0
+    @test parse(Complex{Int}, "3") === Complex(3, 0)
+    @test parse(Complex{Int}, "2im") === Complex(0, 2)
+    @test parse(Complex{Int}, "3-4im") === Complex(3, -4)
+    @test parse(ComplexF64, "1e-3+2e-4im") === Complex(1e-3, 2e-4)
+    @test tryparse(ComplexF64, "m") === nothing
+end
+
 @testset "integer parsing" begin
     @test parse(Int32,"0", base = 36) === Int32(0)
     @test parse(Int32,"1", base = 36) === Int32(1)
@@ -42,9 +68,9 @@ end
 # Issue 29451
 struct Issue29451String <: AbstractString end
 Base.ncodeunits(::Issue29451String) = 12345
-Base.lastindex(::Issue29451String) = 1
-Base.isvalid(::Issue29451String, i::Integer) = i == 1
-Base.iterate(::Issue29451String, i::Integer=1) = i == 1 ? ('0', 2) : nothing
+Base.lastindex(::Issue29451String) = 0
+Base.isvalid(::Issue29451String, i::Integer) = i == 0
+Base.iterate(::Issue29451String, i::Integer=0) = i == 0 ? ('0', 1) : nothing
 
 @test Issue29451String() == "0"
 @test parse(Int, Issue29451String()) == 0
@@ -52,9 +78,9 @@ Base.iterate(::Issue29451String, i::Integer=1) = i == 1 ? ('0', 2) : nothing
 # https://github.com/JuliaStrings/InlineStrings.jl/issues/57
 struct InlineStringIssue57 <: AbstractString end
 Base.ncodeunits(::InlineStringIssue57) = 4
-Base.lastindex(::InlineStringIssue57) = 4
-Base.isvalid(::InlineStringIssue57, i::Integer) = 0 < i < 5
-Base.iterate(::InlineStringIssue57, i::Integer=1) = i == 1 ? ('t', 2) : i == 2 ? ('r', 3) : i == 3 ? ('u', 4) : i == 4 ? ('e', 5) : nothing
+Base.lastindex(::InlineStringIssue57) = 3
+Base.isvalid(::InlineStringIssue57, i::Integer) = 0 <= i < 4
+Base.iterate(::InlineStringIssue57, i::Integer=0) = i == 0 ? ('t', 1) : i == 1 ? ('r', 2) : i == 2 ? ('u', 3) : i == 3 ? ('e', 4) : nothing
 Base.:(==)(::SubString{InlineStringIssue57}, x::String) = x == "true"
 
 @test parse(Bool, InlineStringIssue57())
@@ -91,15 +117,15 @@ Base.:(==)(::SubString{InlineStringIssue57}, x::String) = x == "true"
 
     # Test `tryparse_internal` with part of a string
     let b = "                   "
-        result = @test_throws ArgumentError Base.tryparse_internal(Bool, b, 7, 11, 0, true)
+        result = @test_throws ArgumentError Base.tryparse_internal(Bool, b, 6, 10, 0, true)
         exception_bool = result.value
         @test exception_bool.msg == "input string only contains whitespace"
 
-        result = @test_throws ArgumentError Base.tryparse_internal(Int, b, 7, 11, 0, true)
+        result = @test_throws ArgumentError Base.tryparse_internal(Int, b, 6, 10, 0, true)
         exception_int = result.value
         @test exception_int.msg == "input string is empty or only contains whitespace"
 
-        result = @test_throws ArgumentError Base.tryparse_internal(UInt128, b, 7, 11, 0, true)
+        result = @test_throws ArgumentError Base.tryparse_internal(UInt128, b, 6, 10, 0, true)
         exception_uint = result.value
         @test exception_uint.msg == "input string is empty or only contains whitespace"
     end
@@ -267,7 +293,7 @@ for T in (Int32, BigInt), base in (0,1,100)
 end
 
 # error throwing branch from #10560
-@test_throws ArgumentError Base.tryparse_internal(Bool, "foo", 1, 2, 10, true)
+@test_throws ArgumentError Base.tryparse_internal(Bool, "foo", 0, 1, 10, true)
 
 @test tryparse(Float64, "1.23") === 1.23
 @test tryparse(Float32, "1.23") === 1.23f0
@@ -299,7 +325,7 @@ end
         end
     end
     @test parse(Complex{Float16}, "3.3+4i") === Complex{Float16}(3.3+4im)
-    @test parse(Complex{Int}, SubString("xxxxxx1+2imxxxx", 7, 10)) === 1+2im
+    @test parse(Complex{Int}, SubString("xxxxxx1+2imxxxx", 6, 9)) === 1+2im
     for T in (Int, Float64), bad in ("3 + 4*im", "3 + 4", "1+2ij", "1im-3im", "++4im")
         @test_throws ArgumentError parse(Complex{T}, bad)
     end

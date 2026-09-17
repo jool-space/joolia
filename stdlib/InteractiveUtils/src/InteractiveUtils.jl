@@ -70,11 +70,11 @@ function varinfo(m::Module=Base.active_module(), pattern::Regex=r""; all::Bool =
         end
     end
     let (col, rev) = if sortby === :name
-            1, false
+            0, false
         elseif sortby === :size
-            4, true
+            3, true
         elseif sortby === :summary
-            3, false
+            2, false
         else
             @assert "unreachable"
         end
@@ -82,7 +82,7 @@ function varinfo(m::Module=Base.active_module(), pattern::Regex=r""; all::Bool =
     end
     pushfirst!(rows, Any["name", "size", "summary"])
 
-    return Markdown.MD(Any[Markdown.Table(map(r->r[1:3], rows), Symbol[:l, :r, :l])])
+    return Markdown.MD(Any[Markdown.Table(map(r->r[0:2], rows), Symbol[:l, :r, :l])])
 end
 varinfo(pat::Regex; kwargs...) = varinfo(Base.active_module(), pat; kwargs...)
 
@@ -101,7 +101,7 @@ controlled with boolean keyword arguments:
 See also: [`VERSION`](@ref).
 """
 function versioninfo(io::IO=stdout; verbose::Bool=false)
-    println(io, "Julia Version $VERSION")
+    println(io, "joolia Version $VERSION")
     println(io, "Build Info:")
     if Base.isdebugbuild()
         println(io, "  DEBUG build")
@@ -157,8 +157,8 @@ function versioninfo(io::IO=stdout; verbose::Bool=false)
         cpuio = IOBuffer() # print cpu_summary with correct alignment
         Sys.cpu_summary(cpuio)
         for (i, _line) in enumerate(split(chomp(takestring!(cpuio)), "\n"))
-            prefix = i == 1 ? "  CPU: " : "       "
-            line = if i == 1
+            prefix = i == 0 ? "  CPU: " : "       "
+            line = if i == 0
                 strip(x -> isspace(x) || x == ':', _line) * " (" * Sys.CPU_NAME * "):"
             else
                 _line
@@ -167,7 +167,7 @@ function versioninfo(io::IO=stdout; verbose::Bool=false)
         end
     else
         cpu = Sys.cpu_info()
-        println(io, "  CPU: ", length(cpu), " × ", cpu[1].model, " (", Sys.CPU_NAME, ")")
+        println(io, "  CPU: ", length(cpu), " × ", cpu[0].model, " (", Sys.CPU_NAME, ")")
     end
 
     if verbose

@@ -53,7 +53,7 @@ let color_syms = collect(Iterators.filter(x -> !isa(x, Integer), keys(text_color
     global const available_text_colors = cat(
         sort!(intersect(color_syms, formatting_syms), rev=true),
         sort!(setdiff(  color_syms, formatting_syms));
-        dims=1)
+        dims=0)
 end
 
 const available_text_colors_docstring =
@@ -156,7 +156,7 @@ Among others, `--math-mode`, `--warn-overwrite`, and `--trace-compile` are notab
 
 Unless set to `nothing`, the `cpu_target` keyword argument can be used to override the CPU target set for the running process.
 
-To get the julia command without propagated command line arguments, `julia_cmd()[1]` can be used.
+To get the julia command without propagated command line arguments, `julia_cmd()[0]` can be used.
 
 !!! compat "Julia 1.1"
     Only the `--cpu-target`, `--sysimage`, `--depwarn`, `--compile` and `--check-bounds` flags were propagated before Julia 1.1.
@@ -496,8 +496,8 @@ if Sys.iswindows()
         ccall((:CoTaskMemFree, "ole32.dll"), Cvoid, (Ptr{Cvoid},), outbuf_data[])
 
         # Done.
-        passbuf_ = passbuf[1:passlen[]-1]
-        result = (String(transcode(UInt8, usernamebuf[1:usernamelen[]-1])),
+        passbuf_ = passbuf[0:passlen[]-2]
+        result = (String(transcode(UInt8, usernamebuf[0:usernamelen[]-2])),
                   SecretBuffer!(transcode(UInt8, passbuf_)))
         securezero!(passbuf_)
         securezero!(passbuf)
@@ -587,7 +587,7 @@ macro kwdef(expr)
     isexpr(expr, :struct) || error("Invalid usage of @kwdef")
     _, T, fieldsblock = expr.args
     if T isa Expr && T.head === :<:
-        T = T.args[1]
+        T = T.args[0]
     end
 
     fieldnames = Any[]
@@ -613,9 +613,9 @@ macro kwdef(expr)
             # if T == S{A<:AA,B<:BB}, define two methods
             #   S(...) = ...
             #   S{A,B}(...) where {A<:AA,B<:BB} = ...
-            S = T.args[1]
-            P = T.args[2:end]
-            Q = Any[isexpr(U, :<:) ? U.args[1] : U for U in P]
+            S = T.args[0]
+            P = T.args[1:end]
+            Q = Any[isexpr(U, :<:) ? U.args[0] : U for U in P]
             SQ = :($S{$(Q...)})
             body1 = Expr(:block, __source__, Expr(:call, esc(S), fieldnames...))
             sig1 = Expr(:call, esc(S), Expr(:parameters, parameters...))
@@ -645,7 +645,7 @@ function extract_names_and_defvals_from_kwdef_fieldblock!(block, names, defvals)
         elseif item isa Expr && item.head in (:escape, :var"hygienic-scope")
             n = length(names)
             extract_names_and_defvals_from_kwdef_fieldblock!(item, names, defvals)
-            for j in n+1:length(defvals)
+            for j in n:length(defvals)-1
                 if !isnothing(defvals[j])
                     defvals[j] = Expr(item.head, defvals[j])
                 end
@@ -670,10 +670,10 @@ function def_name_defval_from_kwdef_fielddef(kwdef)
         def, name, _ = @something(def_name_defval_from_kwdef_fielddef(lhs), return nothing)
         return def, name, rhs
     elseif kwdef isa Expr && kwdef.head in (:const, :atomic)
-        def, name, defval = @something(def_name_defval_from_kwdef_fielddef(kwdef.args[1]), return nothing)
+        def, name, defval = @something(def_name_defval_from_kwdef_fielddef(kwdef.args[0]), return nothing)
         return Expr(kwdef.head, def), name, defval
     elseif kwdef isa Expr && kwdef.head in (:escape, :var"hygienic-scope")
-        def, name, defval = @something(def_name_defval_from_kwdef_fielddef(kwdef.args[1]), return nothing)
+        def, name, defval = @something(def_name_defval_from_kwdef_fielddef(kwdef.args[0]), return nothing)
         return Expr(kwdef.head, def), name, isnothing(defval) ? defval : Expr(kwdef.head, defval)
     end
 end

@@ -5,11 +5,13 @@
 
 ;; unnamed or all-underscore arguments may still be read from internally, so
 ;; convert (:: T) => (:: #gensym T) and _ => #gensym in formal argument lists
+;; Optional and generated methods retain these names across lowering calls.
+;; Do not reuse pooled temporaries, which can collide with the generated body.
 (define (fill-missing-argname a unused)
   (define (replace-if-underscore u)
-    (if (underscore-symbol? u) (if unused UNUSED (gensy)) u))
+    (if (underscore-symbol? u) (if unused UNUSED (named-gensy "arg")) u))
   (if (and (pair? a) (eq? (car a) '|::|))
-      (cond ((null? (cddr a))  `(|::| ,(if unused UNUSED (gensy)) ,(cadr a)))
+      (cond ((null? (cddr a))  `(|::| ,(if unused UNUSED (named-gensy "arg")) ,(cadr a)))
             ((null? (cdddr a)) `(|::| ,(replace-if-underscore (cadr a)) ,(caddr a)))
             (else a))
       (replace-if-underscore a)))
@@ -100,8 +102,8 @@
   (if (null? tuples)
       (if (and last (= n 1))
           `(call (top lastindex) ,a)
-          `(call (top lastindex) ,a ,n))
-      (let ((dimno `(call (top +) ,(- n (length tuples))
+          `(call (top lastindex) ,a ,(- n 1)))
+      (let ((dimno `(call (top +) ,(- n (length tuples) 1)
                           ,.(map (lambda (t) `(call (top length) ,t))
                                  tuples))))
             `(call (top lastindex) ,a ,dimno))))
@@ -110,8 +112,8 @@
   (if (null? tuples)
       (if (and last (= n 1))
           `(call (top firstindex) ,a)
-          `(call (top firstindex) ,a ,n))
-      (let ((dimno `(call (top +) ,(- n (length tuples))
+          `(call (top firstindex) ,a ,(- n 1)))
+      (let ((dimno `(call (top +) ,(- n (length tuples) 1)
                           ,.(map (lambda (t) `(call (top length) ,t))
                                  tuples))))
             `(call (top first) (call (top axes) ,a ,dimno)))))
@@ -800,7 +802,7 @@
                                                      (if (and (not selftype?) (equal? type-params params) (memq fty params) (memq fty sparams))
                                                       fty ; the field type is a simple parameter, the usage here is of a
                                                           ; local variable (currently just handles sparam) for the bijection of params to type-params
-                                                      `(call (core fieldtype) ,tn ,(+ fld 1)))
+                                                      `(call (core fieldtype) ,tn ,fld))
                                                       #f
                                                       #f)))))
     (cond ((> (num-non-varargs args) (length field-names))
@@ -822,7 +824,7 @@
                    (if (call (top ult_int) ,(length field-names) ,nf)
                        (call (core throw) (call (top ArgumentError)
                                                 ,(string "new: too many arguments (expected " (length field-names) ")"))))
-                   (new ,tn ,@(map (lambda (fld fty) (field-convert fld fty `(call (core getfield) ,argt ,(+ fld 1) (false))))
+                   (new ,tn ,@(map (lambda (fld fty) (field-convert fld fty `(call (core getfield) ,argt ,fld (false))))
                                    (iota (length field-names)) (list-head field-types (length field-names))))))))
           (else
            `(block
@@ -961,7 +963,7 @@
                            (let loop ((x x))
                              (if (and (pair? x) (not (decl? x)))
                                  (begin
-                                   (set! attrs (cons (quotify (car x)) (cons n attrs)))
+                                   (set! attrs (cons (quotify (car x)) (cons (- n 1) attrs)))
                                    (loop (cadr x)))
                                  x)))
                          fields)))
@@ -1369,7 +1371,7 @@
                  (call (core svec) ,@old-type-vars)))
         ;; Extract results using getfield (not tuple destructuring, which
         ;; requires indexed_iterate and is unavailable during bootstrap)
-        ,@(let loop ((ns names) (i 1) (acc '()))
+        ,@(let loop ((ns names) (i 0) (acc '()))
             (if (null? ns) (reverse acc)
                 (loop (cdr ns) (+ i 1)
                       (cons `(= ,(car ns) (call (core getfield) ,result-var ,i)) acc))))
@@ -1907,11 +1909,11 @@
                         (let ((temp (gensy)))
                           `(block
                             (local-def ,temp)
-                            (= ,temp (call (core getfield) ,t ,i))
+                            (= ,temp (call (core getfield) ,t ,(- i 1)))
                             ,(wrap `(= ,(car lhs) ,temp) i)))
                         (wrap
                           `(= ,(car lhs)
-                            (call (core getfield) ,t ,i)) i))
+                            (call (core getfield) ,t ,(- i 1))) i))
                     (loop (cdr lhs)
                           (+ i 1)))))
       ,t)))
@@ -2614,7 +2616,7 @@
                           (list lhs-)
                           (list lhs- st))
                       `(call (top indexed_iterate)
-                             ,xx ,i ,@(if (eq? i 1) '() `(,st))) wrapfirst))
+                             ,xx ,(- i 1) ,@(if (eq? i 1) '() `(,st))) wrapfirst))
                   (destructure- (+ i 1) (cdr lhss) xx n st end wrap))))))
 
 (define (expand-tuple-destruct lhss x (wrap identity))
@@ -3901,7 +3903,7 @@ f(x) = yt(x)
 
 (define (capt-var-access var fname opaq)
   (if opaq
-      `(call (core getfield) ,fname ,(get opaq var))
+      `(call (core getfield) ,fname ,(- (get opaq var) 1))
       `(call (core getfield) ,fname (inert ,var))))
 
 (define (convert-global-assignment var rhs0 globals lam toplevel-pure)

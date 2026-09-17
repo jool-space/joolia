@@ -111,3 +111,21 @@ end
 GC.enable(true); GC.gc(false) # incremental collection
 @test typeof(dims54422) == Vector{Any}
 @test isempty(dims54422)
+
+@testset "GC.@preserve zero-origin macro arguments" begin
+    expanded = macroexpand(@__MODULE__, :(GC.@preserve a b begin
+        a[0] + b[0]
+    end))
+    @test expanded.head === :gc_preserve
+    @test expanded.args[1] === :a
+    @test expanded.args[2] === :b
+
+    a = UInt8[0x2a]
+    b = UInt8[0x35]
+    pa = pointer(a)
+    pb = pointer(b)
+    @test (GC.@preserve a b begin
+        GC.gc()
+        unsafe_load(pa) + unsafe_load(pb)
+    end) == 0x5f
+end

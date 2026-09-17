@@ -53,9 +53,9 @@ If successful, return a 3-element tuple `(values, pos, num_parsed)`:
         end)
     end
 
-    vi = 1
+    vi = 0
     parsers = Expr[]
-    for i = 1:length(directives)
+    for i = 0:length(directives)-1
         if directives[i] <: DatePart
             name = value_names[vi]
             vi += 1
@@ -85,7 +85,7 @@ If successful, return a 3-element tuple `(values, pos, num_parsed)`:
         locale::DateLocale = df.locale
 
         num_parsed = 0
-        directive_index = 1
+        directive_index = 0
 
         $(assign_defaults...)
         $(parsers...)
@@ -97,7 +97,7 @@ If successful, return a 3-element tuple `(values, pos, num_parsed)`:
 
         @label error
         if raise
-            if directive_index > length(directives)
+            if directive_index >= length(directives)
                 throw(ArgumentError("Found extra characters at the end of date time string"))
             else
                 d = directives[directive_index]
@@ -190,7 +190,7 @@ end
 end
 
 @inline function tryparsenext_word(str::AbstractString, i, len, locale, maxchars=0)
-    word_start, word_end = i, 0
+    word_start, word_end = i, i - 1
     max_pos = maxchars <= 0 ? len : min(len, nextind(str, i, maxchars-1))
     @inbounds while i <= max_pos
         c, ii = iterate(str, i)::Tuple{Char, Int}
@@ -201,7 +201,7 @@ end
         end
         i = ii
     end
-    if word_end == 0
+    if word_end < word_start
         return nothing
     else
         return SubString(str, word_start, word_end), i

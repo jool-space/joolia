@@ -278,7 +278,7 @@ invalid.
 """
 function hoveridx(state::SelectorState)
     if state.hover > 0
-        length(state.candidates) - state.hover + 1
+        length(state.candidates) - state.hover
     else
         state.hover
     end
@@ -301,11 +301,12 @@ Return the `HistEntry` under the cursor (hover position), or `nothing`.
 Handles positive hover for `candidates` and negative for `gathered`.
 """
 function gethover(state::SelectorState)
+    state.hover == 0 && return nothing
     idx = hoveridx(state)
-    if idx ∈ axes(state.candidates, 1)
+    if idx ∈ axes(state.candidates, 0)
         state.candidates[idx]
-    elseif idx < 0 && -idx ∈ axes(state.selection.gathered, 1)
-        state.selection.gathered[-idx]
+    elseif idx < 0 && -idx - 1 ∈ axes(state.selection.gathered, 0)
+        state.selection.gathered[-idx - 1]
     end
 end
 
@@ -351,7 +352,7 @@ function candidates(state::SelectorState, rows::Int)
     gathered = CandsState(
         state.filter,
         gathcands,
-        collect(axes(gathcands, 1)),
+        collect(axes(gathcands, 0)),
         -state.hover - gathshift,
         gathcount,
         state.area.width)
@@ -643,10 +644,10 @@ Shows hover or gathered entries in a box.
 function redisplay_preview(io::IO, oldstate::SelectorState, oldrows::Int, newstate::SelectorState, newrows::Int)
     newrows == 0 && return
     function getcand(state::SelectorState, idx::Int)
-        if idx ∈ axes(state.candidates, 1)
+        if idx ∈ axes(state.candidates, 0)
             state.candidates[idx]
-        elseif -idx ∈ axes(state.selection.gathered, 1)
-            state.selection.gathered[-idx]
+        elseif -idx - 1 ∈ axes(state.selection.gathered, 0)
+            state.selection.gathered[-idx - 1]
         else
             throw(ArgumentError("Invalid candidate index: $idx")) # Should never happen
         end

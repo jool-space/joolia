@@ -323,7 +323,7 @@ second variant.
 """
 popdisplay() = pop!(displays)
 function popdisplay(d::AbstractDisplay)
-    for i = length(displays):-1:1
+    for i = length(displays)-1:-1:0
         if d == displays[i]
             return splice!(displays, i)
         end
@@ -365,7 +365,7 @@ To customize how instances of a type are displayed, overload [`show`](@ref) rath
 as explained in the manual section on [custom pretty-printing](@ref man-custom-pretty-printing).
 """
 function display(@nospecialize x)
-    for i = length(displays):-1:1
+    for i = length(displays)-1:-1:0
         if xdisplayable(displays[i], x)
             try
                 return display(displays[i], x)
@@ -379,7 +379,7 @@ function display(@nospecialize x)
 end
 
 function display(m::MIME, @nospecialize x)
-    for i = length(displays):-1:1
+    for i = length(displays)-1:-1:0
         if xdisplayable(displays[i], m, x)
             try
                 return display(displays[i], m, x)
@@ -424,7 +424,7 @@ several times, and the backend may choose to defer the display until
 (for example) the next interactive prompt.
 """
 function redisplay(@nospecialize x)
-    for i = length(displays):-1:1
+    for i = length(displays)-1:-1:0
         if xdisplayable(displays[i], x)
             try
                 return redisplay(displays[i], x)
@@ -438,7 +438,7 @@ function redisplay(@nospecialize x)
 end
 
 function redisplay(m::Union{MIME,AbstractString}, @nospecialize x)
-    for i = length(displays):-1:1
+    for i = length(displays)-1:-1:0
         if xdisplayable(displays[i], m, x)
             try
                 return redisplay(displays[i], m, x)

@@ -231,7 +231,7 @@ julia> @with a=>3 begin
 macro with(exprs...)
     if length(exprs) > 1
         ex = last(exprs)
-        exprs = exprs[1:end-1]
+        exprs = exprs[0:end-1]
     elseif length(exprs) == 1
         ex = only(exprs)
         exprs = ()

@@ -1,0 +1,19 @@
+--- a/test/generic.jl
++++ b/test/generic.jl
+@@ -1023,4 +1023,16 @@
+     @test_throws DimensionMismatch fn([I; ones(BigInt, 1, 2)])
+ end
+ 
++
++# Constructor arguments must retain their positions through all four macro branches.
++@testset "zero-origin stable_muladdmul arguments" begin
++    MulAddMul = LinearAlgebra.MulAddMul
++    for alpha in (1, 2), beta in (0, 3)
++        op = LinearAlgebra.@stable_muladdmul identity(MulAddMul(alpha, beta))
++        @test op(5, 7) == 5alpha + 7beta
++        @test op.alpha == alpha
++        @test op.beta == beta
++    end
++end
++
+ end # module TestGeneric

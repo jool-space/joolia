@@ -23,13 +23,13 @@ if !Sys.iswindows()
         pts, ptm = open_fake_pty()
         p = run(cmd, pts, pts, pts; wait=false)
         Base.close_stdio(pts)
-        std = readuntil(ptm, "julia>")
-        # check for newlines instead of equality with "julia>" because color may be on
+        std = readuntil(ptm, "joolia>")
+        # check for newlines instead of equality with "joolia>" because color may be on
         occursin("\n", std) && @info "There was output before the julia prompt:\n$std"
         @async write(ptm, "\n")  # another prompt
-        readuntil(ptm, "julia>")
+        readuntil(ptm, "joolia>")
         @async write(ptm, "\n")  # another prompt
-        readuntil(ptm, "julia>")
+        readuntil(ptm, "joolia>")
         tracecompile_out = read(f, String)
         close(ptm) # close after reading so we don't get precompiles from error shutdown
 

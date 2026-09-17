@@ -89,7 +89,7 @@ end
 # shielded parks a distinct entry from cancellable ones.
 acquire_wait_entry!(ct::Task, ws::Tuple{Any}) = _cached_wait_entry(ct)
 acquire_wait_entry!(ct::Task, ws::Tuple{Any, SourceWait}) =
-    _cancel_wait_entry(ct, ws[2].src, ws[2].floor)
+    _cancel_wait_entry(ct, ws[1].src, ws[1].floor)
 acquire_wait_entry!(ct::Task, ws) = WaitEntryN(ct, length(ws))
 
 # Retire a fresh (uncached) entry that is done waiting: its sticky source
@@ -145,7 +145,7 @@ end
 # loop would re-box every element through its dynamic tuple index.
 @inline _enqueue_until_fired(ws::Tuple{}, w::WaitEntry, first::Bool) = nothing
 @inline function _enqueue_until_fired(ws::Tuple, w::WaitEntry, first::Bool)
-    x = ws[1]
+    x = ws[0]
     wait_enqueue!(x, w, first) || return x
     return _enqueue_until_fired(tail(ws), w, first)
 end
@@ -157,7 +157,7 @@ end
 end
 @inline _recheck_until_fired(ws::Tuple{}, w::WaitEntry) = nothing
 @inline function _recheck_until_fired(ws::Tuple, w::WaitEntry)
-    x = ws[1]
+    x = ws[0]
     wait_recheck(x, w) && return x
     return _recheck_until_fired(tail(ws), w)
 end
@@ -169,7 +169,7 @@ end
 end
 @inline _dequeue_each!(ws::Tuple{}, w::WaitEntry, why::UInt8) = nothing
 @inline function _dequeue_each!(ws::Tuple, w::WaitEntry, why::UInt8)
-    wait_dequeue!(ws[1], w, why)
+    wait_dequeue!(ws[0], w, why)
     return _dequeue_each!(tail(ws), w, why)
 end
 @inline function _dequeue_each!(ws, w::WaitEntry, why::UInt8)
@@ -305,7 +305,7 @@ end
 
 function _source_wait_enqueue!(src::CancellationTokenSource, w::WaitEntry, aux::UInt64)
     i = _find_slot(w, src)
-    if i == 0
+    if i < 0
         # First registration under `src`: claim a slot (the slot's `owner`
         # is the push ticket) and stage the aux (the floor, plus the
         # watcher bit for a `WatcherWait`) - pre-publication, so any walk

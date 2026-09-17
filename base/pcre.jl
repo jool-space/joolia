@@ -28,19 +28,19 @@ global THREAD_MATCH_CONTEXTS::Vector{Ptr{Cvoid}} = [C_NULL]
 
 global PCRE_COMPILE_LOCK::Threads.SpinLock
 
-_tid() = Int(ccall(:jl_threadid, Int16, ())) + 1
-_mth() = Threads.maxthreadid()
+_tid() = Int(ccall(:jl_threadid, Int16, ()))
+_mth() = Threads.maxthreadid() + 1
 
 function get_local_match_context()
     tid = _tid()
     ctxs = THREAD_MATCH_CONTEXTS
-    if length(ctxs) < tid
+    if length(ctxs) <= tid
         # slow path to allocate it
         l = PCRE_COMPILE_LOCK
         lock(l)
         try
             ctxs = THREAD_MATCH_CONTEXTS
-            if length(ctxs) < tid
+            if length(ctxs) <= tid
                 global THREAD_MATCH_CONTEXTS = ctxs = copyto!(fill(C_NULL, length(ctxs) + _mth()), ctxs)
             end
         finally
@@ -261,8 +261,8 @@ function capture_names(re)
     name_entry_size = info(re, INFO_NAMEENTRYSIZE, UInt32)
     nametable_ptr = info(re, INFO_NAMETABLE, Ptr{UInt8})
     names = Dict{Int,String}()
-    for i = 1:name_count
-        offset = (i-1)*name_entry_size + 1
+    for i = 0:Int(name_count)-1
+        offset = i*name_entry_size
         # The capture group index corresponding to name 'i' is stored as a
         # big-endian 16-bit value.
         high_byte = UInt16(unsafe_load(nametable_ptr, offset))
@@ -270,7 +270,7 @@ function capture_names(re)
         idx = (high_byte << 8) | low_byte
         # The capture group name is a null-terminated string located directly
         # after the index.
-        names[idx] = unsafe_string(nametable_ptr+offset+1)
+        names[idx] = unsafe_string(nametable_ptr+offset+2)
     end
     return names
 end

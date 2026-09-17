@@ -25,20 +25,20 @@ todouble(sign, exp, mant) = Core.bitcast(Float64, (UInt64(sign) << 63) | (UInt64
     @test_throws ArgumentError Ryu.writeexp(floatmax(Float64), -1)
 
     buf = fill(UInt8(0), Ryu.neededdigits(Float64))
-    @test_throws InexactError Ryu.writeshortest(buf, 1, 1.0, false, false, true, typemax(UInt))
-    @test_throws MethodError Ryu.writefixed(buf, 1, 1.0)
-    @test_throws MethodError Ryu.writeexp(buf, 1, 1.0)
-    @test_throws ArgumentError Ryu.writefixed(buf, 1, 1.0, -1)
-    @test_throws ArgumentError Ryu.writeexp(buf, 1, 1.0, -1)
+    @test_throws InexactError Ryu.writeshortest(buf, 0, 1.0, false, false, true, typemax(UInt))
+    @test_throws MethodError Ryu.writefixed(buf, 0, 1.0)
+    @test_throws MethodError Ryu.writeexp(buf, 0, 1.0)
+    @test_throws ArgumentError Ryu.writefixed(buf, 0, 1.0, -1)
+    @test_throws ArgumentError Ryu.writeexp(buf, 0, 1.0, -1)
 
     for exactbuf in (zeros(UInt8, 4), Memory{UInt8}(undef, 4))
-        @test Ryu.writeshortest(exactbuf, 1, 1.25) == 5
+        @test Ryu.writeshortest(exactbuf, 0, 1.25) == 4
         @test String(Vector(exactbuf)) == "1.25"
     end
     canarybuf = fill(0xa5, 5)
-    canarybuf[5] = 0x5a
-    @test Ryu.writeshortest(canarybuf, 1, 1.25) == 5
-    @test canarybuf[5] == 0x5a
+    canarybuf[4] = 0x5a
+    @test Ryu.writeshortest(canarybuf, 0, 1.25) == 4
+    @test canarybuf[4] == 0x5a
 end
 
 @testset "Float64" begin
@@ -462,7 +462,7 @@ end # Float16
 @testset "writeshortest(::AbstractVector, pos, ...)" begin
     @testset for Vec in (Vector{UInt8}, Memory{UInt8})
         buf = Vec(undef, 4)
-        @test Ryu.writeshortest(buf, 1, -0.0) == 5
+        @test Ryu.writeshortest(buf, 0, -0.0) == 4
         @test String(buf) == "-0.0"
 
         buf = Vec(undef, 100)
@@ -673,7 +673,7 @@ end
     @testset "writefixed(::AbstractVector, pos, ...)" begin
         @testset for Vec in (Vector{UInt8}, Memory{UInt8})
             buf = Vec(undef, 6)
-            @test Ryu.writefixed(buf, 1, 0.0, 4) == 7
+            @test Ryu.writefixed(buf, 0, 0.0, 4) == 6
             @test String(buf) == "0.0000"
 
             buf = Vec(undef, 100)
@@ -887,7 +887,7 @@ end
 @testset "writeexp(::AbstractVector, pos, ...)" begin
     @testset for Vec in (Vector{UInt8}, Memory{UInt8})
         buf = Vec(undef, 10)
-        @test Ryu.writeexp(buf, 1, 0.0, 4) == 11
+        @test Ryu.writeexp(buf, 0, 0.0, 4) == 10
         @test String(buf) == "0.0000e+00"
 
         buf = Vec(undef, 100)
@@ -930,6 +930,12 @@ end # exp
     @test stringcompact(eps(0.0)) == "5.0e-324"
     @test stringcompact(eps(0f0)) == "1.0f-45"
     @test stringcompact(eps(Float16(0.0))) == "6.0e-8"
+
+    # The show path writes directly into a zero-origin byte buffer; no spare
+    # uninitialized byte may leak into compact output.
+    compact = stringcompact(79.063247821)
+    @test !occursin('\0', compact)
+    @test compact == Ryu.writeshortest(79.063247821, false, false, true, -1, UInt8('e'), false, UInt8('.'), false, true)
 end
 
 end # Ryu

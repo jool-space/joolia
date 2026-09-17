@@ -170,7 +170,7 @@ if ccall(:jl_ver_major, Int32, ()) < 2
     ordtype(o::ReverseOrdering, vs::AbstractArray) = ordtype(o.fwd, vs)
     ordtype(o::Perm,            vs::AbstractArray) = ordtype(o.order, o.data)
     # TODO: here, we really want the return type of o.by, without calling it
-    ordtype(o::By,              vs::AbstractArray) = try typeof(o.by(vs[1])) catch; Any end
+    ordtype(o::By,              vs::AbstractArray) = try typeof(o.by(vs[0])) catch; Any end
     ordtype(o::Ordering,        vs::AbstractArray) = eltype(vs)
 end
 

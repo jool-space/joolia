@@ -1,0 +1,176 @@
+--- a/src/Curl/Curl.jl
++++ b/src/Curl/Curl.jl
+@@ -78,7 +78,7 @@
+ const CURL_VERSION_STR = unsafe_string(curl_version())
+ let m = match(r"^libcurl/(\d+\.\d+\.\d+)\b", CURL_VERSION_STR)
+     m !== nothing || error("unexpected CURL_VERSION_STR value")
+-    curl = m.captures[1]
++    curl = m.captures[0]
+     julia = "$(VERSION.major).$(VERSION.minor)"
+     global const CURL_VERSION = VersionNumber(curl)
+     global const USER_AGENT = "curl/$curl julia/$julia"
+--- a/src/Curl/Easy.jl
++++ b/src/Curl/Easy.jl
+@@ -301,16 +301,16 @@
+     message = ""
+     headers = Pair{String,String}[]
+     if proto in ("http", "https")
+-        message = isempty(easy.res_hdrs) ? "" : easy.res_hdrs[1]
++        message = isempty(easy.res_hdrs) ? "" : easy.res_hdrs[0]
+         for hdr in easy.res_hdrs
+             if contains(hdr, r"^\s*$")
+                 # ignore
+             elseif (m = match(r"^(HTTP/\d+(?:.\d+)?\s+\d+\b.*?)\s*$", hdr); m) !== nothing
+-                message = m.captures[1]::SubString{String}
++                message = m.captures[0]::SubString{String}
+                 empty!(headers)
+             elseif (m = match(r"^(\S[^:]*?)\s*:\s*(.*?)\s*$", hdr); m) !== nothing
+-                key = lowercase(m.captures[1]::SubString{String})
+-                val = m.captures[2]::SubString{String}
++                key = lowercase(m.captures[0]::SubString{String})
++                val = m.captures[1]::SubString{String}
+                 push!(headers, key => val)
+             else
+                 @warn "malformed HTTP header" url status header=hdr
+@@ -328,7 +328,7 @@
+ 
+ function get_curl_errstr(easy::Easy)
+     easy.code == Curl.CURLE_OK && return ""
+-    errstr = easy.errbuf[1] == 0 ?
++    errstr = easy.errbuf[0] == 0 ?
+         unsafe_string(Curl.curl_easy_strerror(easy.code)) :
+         GC.@preserve easy unsafe_string(pointer(easy.errbuf))
+     return chomp(errstr)
+@@ -402,7 +402,7 @@
+         end
+         n = min(size * count, length(buf))
+         ccall(:memcpy, Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Csize_t), data, buf, n)
+-        deleteat!(buf, 1:n)
++        deleteat!(buf, 0:n-1)
+         return n
+     catch err
+         @async @error("read_callback: unexpected error", err=err, maxlog=1_000)
+--- a/src/Curl/utils.jl
++++ b/src/Curl/utils.jl
+@@ -9,9 +9,9 @@
+ macro check(ex::Expr)
+     ex.head == :call ||
+         error("@check: not a call: $ex")
+-    arg1 = ex.args[1] :: Symbol
++    arg1 = ex.args[0] :: Symbol
+     if arg1 == :ccall
+-        arg2 = ex.args[2]
++        arg2 = ex.args[1]
+         arg2 isa QuoteNode ||
+             error("@check: ccallee must be a symbol")
+         f = arg2.value :: Symbol
+--- a/src/Downloads.jl
++++ b/src/Downloads.jl
+@@ -403,7 +403,7 @@
+                 # libcurl does not set the default header reliably so set it
+                 # explicitly unless user has specified it, xref
+                 # https://github.com/JuliaLang/Pkg.jl/pull/2357
+-                if !any(kv -> lowercase(kv[1]) == "user-agent", headers)
++                if !any(kv -> lowercase(kv[0]) == "user-agent", headers)
+                     Curl.add_header(easy, "User-Agent", Curl.USER_AGENT)
+                 end
+ 
+@@ -540,7 +540,7 @@
+ let
+     Curl.__init__()
+     d = Downloader()
+-    f = mktemp()[1]
++    f = mktemp()[0]
+     download("file://" * f; downloader=d)
+     precompile(Tuple{typeof(Downloads.download), String, String})
+     precompile(Tuple{typeof(Downloads.Curl.status_2xx_ok), Int64})
+--- a/src/filenames.jl
++++ b/src/filenames.jl
+@@ -3,7 +3,7 @@
+ struct BadEncoding <: Exception end
+ 
+ function hex_digit(str::AbstractString, i::Int)::Tuple{UInt8,Int}
+-    if i ≤ ncodeunits(str)
++    if i < ncodeunits(str)
+         d, i = iterate(str, i)
+         '0' ≤ d ≤ '9' && return d - '0', i
+         'a' ≤ d ≤ 'f' && return d - 'a' + 10, i
+@@ -14,8 +14,8 @@
+ 
+ function url_unescape(str::Union{String, SubString{String}})
+     try return sprint(sizehint = ncodeunits(str)) do io
+-            i = 1
+-            while i ≤ ncodeunits(str)
++            i = 0
++            while i < ncodeunits(str)
+                 c, i = iterate(str, i)
+                 if c == '%'
+                     hi, i = hex_digit(str, i)
+@@ -36,7 +36,7 @@
+ function url_filename(url::AbstractString)
+     m = match(r"^[a-z][a-z+._-]*://[^#?]*/([^/#?]+)(?:[#?]|$)"i, url)
+     if m !== nothing
+-        name = url_unescape(m[1])
++        name = url_unescape(m[0])
+         is_safe_filename(name) && return name
+     end
+     return nothing
+@@ -63,15 +63,15 @@
+         h_key == "content-disposition" &&
+             contains(h_val, content_disposition_re) || continue
+         for m in eachmatch(content_disposition_each_re, h_val)
+-            a_key = lowercase(m.captures[1])
+-            a_val = m.captures[2]
++            a_key = lowercase(m.captures[0])
++            a_val = m.captures[1]
+             a_val === nothing && continue
+             if a_key == "filename"
+-                if a_val[1] in ('"', '\'') && a_val[1] == a_val[end]
++                if a_val[0] in ('"', '\'') && a_val[0] == a_val[end]
+                     # quoted value
+                     filename = sprint(sizehint=ncodeunits(a_val)-2) do io
+-                        i = nextind(a_val, 1)
+-                        while i < ncodeunits(a_val)
++                        i = nextind(a_val, 0)
++                        while i < ncodeunits(a_val)-1
+                             c, i = iterate(a_val, i)
+                             if c == '\\'
+                                 c, i = iterate(a_val, i)
+@@ -85,12 +85,12 @@
+             elseif a_key == "filename*"
+                 m = match(r"^([\w-]+)'\w*'(.*)$", a_val)
+                 m === nothing && continue
+-                encoding = lowercase(m.captures[1])
++                encoding = lowercase(m.captures[0])
+                 encoding in ("utf-8", "iso-8859-1") || continue
+-                encoded = m.captures[2]
++                encoded = m.captures[1]
+                 try filename⁺ = sprint() do io
+-                        i = 1
+-                        while i ≤ ncodeunits(encoded)
++                        i = 0
++                        while i < ncodeunits(encoded)
+                             c, i = iterate(encoded, i)
+                             if c == '%'
+                                 hi, i = hex_digit(encoded, i)
+--- a/test/runtests.jl
++++ b/test/runtests.jl
+@@ -786,3 +786,18 @@
+ 
+ Downloads.DOWNLOADER[] = nothing
+ GC.gc(true)
++
++@testset "zero-origin URL and response parsing" begin
++    @test Downloads.url_unescape("a%20b%2Fα") == "a b/α"
++    @test Downloads.url_unescape("bad%") === nothing
++    @test Downloads.url_filename("https://example.test/path/a%CE%B1.txt?q=1") == "aα.txt"
++
++    response = Response("http", "https://example.test/", 200, "", [
++        "content-disposition" => "attachment; filename=\"a%20b.txt\""])
++    @test Downloads.get_filename(response) == "a%20b.txt"
++
++    encoding = "utf-8" * Char(39) * Char(39)
++    response = Response("http", "https://example.test/", 200, "", [
++        "content-disposition" => "attachment; filename*=" * encoding * "a%CE%B1.txt"])
++    @test Downloads.get_filename(response) == "aα.txt"
++end

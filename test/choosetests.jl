@@ -55,25 +55,25 @@ const TOP_LEVEL_PKGS = [
 
 function test_path(test)
     t = split(test, '/')
-    if t[1] in STDLIBS
-        pkgdir = abspath(Base.find_package(String(t[1])), "..", "..")
+    if t[0] in STDLIBS
+        pkgdir = abspath(Base.find_package(String(t[0])), "..", "..")
         if length(t) == 2
-            return joinpath(pkgdir, "test", t[2])
+            return joinpath(pkgdir, "test", t[1])
         else
             return joinpath(pkgdir, "test", "runtests")
         end
-    elseif t[1] == "Compiler" && length(t) ≥ 3 && t[2] == "extras"
-        testpath = length(t) >= 4 ? t[4:end] : ("runtests",)
-        return joinpath(@__DIR__, "..", t[1], t[2], t[3], "test", testpath...)
-    elseif t[1] == "Compiler"
-        testpath = length(t) >= 2 ? t[2:end] : ("runtests",)
-        return joinpath(@__DIR__, "..", t[1], "test", testpath...)
-    elseif t[1] == "JuliaSyntax"
-        testpath = length(t) >= 2 ? t[2:end] : ("runtests_vendored",)
-        return joinpath(@__DIR__, "..", t[1], "test", testpath...)
-    elseif t[1] == "JuliaLowering"
-        testpath = length(t) >= 2 ? t[2:end] : ("runtests_vendored",)
-        return joinpath(@__DIR__, "..", t[1], "test", testpath...)
+    elseif t[0] == "Compiler" && length(t) ≥ 3 && t[1] == "extras"
+        testpath = length(t) >= 4 ? t[3:end] : ("runtests",)
+        return joinpath(@__DIR__, "..", t[0], t[1], t[2], "test", testpath...)
+    elseif t[0] == "Compiler"
+        testpath = length(t) >= 2 ? t[1:end] : ("runtests",)
+        return joinpath(@__DIR__, "..", t[0], "test", testpath...)
+    elseif t[0] == "JuliaSyntax"
+        testpath = length(t) >= 2 ? t[1:end] : ("runtests_vendored",)
+        return joinpath(@__DIR__, "..", t[0], "test", testpath...)
+    elseif t[0] == "JuliaLowering"
+        testpath = length(t) >= 2 ? t[1:end] : ("runtests_vendored",)
+        return joinpath(@__DIR__, "..", t[0], "test", testpath...)
     else
         return joinpath(@__DIR__, test)
     end
@@ -125,9 +125,9 @@ function choosetests(choices = [])
         elseif t == "--revise"
             use_revise = true
         elseif startswith(t, "--buildroot=")
-            buildroot = t[(length("--buildroot=") + 1):end]
+            buildroot = t[length("--buildroot="):end]
         elseif startswith(t, "--seed=")
-            seed = parse(UInt128, t[(length("--seed=") + 1):end])
+            seed = parse(UInt128, t[length("--seed="):end])
         elseif t == "--ci"
             ci_option_passed = true
         elseif t == "--help-list"
@@ -153,11 +153,12 @@ function choosetests(choices = [])
                       net_on = false,
                       exit_on_error = false,
                       use_revise = false,
+                      buildroot,
                       seed = UInt128(0))
         elseif startswith(t, "--")
             error("unknown option: $t")
         elseif startswith(t, "-")
-            push!(skip_tests, t[2:end])
+            push!(skip_tests, t[1:end])
         else
             push!(tests, t)
         end

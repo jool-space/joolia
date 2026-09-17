@@ -9,23 +9,23 @@ public Condition, threadpoolsize, ngcthreads
     Threads.threadid([t::Task])::Int
 
 Get the ID number of the current thread of execution, or the thread of task
-`t`. The master thread has ID `1`.
+`t`. The master thread has ID `0`.
 
 # Examples
 ```julia-repl
 julia> Threads.threadid()
-1
+0
 
 julia> Threads.@threads for i in 1:4
           println(Threads.threadid())
        end
-4
+3
+1
 2
-5
-4
+0
 
 julia> Threads.threadid(Threads.@spawn "foo")
-2
+1
 ```
 
 !!! note
@@ -33,25 +33,25 @@ julia> Threads.threadid(Threads.@spawn "foo")
     For this reason in most cases it is not safe to use `threadid([task])` to index into, say, a vector of buffers or stateful
     objects.
 """
-threadid() = Int(ccall(:jl_threadid, Int16, ())+1)
+threadid() = Int(ccall(:jl_threadid, Int16, ()))
 
 # lower bound on the largest threadid()
 """
     Threads.maxthreadid()::Int
 
-Get a lower bound on the number of threads (across all thread pools) available
+Get a lower bound on the largest thread ID (across all thread pools) available
 to the Julia process, with atomic-acquire semantics. The result will always be
 greater than or equal to [`threadid()`](@ref) as well as `threadid(task)` for
 any task you were able to observe before calling `maxthreadid`.
 """
-maxthreadid() = Int(unsafe_load(cglobal(:jl_n_threads, Cint), :acquire))
+maxthreadid() = Int(unsafe_load(cglobal(:jl_n_threads, Cint), :acquire)) - 1
 
 """
     Threads.nthreads(:default | :interactive)::Int
 
 Get the current number of threads within the specified thread pool. The threads in `:interactive`
-have id numbers `1:nthreads(:interactive)`, and the threads in `:default` have id numbers in
-`nthreads(:interactive) .+ (1:nthreads(:default))`.
+have id numbers `0:nthreads(:interactive)-1`, and the threads in `:default` have id numbers in
+`nthreads(:interactive) .+ (0:nthreads(:default)-1)`.
 
 See also `BLAS.get_num_threads` and `BLAS.set_num_threads` in the [`LinearAlgebra`](@ref
 man-linalg) standard library, and `nprocs()` in the [`Distributed`](@ref man-distributed)
@@ -61,7 +61,7 @@ nthreads(pool::Symbol) = threadpoolsize(pool)
 
 function _nthreads_in_pool(tpid::Int8)
     p = unsafe_load(cglobal(:jl_n_threads_per_pool, Ptr{Cint}))
-    return Int(unsafe_load(p, tpid + 1))
+    return Int(unsafe_load(p, tpid))
 end
 
 function _tpid_to_sym(tpid::Int8)
@@ -94,7 +94,7 @@ end
 Return the specified thread's threadpool; either `:default`, `:interactive`, or `:foreign`.
 """
 function threadpool(tid = threadid())
-    tpid = ccall(:jl_threadpoolid, Int8, (Int16,), tid-1)
+    tpid = ccall(:jl_threadpoolid, Int8, (Int16,), tid)
     return _tpid_to_sym(tpid)
 end
 
@@ -109,7 +109,7 @@ function threadpooldescription(tid = threadid())
         # TODO: extend tls to include a field to add a description to a foreign thread and make this more general
         n_others = nthreads(:interactive) + nthreads(:default)
         # Assumes GC threads come first in the foreign thread pool
-        if tid > n_others && tid <= n_others + ngcthreads()
+        if tid >= n_others && tid < n_others + ngcthreads()
             return "foreign: gc"
         end
     end
@@ -152,9 +152,9 @@ Return a vector of IDs of threads in the given pool.
 function threadpooltids(pool::Symbol)
     ni = _nthreads_in_pool(Int8(0))
     if pool === :interactive
-        return collect(1:ni)
+        return collect(0:ni-1)
     elseif pool === :default
-        return collect(ni+1:ni+_nthreads_in_pool(Int8(1)))
+        return collect(ni:ni+_nthreads_in_pool(Int8(1))-1)
     else
         error("invalid threadpool specified")
     end
@@ -184,11 +184,11 @@ function threading_run(fun, static)
     cr = nothing
     try
         Base.ScopedValues.with(Base.CANCEL_TOKEN => tok) do
-            for i = 1:n
+            for i = 0:n-1
                 t = Task(() -> fun(i)) # pass in tid
                 t.sticky = static
                 if static
-                    ccall(:jl_set_task_tid, Cint, (Any, Cint), t, tid_offset + i-1)
+                    ccall(:jl_set_task_tid, Cint, (Any, Cint), t, tid_offset + i)
                 else
                     # TODO: this should be the current pool (except interactive) if there
                     # are ever more than two pools.
@@ -199,7 +199,7 @@ function threading_run(fun, static)
                 schedule(t)
             end
         end
-        for i = 1:n
+        for i = 0:n-1
             r = Base._wait(tasks[i], tok; cancel_value=true)
             if r isa Base.CancellationRequest
                 # Our own scope was cancelled; the workers observe the same
@@ -211,7 +211,7 @@ function threading_run(fun, static)
                 # wait for).
                 cr = r
                 sev = Base.severity(r)
-                for j = i:n
+                for j = i:n-1
                     while sev < Base.CANCEL_REQUEST_ABANDON_ALL.request
                         r2 = Base._wait(tasks[j], tok; min_severity=sev + 0x01,
                                         cancel_value=true)
@@ -245,8 +245,8 @@ function _threading_run_expr(schedule)
 end
 
 function _threadsfor(iter, lbody, schedule)
-    lidx = iter.args[1]         # index
-    range = iter.args[2]
+    lidx = iter.args[0]         # index
+    range = iter.args[1]
     esc_range = esc(range)
     func = if schedule === :greedy
         greedy_func(esc_range, lidx, lbody)
@@ -262,11 +262,11 @@ function _threadsfor(iter, lbody, schedule)
 end
 
 function _threadsfor_multi_iterator(body, iterators, condition, schedule, dims, result_type)
-    vars = [iter.args[1] for iter in iterators]
-    ranges = [iter.args[2] for iter in iterators]
+    vars = [iter.args[0] for iter in iterators]
+    ranges = [iter.args[1] for iter in iterators]
 
     tuple_var = gensym("iter_tuple")
-    assignments = [:($(vars[i]) = $(tuple_var)[$i]) for i in 1:length(vars)]
+    assignments = [:($(vars[i]) = $(tuple_var)[$i]) for i in 0:length(vars)-1]
     # Use let blocks so destructured variables are local to each iteration,
     # avoiding data races when multiple threads execute the body concurrently.
     new_body = Expr(:let, Expr(:block, assignments...), body)
@@ -285,22 +285,22 @@ end
 function _threadsfor_comprehension(gen::Expr, schedule, result_type=nothing)
     @assert gen.head === :generator
 
-    body = gen.args[1]
+    body = gen.args[0]
 
     # Check if the second arg is a filter (handles both single and multi-loop with filters)
-    iter_or_filter = gen.args[2]
+    iter_or_filter = gen.args[1]
     if isa(iter_or_filter, Expr) && iter_or_filter.head === :filter
-        condition = iter_or_filter.args[1]
-        iterators = iter_or_filter.args[2:end]
+        condition = iter_or_filter.args[0]
+        iterators = iter_or_filter.args[1:end]
 
         if length(iterators) == 1
-            return _threadsfor_single_iterator(body, iterators[1], condition, schedule; result_type)
+            return _threadsfor_single_iterator(body, iterators[0], condition, schedule; result_type)
         else
             return _threadsfor_multi_iterator(body, iterators, condition, schedule, nothing, result_type)
         end
     elseif length(gen.args) > 2
-        iterators = gen.args[2:end]
-        ranges = [iter.args[2] for iter in iterators]
+        iterators = gen.args[1:end]
+        ranges = [iter.args[1] for iter in iterators]
         # Use axes to preserve offset index spaces (e.g. OffsetArrays)
         dims_expr = :(tuple($([:(axes($(esc(r)), 1)) for r in ranges]...)))
         return _threadsfor_multi_iterator(body, iterators, true, schedule, dims_expr, result_type)
@@ -310,8 +310,8 @@ function _threadsfor_comprehension(gen::Expr, schedule, result_type=nothing)
 end
 
 function _threadsfor_single_iterator(body, iterator, condition, schedule, dims=nothing; result_type=nothing)
-    lidx = iterator.args[1]
-    range = iterator.args[2]
+    lidx = iterator.args[0]
+    range = iterator.args[1]
     esc_range = esc(range)
     esc_lidx = esc(lidx)
     esc_body = esc(body)
@@ -407,7 +407,7 @@ function _threadsfor_comprehension_fast(esc_range, esc_lidx, esc_body, schedule,
             if niter > 0
                 let items = items, result = result
                 local threadsfor_fun
-                function threadsfor_fun(tid = 1)
+                function threadsfor_fun(tid = 0)
                     # Reads: items, tid. Defines: r, loop_first, loop_last.
                     $work_dist
                     for i = loop_first:loop_last
@@ -444,7 +444,7 @@ function _threadsfor_comprehension_fast(esc_range, esc_lidx, esc_body, schedule,
                     let items = items, result = result, _widen_buffers = _widen_buffers,
                         _skip = _skip
                     local threadsfor_fun
-                    function threadsfor_fun(tid = 1)
+                    function threadsfor_fun(tid = 0)
                         # Reads: items, tid. Defines: r, loop_first, loop_last.
                         $work_dist
                         local _T = eltype(result)
@@ -520,19 +520,19 @@ function _work_distribution_code()
         len, rem = divrem(lenr, threadpoolsize())
         # not enough iterations for all the threads?
         if len == 0
-            if tid > rem
+            if tid >= rem
                 return
             end
             len, rem = 1, 0
         end
         # compute this thread's iterations
-        loop_first = firstindex(r) + ((tid-1) * len)
+        loop_first = firstindex(r) + (tid * len)
         loop_last = loop_first + len - 1
         # distribute remaining iterations evenly
         if rem > 0
-            if tid <= rem
-                loop_first = loop_first + (tid-1)
-                loop_last = loop_last + tid
+            if tid < rem
+                loop_first = loop_first + tid
+                loop_last = loop_last + tid + 1
             else
                 loop_first = loop_first + rem
                 loop_last = loop_last + rem
@@ -545,7 +545,7 @@ function default_func(itr, lidx, lbody)
     work_dist = _work_distribution_code()
     quote
         let items = $itr
-        function threadsfor_fun(tid = 1)
+        function threadsfor_fun(tid = 0)
             # Reads: items, tid. Defines: r, loop_first, loop_last.
             $work_dist
             for i = loop_first:loop_last
@@ -581,7 +581,7 @@ function default_comprehension_func(itr, esc_lidx, esc_body, esc_condition, resu
         # in tid order preserves iteration order without a sort step.
         local local_bufs = [$buf_init for _ in 1:_npool]
 
-        function threadsfor_fun(tid = 1)
+        function threadsfor_fun(tid = 0)
             # Reads: items, tid. Defines: r, loop_first, loop_last.
             $work_dist
             local buf = local_bufs[tid]
@@ -822,23 +822,23 @@ macro threads(args...)
         end
     elseif na == 1
         sched = :default
-        ex = args[1]
+        ex = args[0]
     else
         throw(ArgumentError("wrong number of arguments in @threads"))
     end
     if isa(ex, Expr) && (ex.head === :comprehension || ex.head === :typed_comprehension)
         # Handle array comprehensions (typed and untyped)
         if ex.head === :typed_comprehension
-            return _threadsfor_comprehension(ex.args[2], sched, ex.args[1])
+            return _threadsfor_comprehension(ex.args[1], sched, ex.args[0])
         else
-            return _threadsfor_comprehension(ex.args[1], sched)
+            return _threadsfor_comprehension(ex.args[0], sched)
         end
     elseif isa(ex, Expr) && ex.head === :for
         # Handle for loops
-        if !(ex.args[1] isa Expr && ex.args[1].head === :(=))
+        if !(ex.args[0] isa Expr && ex.args[0].head === :(=))
             throw(ArgumentError("nested outer loops are not currently supported by @threads"))
         end
-        return _threadsfor(ex.args[1], ex.args[2], sched)
+        return _threadsfor(ex.args[0], ex.args[1], sched)
     else
         throw(ArgumentError("@threads requires a `for` loop or comprehension expression"))
     end
@@ -913,7 +913,7 @@ macro spawn(args...)
             tp = ttype
         end
     elseif na == 1
-        ex = args[1]
+        ex = args[0]
     else
         throw(ArgumentError("wrong number of arguments in @spawn"))
     end

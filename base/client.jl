@@ -38,18 +38,18 @@ function repl_cmd(cmd::AbstractCmd, out)
             run(ignorestatus(cmd))
         catch
             lasterr = current_exceptions()
-            lasterr = ExceptionStack(NamedTuple[(exception = e[1], backtrace = [] ) for e in lasterr])
+            lasterr = ExceptionStack(NamedTuple[(exception = e[0], backtrace = [] ) for e in lasterr])
             invokelatest(display_error, lasterr)
         end
         return nothing
     end
     if isempty(cmd.exec)
         throw(ArgumentError("no cmd to execute"))
-    elseif cmd.exec[1] == "cd"
+    elseif cmd.exec[0] == "cd"
         if length(cmd.exec) > 2
             throw(ArgumentError("cd method only takes one argument"))
         elseif length(cmd.exec) == 2
-            dir = cmd.exec[2]
+            dir = cmd.exec[1]
             if dir == "-"
                 if !haskey(ENV, "OLDPWD")
                     error("cd: OLDPWD not set")
@@ -79,7 +79,7 @@ function repl_cmd(cmd::AbstractCmd, out)
         catch
             # Julia throws an exception if it can't find the cmd (which may be the shell itself), but the stack trace isn't useful
             lasterr = current_exceptions()
-            lasterr = ExceptionStack(NamedTuple[(exception = e[1], backtrace = [] ) for e in lasterr])
+            lasterr = ExceptionStack(NamedTuple[(exception = e[0], backtrace = [] ) for e in lasterr])
             invokelatest(display_error, lasterr)
         end
     end
@@ -124,7 +124,7 @@ function scrub_repl_backtrace(bt)
         # remove REPL/driver frames from interactive printing
         eval_ind = findlast(is_driver_entry, bt)
         if eval_ind !== nothing
-            deleteat!(bt, eval_ind:length(bt))
+            deleteat!(bt, eval_ind:lastindex(bt))
             while !isempty(bt) && is_driver_machinery(bt[end])
                 pop!(bt)
             end
@@ -136,8 +136,8 @@ scrub_repl_backtrace(stack::ExceptionStack) =
     ExceptionStack(NamedTuple[(;x.exception, backtrace = scrub_repl_backtrace(x.backtrace)) for x in stack])
 
 istrivialerror(stack::ExceptionStack) =
-    length(stack) == 1 && length(stack[1].backtrace) ≤ 1 && !isa(stack[1].exception, MethodError)
-    # frame 1 = top level; assumes already went through scrub_repl_backtrace; MethodError see #50803
+    length(stack) == 1 && length(stack[0].backtrace) ≤ 1 && !isa(stack[0].exception, MethodError)
+    # frame 0 = top level; assumes already went through scrub_repl_backtrace; MethodError see #50803
 
 function display_error(io::IO, stack::ExceptionStack)
     printstyled(io, "ERROR: "; bold=true, color=Base.error_color())
@@ -261,7 +261,7 @@ function incomplete_tag(ex::Expr)
     elseif isempty(ex.args)
         return :other
     else
-        a = ex.args[1]
+        a = ex.args[0]
         if a isa String
             return fl_incomplete_tag(a)::Symbol
         else
@@ -328,7 +328,7 @@ function exec_options(opts)
     interactiveinput = (repl || is_interactive::Bool) && isa(stdin, TTY)
     is_interactive::Bool |= interactiveinput
 
-    # load ~/.julia/config/startup.jl file
+    # load ~/.joolia/config/startup.jl file
     if startup
         try
             load_julia_startup()
@@ -406,7 +406,7 @@ end
 
 function _local_julia_startup_file()
     if !isempty(DEPOT_PATH)
-        path = abspath(DEPOT_PATH[1], "config", "startup.jl")
+        path = abspath(DEPOT_PATH[0], "config", "startup.jl")
         isfile(path) && return path
     end
     return nothing
@@ -427,7 +427,7 @@ const repl_hooks = []
 
 Register a one-argument function to be called before the REPL interface is initialized in
 interactive sessions; this is useful to customize the interface. The argument of `f` is the
-REPL object. This function should be called from within the `.julia/config/startup.jl`
+REPL object. This function should be called from within the `.joolia/config/startup.jl`
 initialization file.
 """
 atreplinit(f::Function) = (pushfirst!(repl_hooks, f); nothing)
@@ -490,7 +490,7 @@ function run_fallback_repl(interactive::Bool)
         else
             while true
                 if interactive
-                    print("julia> ")
+                    print("joolia> ")
                     flush(stdout)
                 end
                 eof(input) && break
@@ -532,7 +532,7 @@ function run_std_repl(REPL::Module, quiet::Bool, banner::Symbol, history_file::B
         repl = REPL.LineEditREPL(term, get(stdout, :color, false), true)
         repl.history_file = history_file
     end
-    # Make sure any displays pushed in .julia/config/startup.jl end up above the
+    # Make sure any displays pushed in .joolia/config/startup.jl end up above the
     # REPLDisplay
     d = REPL.REPLDisplay(repl)
     last_active_repl = @isdefined(active_repl) ? active_repl : nothing

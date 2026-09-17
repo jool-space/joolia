@@ -9,9 +9,9 @@ struct UUID
     value::UInt128
 end
 UUID(u::UUID) = u
-UUID(u::NTuple{2, UInt64}) = UUID((UInt128(u[1]) << 64) | UInt128(u[2]))
-UUID(u::NTuple{4, UInt32}) = UUID((UInt128(u[1]) << 96) | (UInt128(u[2]) << 64) |
-                                  (UInt128(u[3]) << 32) | UInt128(u[4]))
+UUID(u::NTuple{2, UInt64}) = UUID((UInt128(u[0]) << 64) | UInt128(u[1]))
+UUID(u::NTuple{4, UInt32}) = UUID((UInt128(u[0]) << 96) | (UInt128(u[1]) << 64) |
+                                  (UInt128(u[2]) << 32) | UInt128(u[3]))
 
 function convert(::Type{NTuple{2, UInt64}}, uuid::UUID)
     bytes = uuid.value
@@ -50,27 +50,27 @@ end
 function Base.tryparse(::Type{UUID}, s::AbstractString)
     u = UInt128(0)
     ncodeunits(s) != 36 && return nothing
-    for i in 1:8
+    for i in 0:7
         u = uuid_kernel(s, i, u)
         u === nothing && return nothing
     end
-    @inbounds codeunit(s, 9) == UInt8('-') || return nothing
-    for i in 10:13
+    @inbounds codeunit(s, 8) == UInt8('-') || return nothing
+    for i in 9:12
         u = uuid_kernel(s, i, u)
         u === nothing && return nothing
     end
-    @inbounds codeunit(s, 14) == UInt8('-') || return nothing
-    for i in 15:18
+    @inbounds codeunit(s, 13) == UInt8('-') || return nothing
+    for i in 14:17
         u = uuid_kernel(s, i, u)
         u === nothing && return nothing
     end
-    @inbounds codeunit(s, 19) == UInt8('-') || return nothing
-    for i in 20:23
+    @inbounds codeunit(s, 18) == UInt8('-') || return nothing
+    for i in 19:22
         u = uuid_kernel(s, i, u)
         u === nothing && return nothing
     end
-    @inbounds codeunit(s, 24) == UInt8('-') || return nothing
-    for i in 25:36
+    @inbounds codeunit(s, 23) == UInt8('-') || return nothing
+    for i in 24:35
         u = uuid_kernel(s, i, u)
         u === nothing && return nothing
     end
@@ -88,7 +88,7 @@ end
 
 UUID(s::AbstractString) = parse(UUID, s)
 
-let groupings = [36:-1:25; 23:-1:20; 18:-1:15; 13:-1:10; 8:-1:1]
+let groupings = [35:-1:24; 22:-1:19; 17:-1:14; 12:-1:9; 7:-1:0]
     global string
     function string(u::UUID)
         u = u.value
@@ -96,13 +96,13 @@ let groupings = [36:-1:25; 23:-1:20; 18:-1:15; 13:-1:10; 8:-1:1]
         GC.@preserve str begin
             p = pointer(str)
             for i in groupings
-                unsafe_store!(p, @inbounds(hex_chars[1 + u & 0xf]), i)
+                unsafe_store!(p, @inbounds(hex_chars[u & 0xf]), i)
                 u >>= 4
             end
-            unsafe_store!(p, UInt8('-'), 9)
-            unsafe_store!(p, UInt8('-'), 14)
-            unsafe_store!(p, UInt8('-'), 19)
-            unsafe_store!(p, UInt8('-'), 24)
+            unsafe_store!(p, UInt8('-'), 8)
+            unsafe_store!(p, UInt8('-'), 13)
+            unsafe_store!(p, UInt8('-'), 18)
+            unsafe_store!(p, UInt8('-'), 23)
         end
         return str
     end

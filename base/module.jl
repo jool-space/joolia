@@ -12,10 +12,10 @@ end
 function eval_import_path(at::Module, from::Union{Module, Nothing}, path::Expr, keyword::String)
     isempty(path.args) && error("malformed import statement")
 
-    i = RefValue(1)
+    i = RefValue(0)
     function next!()
         local v
-        i[] <= length(path.args) || error("invalid module path")
+        i[] < length(path.args) || error("invalid module path")
         v = path.args[i[]]
         i[] += 1
         v isa Symbol || throw(TypeError(Symbol(keyword), "", Symbol, v))
@@ -135,7 +135,7 @@ See also [`_using`](@ref Core._using).
 function _eval_using(to::Module, path::Expr, flags::UInt8=UInt8(0))
     from = eval_import_path_all(to, path, "using")
     Core._using(to, from, flags)
-    is_package = length(path.args) == 1 && path.args[1] !== :.
+    is_package = length(path.args) == 1 && path.args[0] !== :.
     if to == Main && is_package
         Core._import(to, from, nameof(from))
     end

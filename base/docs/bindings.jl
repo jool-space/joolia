@@ -31,7 +31,7 @@ defined(b::Binding) = invokelatest(isdefinedglobal, b.mod, b.var)
 resolve(b::Binding) = invokelatest(getglobal, b.mod, b.var)
 
 function splitexpr(x::Expr)
-    isexpr(x, :.) ? (x.args[1], x.args[2]) : error("Could not find something to document in `$x`.")
+    isexpr(x, :.) ? (x.args[0], x.args[1]) : error("Could not find something to document in `$x`.")
 end
 splitexpr(s::Symbol) = :($Base.@__MODULE__), quot(s) # this somewhat complex form allows deferring resolving the Module for module docstring until after the module is created
 splitexpr(r::GlobalRef) = r.mod, quot(r.name)

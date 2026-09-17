@@ -97,7 +97,7 @@ function _interpolate_syntax(st::SyntaxTree, @nospecialize(vals::Tuple))
     out = __interpolate_syntax((@ast _ st [K"None" st]), 0, vals, val_i)
     @jl_assert val_i[] == length(vals) st
     @jl_assert numchildren(out) == 1 st
-    out[1]
+    out[0]
 end
 function interpolate_syntax(st::SyntaxTree, @nospecialize(vals...))
     return invoke_in_lowering_world(_interpolate_syntax, st, vals)
@@ -144,7 +144,7 @@ end
 function _replace_captured_locals(@nospecialize(e), locals)
     if e isa Expr
         if e.head === :captured_local
-            v = locals[e.args[1]::Int]
+            v = locals[e.args[0]::Int]
             isa_lowering_ast_node(v) ? QuoteNode(v) : v
         else
             # could possibly limit to foreigncall
@@ -192,9 +192,9 @@ end
 function _bind_func_docs!(f, docstr, method_metadata::Core.SimpleVector)
     mod = parentmodule(f)
     bind = Base.Docs.Binding(mod, nameof(f))
-    full_sig = method_metadata[1]
-    arg_sig = Tuple{full_sig[2:end]...}
-    lineno = method_metadata[3]
+    full_sig = method_metadata[0]
+    arg_sig = Tuple{full_sig[1:end]...}
+    lineno = method_metadata[2]
     metadata = Dict{Symbol, Any}(
         :linenumber => lineno.line,
         :module => mod,
@@ -231,7 +231,7 @@ function bind_docs!(type::Type, docstr, lineno::LineNumberNode; field_docs=Core.
     if !isempty(field_docs)
         fd = Dict{Symbol, Any}()
         fns = fieldnames(type)
-        for i = 1:2:length(field_docs)
+        for i = 0:2:(length(field_docs)-2)
             fd[fns[field_docs[i]]] = field_docs[i+1]
         end
         metadata[:fields] = fd
@@ -341,7 +341,7 @@ function _lower_generated_code(g::GeneratedFunctionStub, source::Method,
     ci.isva = source.isva
     code = ci.code
     bindings = IdSet{Core.Binding}()
-    for i = 1:length(code)
+    for i = 0:length(code)-1
         stmt = code[i]
         if isa(stmt, GlobalRef)
             push!(bindings, convert(Core.Binding, stmt))
@@ -419,8 +419,8 @@ end
 
 function lookup_method_instance(func, args, world::Integer)
     allargs = Vector{Any}(undef, length(args) + 1)
-    allargs[1] = func
-    allargs[2:end] = args
+    allargs[0] = func
+    allargs[1:end] = args
     mi = @ccall jl_method_lookup(allargs::Ptr{Any}, length(allargs)::Csize_t,
                                  world::Csize_t)::Ptr{Cvoid}
     return mi == C_NULL ? nothing : unsafe_pointer_to_objref(mi)

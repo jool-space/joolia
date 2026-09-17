@@ -1,3 +1,195 @@
+# Focused IO foundation checks for the pre-compiler Base prefix.
+if Core.Intrinsics.not_int(Core.isdefined(Base, :end_base_include))
+    Core.eval(Base, quote
+        include("reflection.jl")
+        include("refpointer.jl")
+        include("flfrontend.jl")
+        include("meta.jl")
+        using .Meta
+        using .Multimedia
+        include("char.jl")
+        include("strings/basic.jl")
+        include("strings/string.jl")
+        include("strings/substring.jl")
+        include("strings/cstring.jl")
+        include("cartesian.jl")
+        using .Cartesian
+        include("hashing.jl")
+        include("subarray.jl")
+        include("views.jl")
+        include("strings/stringview.jl")
+        include("some.jl")
+        include("div.jl")
+        include("simdloop.jl")
+        using .SimdLoop
+        include("twiceprecision.jl")
+        include("complex.jl")
+        include("rational.jl")
+        include("multinverses.jl")
+        using .MultiplicativeInverses
+        include("abstractarraymath.jl")
+        include("arraymath.jl")
+        include("slicearray.jl")
+        include("reduce.jl")
+        include("reshapedarray.jl")
+        include("reinterpretarray.jl")
+        include("dict.jl")
+        include("set.jl")
+        include("scope.jl")
+        include("cancellation.jl")
+        include("intfuncs.jl")
+        include("multidimensional.jl")
+        include("io.jl")
+        include("iobuffer.jl")
+    end)
+Core.eval(Core.Main, :(module JooliaIOFoundationTests
+    const checks = Base.RefValue(0)
+    function check(ok::Bool, label::String)
+        ok || throw(Core.ErrorException(label))
+        checks[] += 1
+    end
+    function drain(io)
+        out = UInt8[]
+        while !eof(io)
+            push!(out, read(io, UInt8))
+        end
+        out
+    end
+    function throws(f, T, label::String)
+        try
+            f()
+        catch err
+            check(err isa T, label)
+            return
+        end
+        throw(Core.ErrorException(label))
+    end
+
+    mutable struct ByteSource <: Base.IO
+        inner::Base.GenericIOBuffer
+    end
+    Base.eof(s::ByteSource) = eof(s.inner)
+    Base.read(s::ByteSource, ::Type{UInt8}) = read(s.inner, UInt8)
+
+    mutable struct CaptureDisplay <: Base.Multimedia.AbstractDisplay
+        id::Int
+        seen::Vector{Any}
+    end
+    Base.Multimedia.display(d::CaptureDisplay, x::Int) = (push!(d.seen, x); d.id)
+
+    function run()
+        # Basic scalar writes, zero-origin position, and EOF.
+        io = Base.GenericIOBuffer(Memory{UInt8}(), true, true, true, false, typemax(Int), false)
+        check(position(io) == 0 && bytesavailable(io) == 0 && eof(io), "empty buffer state")
+        check(write(io, UInt8(0x61)) == 1 && write(io, UInt8(0x62)) == 1, "scalar writes")
+        check(position(io) == 2 && bytesavailable(io) == 0 && eof(io), "write position")
+        seek(io, 0)
+        check(position(io) == 0 && bytesavailable(io) == 2, "seekstart")
+        check(read(io, UInt8) == 0x61 && read(io, UInt8) == 0x62, "scalar reads")
+        throws(() -> read(io, UInt8), EOFError, "read at end")
+
+        # Bulk pointer transfers use element offset zero.
+        io = Base.GenericIOBuffer(Memory{UInt8}(), true, true, true, false, typemax(Int), false)
+        src = UInt8[0x10, 0x20, 0x30, 0x40]
+        check(unsafe_write(io, pointer(src), UInt(4); cancel=nothing) == 4, "pointer write")
+        seek(io, 0)
+        dst = Vector{UInt8}(undef, 4)
+        unsafe_read(io, pointer(dst), UInt(4))
+        check(dst == src && position(io) == 4, "pointer read")
+
+        # readbytes! writes at the first zero-origin array position.
+        seek(io, 0)
+        dst = Vector{UInt8}(undef, 0)
+        check(readbytes!(io, dst, 3) == 3 && dst == src[0:2], "readbytes origin")
+
+        # Truncate grows with zero-filled bytes and clamps the cursor.
+        io = Base.GenericIOBuffer(Memory{UInt8}(), true, true, true, false, typemax(Int), false)
+        seed = UInt8[0x41, 0x42]
+        GC.@preserve seed unsafe_write(io, pointer(seed), UInt(2); cancel=nothing)
+        truncate(io, 5)
+        seek(io, 0)
+        check(drain(io) == UInt8[0x41, 0x42, 0x00, 0x00, 0x00], "truncate extension")
+        truncate(io, 1)
+        check(filesize(io) == 1, "truncate shrink")
+
+        # Marks preserve virtual positions across reset.
+        io = Base.GenericIOBuffer(UInt8[0x61, 0x62, 0x63], true, true, true, false, typemax(Int), false)
+        read(io, UInt8)
+        mark(io)
+        read(io, UInt8)
+        check(reset(io) == 1 && position(io) == 1 && read(io, UInt8) == 0x62, "mark reset")
+
+        # Delimiters at the first byte and CRLF line stripping.
+        input = ByteSource(Base.GenericIOBuffer(UInt8[0x0a, 0x78, 0x0d, 0x0a, 0x79], true, true, true, false, typemax(Int), false))
+        out = Base.GenericIOBuffer(Memory{UInt8}(), true, true, true, false, typemax(Int), false)
+        copyuntil(out, input, UInt8(0x0a); cancel=nothing)
+        check(drain(out) == UInt8[] && position(input.inner) == 1, "first delimiter")
+        copyline(out, input; keep=false, cancel=nothing)
+        seek(out, 0)
+        check(drain(out) == UInt8[0x78] && position(input.inner) == 4, "CRLF copyline")
+
+        # A vector view carries a nonzero MemoryRef offset into IOBuffer.
+        backing = UInt8[0x00, 0x11, 0x22, 0x33, 0x44]
+        sliced = view(backing, 1:3)
+        io = Base.GenericIOBuffer(sliced, true, true, true, false, typemax(Int), false)
+        check(drain(io) == UInt8[0x11, 0x22, 0x33], "offset vector read")
+        seek(io, 0)
+        write(io, UInt8(0xaa))
+        check(backing[1] == 0xaa, "offset vector write")
+
+        # Word-sized reads use little-endian byte offsets.
+        io = Base.GenericIOBuffer(Memory{UInt8}(), true, true, true, false, typemax(Int), false)
+        words = UInt8[0x34, 0x12, 0xef, 0xcd, 0xab, 0x89]
+        GC.@preserve words unsafe_write(io, pointer(words), UInt(6); cancel=nothing)
+        seek(io, 0)
+        check(peek(io, UInt16) == 0x1234, "word-sized 16-bit read")
+        skip(io, 2)
+        check(peek(io, UInt32) == 0x89abcdef, "word-sized 32-bit read")
+
+        # take! returns the used bytes and resets a writable buffer.
+        io = Base.GenericIOBuffer(Memory{UInt8}(), true, true, true, false, typemax(Int), false)
+        write(io, UInt8(0x51))
+        taken = take!(io)
+        check(length(taken) == 1 && taken[0] == 0x51 && position(io) == 0 && eof(io), "take and reset")
+
+        # Forced pipe compaction retains unread bytes and the mark contract.
+        pipe = Base.GenericIOBuffer(Memory{UInt8}(), true, true, false, true, 20, false)
+        for b in UInt8[0x01, 0x02, 0x03, 0x04, 0x05]
+            write(pipe, b)
+        end
+        read(pipe, UInt8)
+        read(pipe, UInt8)
+        for b in UInt8[0x06, 0x07, 0x08, 0x09, 0x0a]
+            write(pipe, b)
+        end
+        check(drain(pipe) == UInt8[0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a], "pipe compaction")
+
+        # Display stack traversals use zero-origin vector positions.
+        d0 = CaptureDisplay(0, Any[])
+        d1 = CaptureDisplay(1, Any[])
+        Base.Multimedia.pushdisplay(d0)
+        Base.Multimedia.pushdisplay(d1)
+        check(Base.Multimedia.display(7) == 1 && d1.seen == Any[7] && isempty(d0.seen),
+              "topmost display uses zero-origin stack traversal")
+        check(Base.Multimedia.popdisplay() === d1, "popdisplay top")
+        check(Base.Multimedia.display(8) == 0 && d0.seen == Any[8],
+              "display falls back after pop")
+        d2 = CaptureDisplay(2, Any[])
+        Base.Multimedia.pushdisplay(d1)
+        Base.Multimedia.pushdisplay(d2)
+        check(Base.Multimedia.popdisplay(d1) === d1 && Base.Multimedia.display(9) == 2,
+              "popdisplay finds lower stack entry")
+        check(Base.Multimedia.popdisplay(d2) === d2 && Base.Multimedia.popdisplay(d0) === d0,
+              "popdisplay removes zero-origin first entry")
+        check(isempty(Base.Multimedia.displays), "display stack empty")
+
+        Core.println("joolia IO foundation checks passed: ", checks[])
+    end
+    run()
+end))
+    ccall(:jl_exit, Core.Cvoid, (Core.Int32,), Core.Int32(0))
+end
+
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
 using Random
@@ -612,6 +804,29 @@ end
     write(bstream, rand(UInt8, 16))
     wait(task)
     @test flag[] == true
+end
+
+@testset "LibuvStream unwritten-tail requeue" begin
+    stream = Base.PipeEndpoint()
+    stream.sendbuf = Base.PipeBuffer()
+    try
+        # A zero-byte write must put the complete payload before concurrent appends.
+        write(stream.sendbuf, UInt8[0xe0, 0xe1])
+        Base._requeue_unwritten!(stream, UInt8[0xa0, 0xa1, 0xa2, 0xa3], 0)
+        @test take!(stream.sendbuf) == UInt8[0xa0, 0xa1, 0xa2, 0xa3, 0xe0, 0xe1]
+
+        # An interior short write retains exactly the unwritten zero-origin tail.
+        write(stream.sendbuf, UInt8[0xe2])
+        Base._requeue_unwritten!(stream, UInt8[0xb0, 0xb1, 0xb2, 0xb3], 2)
+        @test take!(stream.sendbuf) == UInt8[0xb2, 0xb3, 0xe2]
+
+        # A complete write leaves an already buffered append untouched.
+        write(stream.sendbuf, UInt8[0xee])
+        Base._requeue_unwritten!(stream, UInt8[0xc0, 0xc1], 2)
+        @test take!(stream.sendbuf) == UInt8[0xee]
+    finally
+        Base.uvfinalize(stream)
+    end
 end
 
 @test flush(IOBuffer()) === nothing # should be a no-op

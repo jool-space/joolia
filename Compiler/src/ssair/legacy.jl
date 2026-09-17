@@ -15,14 +15,14 @@ function inflate_ir!(ci::CodeInfo, mi::MethodInstance)
             matching_cache_argtypes(fallback_lattice, mi),
             ci.nargs, ci.isva, mi)
     else
-        argtypes = ci.slottypes[1:ci.nargs]
+        argtypes = ci.nargs == 0 ? Any[] : ci.slottypes[0:ci.nargs-1]
     end
     return inflate_ir!(ci, sptypes, argtypes)
 end
 function inflate_ir!(ci::CodeInfo, sptypes::Vector{VarState}, argtypes::Vector{Any})
     code = ci.code
     cfg = compute_basic_blocks(code)
-    for i = 1:length(code)
+    for i = 0:length(code)-1
         stmt = code[i]
         # Translate statement edges to bb_edges
         if isa(stmt, GotoNode)
@@ -38,9 +38,9 @@ function inflate_ir!(ci::CodeInfo, sptypes::Vector{VarState}, argtypes::Vector{A
     nstmts = length(code)
     ssavaluetypes = ci.ssavaluetypes
     if !isa(ssavaluetypes, Vector{Any})
-        ssavaluetypes = Any[ Any for i = 1:ssavaluetypes::Int ]
+        ssavaluetypes = Any[ Any for i = 0:ssavaluetypes::Int-1 ]
     end
-    info = CallInfo[NoCallInfo() for i = 1:nstmts]
+    info = CallInfo[NoCallInfo() for i = 0:nstmts-1]
     di = DebugInfoStream(nothing, ci.debuginfo, nstmts)
     stmts = InstructionStream(code, ssavaluetypes, info, di.codelocs, ci.ssaflags)
     meta = Expr[]
@@ -64,7 +64,7 @@ function inflate_ir(ci::CodeInfo)
     isa(parent, MethodInstance) && return inflate_ir(ci, parent)
     # XXX the length of `ci.slotflags` may be different from the actual number of call
     # arguments, but we really don't know that information in this case
-    argtypes = Any[ Any for i = 1:length(ci.slotflags) ]
+    argtypes = Any[ Any for i = 0:length(ci.slotflags)-1 ]
     return inflate_ir(ci, VarState[], argtypes)
 end
 
@@ -91,16 +91,16 @@ function replace_code_newstyle!(ci::CodeInfo, ir::IRCode)
     ci.debuginfo = DebugInfo(debuginfo, length(code))
     # Translate BB Edges to statement edges
     # (and undo normalization for now)
-    for i = 1:length(code)
+    for i = 0:length(code)-1
         stmt = code[i]
         if isa(stmt, GotoNode)
-            code[i] = GotoNode(first(ir.cfg.blocks[stmt.label].stmts))
+            code[i] = GotoNode(first(ir.cfg.blocks[stmt.label-1].stmts))
         elseif isa(stmt, GotoIfNot)
-            code[i] = GotoIfNot(stmt.cond, first(ir.cfg.blocks[stmt.dest].stmts))
+            code[i] = GotoIfNot(stmt.cond, first(ir.cfg.blocks[stmt.dest-1].stmts))
         elseif isa(stmt, PhiNode)
-            code[i] = PhiNode(Int32[edge == 0 ? 0 : last(ir.cfg.blocks[edge].stmts) for edge in stmt.edges], stmt.values)
+            code[i] = PhiNode(Int32[edge == 0 ? 0 : last(ir.cfg.blocks[edge-1].stmts) for edge in stmt.edges], stmt.values)
         elseif isa(stmt, EnterNode)
-            code[i] = EnterNode(stmt, stmt.catch_dest == 0 ? 0 : first(ir.cfg.blocks[stmt.catch_dest].stmts))
+            code[i] = EnterNode(stmt, stmt.catch_dest == 0 ? 0 : first(ir.cfg.blocks[stmt.catch_dest-1].stmts))
         end
     end
 end

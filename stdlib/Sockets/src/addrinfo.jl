@@ -245,7 +245,7 @@ function getipaddr(addr_type::Type{T}) where T<:IPAddr
 
     # When `addr_type` is `IPAddr`, `addrs` contain IP addresses of all types
     # In that case, we prefer to return the first IPv4
-    i = something(findfirst(ip -> ip isa IPv4, addrs), 1)
+    i = something(findfirst(ip -> ip isa IPv4, addrs), 0)
     return addrs[i]
 end
 getipaddr() = getipaddr(IPAddr)

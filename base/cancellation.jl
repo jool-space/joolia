@@ -161,7 +161,8 @@ end
 CancellationTokenSource(::Nothing) = Core._new_cancel_source()::CancellationTokenSource
 CancellationTokenSource() = Core._new_cancel_source()::CancellationTokenSource
 
-# The i-th (1-based) parent of `src`. Parent links are strong and const, so
+# The i-th parent of `src` (the native parent list remains one-based at
+# this boundary). Parent links are strong and const, so
 # these reads need no synchronization.
 _cancel_parent(src::CancellationTokenSource, i::Int) =
     ccall(:jl_cancel_source_parent, Any, (Any, Csize_t), src, i - 1)::CancellationTokenSource
@@ -261,7 +262,7 @@ const WaitEntry = Union{WaitEntry1, WaitEntry2, WaitEntryN}
 ## Uniform slot access
 #
 # Every kind is a `task` plus `_nslots` uniform {owner, next, aux} slots
-# (1-based). `task` and the slot `owner`s are atomic, accessed relaxed
+# (zero-origin). `task` and the slot `owner`s are atomic, accessed relaxed
 # (walkers read them without the owner's locks - see the notes above and
 # below); the `owner` doubles as the membership witness (`nothing` = free
 # slot). `next` and `aux` are plain, each protected by its owner's
@@ -280,16 +281,16 @@ _nslots(w::WaitEntryN) = Int(w.nslots)
 # dance of the source registration - `SourceWait` in base/park.jl).
 @inline _slot_owner(w::WaitEntry1, i::Int) = @atomic :monotonic w.owner1
 @inline _slot_owner(w::WaitEntry2, i::Int) =
-    i == 1 ? (@atomic :monotonic w.owner1) : (@atomic :monotonic w.owner2)
+    i == 0 ? (@atomic :monotonic w.owner1) : (@atomic :monotonic w.owner2)
 @inline _slot_owner(w::WaitEntryN, i::Int) =
-    ccall(:jl_wait_entry_slot_owner, Any, (Any, Csize_t), w, i - 1)
+    ccall(:jl_wait_entry_slot_owner, Any, (Any, Csize_t), w, i)
 
 @inline function _set_slot_owner!(w::WaitEntry1, i::Int, @nospecialize(v))
     @atomic :monotonic w.owner1 = v
     return nothing
 end
 @inline function _set_slot_owner!(w::WaitEntry2, i::Int, @nospecialize(v))
-    if i == 1
+    if i == 0
         @atomic :monotonic w.owner1 = v
     else
         @atomic :monotonic w.owner2 = v
@@ -297,53 +298,53 @@ end
     return nothing
 end
 @inline _set_slot_owner!(w::WaitEntryN, i::Int, @nospecialize(v)) =
-    ccall(:jl_wait_entry_set_slot_owner, Cvoid, (Any, Csize_t, Any), w, i - 1, v)
+    ccall(:jl_wait_entry_set_slot_owner, Cvoid, (Any, Csize_t, Any), w, i, v)
 
 @inline _slot_next(w::WaitEntry1, i::Int) = w.next1
-@inline _slot_next(w::WaitEntry2, i::Int) = i == 1 ? w.next1 : w.next2
+@inline _slot_next(w::WaitEntry2, i::Int) = i == 0 ? w.next1 : w.next2
 @inline _slot_next(w::WaitEntryN, i::Int) =
-    ccall(:jl_wait_entry_slot_next, Any, (Any, Csize_t), w, i - 1)::Union{WaitEntry, Nothing}
+    ccall(:jl_wait_entry_slot_next, Any, (Any, Csize_t), w, i)::Union{WaitEntry, Nothing}
 
 @inline _set_slot_next!(w::WaitEntry1, i::Int, v::Union{WaitEntry, Nothing}) = (w.next1 = v; nothing)
 @inline function _set_slot_next!(w::WaitEntry2, i::Int, v::Union{WaitEntry, Nothing})
-    i == 1 ? (w.next1 = v) : (w.next2 = v)
+    i == 0 ? (w.next1 = v) : (w.next2 = v)
     return nothing
 end
 @inline _set_slot_next!(w::WaitEntryN, i::Int, v::Union{WaitEntry, Nothing}) =
-    ccall(:jl_wait_entry_set_slot_next, Cvoid, (Any, Csize_t, Any), w, i - 1,
+    ccall(:jl_wait_entry_set_slot_next, Cvoid, (Any, Csize_t, Any), w, i,
           v === nothing ? nothing : v)
 
 @inline _slot_aux(w::WaitEntry1, i::Int) = w.aux1
-@inline _slot_aux(w::WaitEntry2, i::Int) = i == 1 ? w.aux1 : w.aux2
+@inline _slot_aux(w::WaitEntry2, i::Int) = i == 0 ? w.aux1 : w.aux2
 @inline _slot_aux(w::WaitEntryN, i::Int) =
-    ccall(:jl_wait_entry_slot_aux, UInt64, (Any, Csize_t), w, i - 1)
+    ccall(:jl_wait_entry_slot_aux, UInt64, (Any, Csize_t), w, i)
 
 @inline _set_slot_aux!(w::WaitEntry1, i::Int, v::UInt64) = (w.aux1 = v; nothing)
 @inline function _set_slot_aux!(w::WaitEntry2, i::Int, v::UInt64)
-    i == 1 ? (w.aux1 = v) : (w.aux2 = v)
+    i == 0 ? (w.aux1 = v) : (w.aux2 = v)
     return nothing
 end
 @inline _set_slot_aux!(w::WaitEntryN, i::Int, v::UInt64) =
-    ccall(:jl_wait_entry_set_slot_aux, Cvoid, (Any, Csize_t, UInt64), w, i - 1, v)
+    ccall(:jl_wait_entry_set_slot_aux, Cvoid, (Any, Csize_t, UInt64), w, i, v)
 
-# The slot registered on `owner`, or 0.
+# The slot registered on `owner`, or -1.
 @inline _find_slot(w::WaitEntry1, @nospecialize(owner)) =
-    (@atomic :monotonic w.owner1) === owner ? 1 : 0
+    (@atomic :monotonic w.owner1) === owner ? 0 : -1
 @inline _find_slot(w::WaitEntry2, @nospecialize(owner)) =
-    (@atomic :monotonic w.owner1) === owner ? 1 :
-    (@atomic :monotonic w.owner2) === owner ? 2 : 0
+    (@atomic :monotonic w.owner1) === owner ? 0 :
+    (@atomic :monotonic w.owner2) === owner ? 1 : -1
 function _find_slot(w::WaitEntryN, @nospecialize(owner))
-    for i in 1:_nslots(w)
+    for i in 0:_nslots(w)-1
         _slot_owner(w, i) === owner && return i
     end
-    return 0
+    return -1
 end
 
-# The first free slot, or 0.
-@inline _free_slot(w::WaitEntry1) = (@atomic :monotonic w.owner1) === nothing ? 1 : 0
+# The first free slot, or -1.
+@inline _free_slot(w::WaitEntry1) = (@atomic :monotonic w.owner1) === nothing ? 0 : -1
 @inline _free_slot(w::WaitEntry2) =
-    (@atomic :monotonic w.owner1) === nothing ? 1 :
-    (@atomic :monotonic w.owner2) === nothing ? 2 : 0
+    (@atomic :monotonic w.owner1) === nothing ? 0 :
+    (@atomic :monotonic w.owner2) === nothing ? 1 : -1
 _free_slot(w::WaitEntryN) = _find_slot(w, nothing)
 
 @noinline _slot_overflow_error() =
@@ -352,7 +353,7 @@ _free_slot(w::WaitEntryN) = _find_slot(w, nothing)
 # Claim a free slot for `owner` (which must not already have one).
 @inline function _acquire_slot!(w::WaitEntry, @nospecialize(owner))
     i = _free_slot(w)
-    i == 0 && _slot_overflow_error()
+    i < 0 && _slot_overflow_error()
     _set_slot_owner!(w, i, owner)
     return i
 end
@@ -389,7 +390,11 @@ struct WaitSlots{T<:WaitEntry} <: AbstractVector{WaitSlotRef{T}}
     entry::T
 end
 size(s::WaitSlots) = (_nslots(getfield(s, :entry)),)
-@inline getindex(s::WaitSlots, i::Int) = WaitSlotRef(getfield(s, :entry), i)
+axes(s::WaitSlots) = (ZeroTo(_nslots(getfield(s, :entry))),)
+@inline function getindex(s::WaitSlots, i::Int)
+    0 <= i < _nslots(getfield(s, :entry)) || throw(BoundsError(s, i))
+    return WaitSlotRef(getfield(s, :entry), i)
+end
 slots(w::WaitEntry) = WaitSlots(w)
 
 # Free slot `i` of `w`: `next` and `aux` are cleared first (a freed slot's
@@ -407,7 +412,7 @@ end
 # defensively - when `w` has no slot for `owner`).
 @inline function _next_on(w::WaitEntry, @nospecialize(owner))
     i = _find_slot(w, owner)
-    return i == 0 ? nothing : _slot_next(w, i)
+    return i < 0 ? nothing : _slot_next(w, i)
 end
 
 # Set/clear a bare waitee witness (a registration that marks the entry as
@@ -416,7 +421,7 @@ end
 _set_wait_witness!(w::WaitEntry, @nospecialize(x)) = (_acquire_slot!(w, x); nothing)
 function _clear_wait_witness!(w::WaitEntry, @nospecialize(x))
     i = _find_slot(w, x)
-    i == 0 || _release_slot!(w, i)
+    i < 0 || _release_slot!(w, i)
     return nothing
 end
 
@@ -597,7 +602,7 @@ end
 # registration in place). `w` must be unarmed and owned by the caller.
 function unregister_cancellation!(src::CancellationTokenSource, w::WaitEntry)
     wi = _find_slot(w, src)
-    wi == 0 && return nothing
+    wi < 0 && return nothing
     wslot = slots(w)[wi]
     _lock_walk(src)
     prev = nothing # the predecessor's slot for `src`, once past the head
@@ -606,7 +611,7 @@ function unregister_cancellation!(src::CancellationTokenSource, w::WaitEntry)
         xi = x === w ? wi : _find_slot(x, src)
         # a linked entry always has a slot for this source (see
         # _walk_waiters!); bail out without touching the structure otherwise
-        xi == 0 && break
+        xi < 0 && break
         slot = slots(x)[xi]
         xnext = slot.next
         if x === w
@@ -760,7 +765,7 @@ function _walk_waiters!(node::CancellationTokenSource, sev::UInt8)
         # a linked entry always has a slot for this source (its owner is
         # the membership witness, cleared only on unlink, under this lock);
         # bail out without touching the structure if that is ever violated
-        wi == 0 && break
+        wi < 0 && break
         slot = slots(w)[wi]
         wnext = slot.next
         t = @atomic :monotonic w.task

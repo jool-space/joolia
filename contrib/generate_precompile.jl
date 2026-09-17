@@ -3,11 +3,11 @@
 # Prevent this from putting anything into the Main namespace
 @eval Base module __precompile_script
 
-if Threads.maxthreadid() != 1
+if Threads.maxthreadid() != 0
     @warn "Running this file with multiple Julia threads may lead to a build error" Threads.maxthreadid()
 end
 
-if Base.isempty(Base.ARGS) || Base.ARGS[1] !== "0"
+if Base.isempty(Base.ARGS) || Base.ARGS[0] !== "0"
 Sys.__init_build()
 if !isdefined(Base, :uv_eventloop)
     Base.reinit_stdio()
@@ -192,10 +192,10 @@ cumsum([1,2,3])
 append!(Int[], BitSet())
 isempty(BitSet())
 delete!(BitSet([1,2]), 3)
-deleteat!(Int32[1,2,3], [1,3])
-deleteat!(Any[1,2,3], [1,3])
+deleteat!(Int32[1,2,3], [0,2])
+deleteat!(Any[1,2,3], [0,2])
 Core.svec(1, 2) == Core.svec(3, 4)
-any(t->t[1].line > 1, [(LineNumberNode(2,:none), :(1+1))])
+any(t->t[0].line > 1, [(LineNumberNode(2,:none), :(1+1))])
 
 # Code loading uses this
 sortperm(mtime.(readdir(".")), rev=true)

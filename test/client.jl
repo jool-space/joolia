@@ -72,7 +72,7 @@ end
     scrubbed_nonrepl_bt = Base.scrub_repl_backtrace(nonrepl_bt)
 
     @test length(scrubbed_repl_bt) == 1
-    @test scrubbed_repl_bt[1].func == :foo
+    @test scrubbed_repl_bt[0].func == :foo
     @test length(scrubbed_nonrepl_bt) == 3
 
     # driver entries (script/-e execution) cut like REPL entries, including

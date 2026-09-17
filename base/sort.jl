@@ -4,7 +4,7 @@ module Sort
 
 using Base.Order
 
-using Base: copymutable, midpoint, require_one_based_indexing, uinttype, tail,
+using Base: copymutable, midpoint, uinttype, tail,
     sub_with_overflow, add_with_overflow, BitSigned, BitIntegerType, top_set_bit
 
 import Base:
@@ -70,13 +70,13 @@ order is considered sorted, as described in the [`sort!`](@ref) documentation.
 julia> issorted([1, 2, 3])
 true
 
-julia> issorted([(1, "b"), (2, "a")], by = x -> x[1])
+julia> issorted([(1, "b"), (2, "a")], by = x -> x[0])
 true
 
-julia> issorted([(1, "b"), (2, "a")], by = x -> x[2])
+julia> issorted([(1, "b"), (2, "a")], by = x -> x[1])
 false
 
-julia> issorted([(1, "b"), (2, "a")], by = x -> x[2], rev=true)
+julia> issorted([(1, "b"), (2, "a")], by = x -> x[1], rev=true)
 true
 
 julia> issorted([1, 2, -2, 3], by=abs)
@@ -241,59 +241,63 @@ end
 const FastRangeOrderings = Union{DirectOrdering,Lt{typeof(<)},ReverseOrdering{Lt{typeof(<)}}}
 
 function searchsortedlast(a::AbstractRange{<:Real}, x::Real, o::FastRangeOrderings)::keytype(a)
-    require_one_based_indexing(a)
+    Base.require_zero_based_indexing(a)
+    isempty(a) && return firstindex(a) - 1
     f, h, l = first(a), step(a), last(a)
     if lt(o, x, f)
-        0
+        firstindex(a) - 1
     elseif h == 0 || !lt(o, x, l)
-        length(a)
+        lastindex(a)
     else
-        n = round(Integer, (x - f) / h + 1)
+        n = round(Integer, (x - f) / h)
         lt(o, x, a[n]) ? n - 1 : n
     end
 end
 
 function searchsortedfirst(a::AbstractRange{<:Real}, x::Real, o::FastRangeOrderings)::keytype(a)
-    require_one_based_indexing(a)
+    Base.require_zero_based_indexing(a)
+    isempty(a) && return firstindex(a)
     f, h, l = first(a), step(a), last(a)
     if !lt(o, f, x)
-        1
+        firstindex(a)
     elseif h == 0 || lt(o, l, x)
-        length(a) + 1
+        lastindex(a) + 1
     else
-        n = round(Integer, (x - f) / h + 1)
+        n = round(Integer, (x - f) / h)
         lt(o, a[n], x) ? n + 1 : n
     end
 end
 
 function searchsortedlast(a::AbstractRange{<:Integer}, x::Real, o::FastRangeOrderings)::keytype(a)
-    require_one_based_indexing(a)
+    Base.require_zero_based_indexing(a)
+    isempty(a) && return firstindex(a) - 1
     f, h, l = first(a), step(a), last(a)
     if lt(o, x, f)
-        0
+        firstindex(a) - 1
     elseif h == 0 || !lt(o, x, l)
-        length(a)
+        lastindex(a)
     else
         if !(o isa ReverseOrdering)
-            fld(floor(Integer, x) - f, h) + 1
+            fld(floor(Integer, x) - f, h)
         else
-            fld(ceil(Integer, x) - f, h) + 1
+            fld(ceil(Integer, x) - f, h)
         end
     end
 end
 
 function searchsortedfirst(a::AbstractRange{<:Integer}, x::Real, o::FastRangeOrderings)::keytype(a)
-    require_one_based_indexing(a)
+    Base.require_zero_based_indexing(a)
+    isempty(a) && return firstindex(a)
     f, h, l = first(a), step(a), last(a)
     if !lt(o, f, x)
-        1
+        firstindex(a)
     elseif h == 0 || lt(o, l, x)
-        length(a) + 1
+        lastindex(a) + 1
     else
         if !(o isa ReverseOrdering)
-            cld(ceil(Integer, x) - f, h) + 1
+            cld(ceil(Integer, x) - f, h)
         else
-            cld(floor(Integer, x) - f, h) + 1
+            cld(floor(Integer, x) - f, h)
         end
     end
 end
@@ -613,7 +617,7 @@ Base.axes(v::WithoutMissingVector) = axes(v.data)
 Send every element of `v` for which `f` returns `true` to the end of the vector and return
 the index of the last element for which `f` returns `false`.
 
-`send_to_end!(f, v, lo, hi)` is equivalent to `send_to_end!(f, view(v, lo:hi))+lo-1`
+`send_to_end!(f, v; lo, hi)` returns a position in `v`, including for a subrange.
 
 Preserves the order of the elements that are not sent to the end.
 """
@@ -643,9 +647,15 @@ If `end_stable` is set, the elements that are sent to the end are stable instead
 elements that are not
 """
 @inline send_to_end!(f::F, v::AbstractVector, ::ForwardOrdering, end_stable=false; lo, hi) where F <: Function =
-    end_stable ? (lo, hi-send_to_end!(!f, view(v, hi:-1:lo))) : (lo, send_to_end!(f, v; lo, hi))
+    end_stable ? begin
+        rv = view(v, hi:-1:lo)
+        (lo, hi - (send_to_end!(!f, rv) - firstindex(rv) + 1))
+    end : (lo, send_to_end!(f, v; lo, hi))
 @inline send_to_end!(f::F, v::AbstractVector, ::ReverseOrdering, end_stable=false; lo, hi) where F <: Function =
-    end_stable ? (send_to_end!(!f, v; lo, hi)+1, hi) : (hi-send_to_end!(f, view(v, hi:-1:lo))+1, hi)
+    end_stable ? (send_to_end!(!f, v; lo, hi)+1, hi) : begin
+        rv = view(v, hi:-1:lo)
+        (hi - (send_to_end!(f, rv) - firstindex(rv) + 1) + 1, hi)
+    end
 
 
 function _sort!(v::AbstractVector, a::MissingOptimization, o::Ordering, kw)
@@ -948,7 +958,7 @@ maybe_reverse(o::ReverseOrdering, x) = reverse(x)
 function _sort!(v::AbstractVector{<:Integer}, ::CountingSort, o::DirectOrdering, kw)
     @getkw lo hi mn mx scratch
     range = maybe_unsigned(o === Reverse ? mn -% mx : mx -% mn)
-    offs = 1 -% (o === Reverse ? mx : mn)
+    offs = 0 -% (o === Reverse ? mx : mn)
 
     counts = fill(0, range+1) # TODO use scratch (but be aware of type stability)
     @inbounds for i = lo:hi
@@ -956,7 +966,7 @@ function _sort!(v::AbstractVector{<:Integer}, ::CountingSort, o::DirectOrdering,
     end
 
     idx = lo
-    @inbounds for i = maybe_reverse(o, 1:range+1)
+    @inbounds for i = maybe_reverse(o, eachindex(counts))
         lastidx = idx + counts[i] - 1
         val = i -% offs
         for j = idx:lastidx
@@ -1038,10 +1048,10 @@ function _sort!(v::AbstractVector, a::RadixSort, o::DirectOrdering, kw)
 
     scratch, t = make_scratch(scratch, eltype(v), hi-lo+1)
     tu = reinterpret(eltype(u), t)
-    if radix_sort!(u, lo, hi, bits, tu, 1-lo)
+    if radix_sort!(u, lo, hi, bits, tu, firstindex(tu)-lo)
         uint_unmap!(v, u, lo, hi, o, umn)
     else
-        uint_unmap!(v, tu, lo, hi, o, umn, 1-lo)
+        uint_unmap!(v, tu, lo, hi, o, umn, firstindex(tu)-lo)
     end
     scratch
 end
@@ -1124,7 +1134,7 @@ function _sort!(v::AbstractVector, a::ScratchQuickSort, o::Ordering, kw;
 
     if t === nothing
         scratch, t = make_scratch(scratch, eltype(v), hi-lo+1)
-        offset = 1-lo
+        offset = firstindex(t)-lo
         kw = (;kw..., scratch)
     end
 
@@ -1402,25 +1412,25 @@ end
 function radix_sort_pass!(t, lo, hi, offset, counts, v, shift, chunk_size)
     mask = UInt(1) << chunk_size - 1  # mask is defined in pass so that the compiler
     @inbounds begin                   #  ↳ knows it's shape
-        # counts[2:mask+2] will store the number of elements that fall into each bucket.
-        # if chunk_size = 8, counts[2] is bucket 0x00 and counts[257] is bucket 0xff.
+        # counts[1:mask+1] will store the number of elements that fall into each bucket.
+        # if chunk_size = 8, counts[1] is bucket 0x00 and counts[256] is bucket 0xff.
         counts .= 0
         for k in lo:hi
             x = v[k]                  # lookup the element
-            i = (x >> shift)&mask + 2 # compute its bucket's index for this pass
+            i = (x >> shift)&mask + 1 # compute its bucket's index for this pass
             counts[i] += 1            # increment that bucket's count
         end
 
-        counts[1] = lo + offset       # set target index for the first bucket
+        counts[0] = lo + offset       # set target index for the first bucket
         cumsum!(counts, counts)       # set target indices for subsequent buckets
-        # counts[1:mask+1] now stores indices where the first member of each bucket
+        # counts[0:mask] now stores indices where the first member of each bucket
         # belongs, not the number of elements in each bucket. We will put the first element
-        # of bucket 0x00 in t[counts[1]], the next element of bucket 0x00 in t[counts[1]+1],
-        # and the last element of bucket 0x00 in t[counts[2]-1].
+        # of bucket 0x00 in t[counts[0]], the next element of bucket 0x00 in t[counts[0]+1],
+        # and the last element of bucket 0x00 in t[counts[1]-1].
 
         for k in lo:hi
             x = v[k]                  # lookup the element
-            i = (x >> shift)&mask + 1 # compute its bucket's index for this pass
+            i = (x >> shift)&mask     # compute its bucket's index for this pass
             j = counts[i]             # lookup the target index
             t[j] = x                  # put the element where it belongs
             counts[i] = j + 1         # increment the target index for the next
@@ -1690,13 +1700,13 @@ julia> v = [3, 1, 2]; sort!(v, rev = true); v
  2
  1
 
-julia> v = [(1, "c"), (3, "a"), (2, "b")]; sort!(v, by = x -> x[1]); v
+julia> v = [(1, "c"), (3, "a"), (2, "b")]; sort!(v, by = x -> x[0]); v
 3-element Vector{Tuple{Int64, String}}:
  (1, "c")
  (2, "b")
  (3, "a")
 
-julia> v = [(1, "c"), (3, "a"), (2, "b")]; sort!(v, by = x -> x[2]); v
+julia> v = [(1, "c"), (3, "a"), (2, "b")]; sort!(v, by = x -> x[1]); v
 3-element Vector{Tuple{Int64, String}}:
  (3, "a")
  (2, "b")
@@ -1815,7 +1825,7 @@ merge(x::NTuple, y::NTuple{0}, o::Ordering) = x
 merge(x::NTuple{0}, y::NTuple, o::Ordering) = y
 merge(x::NTuple{0}, y::NTuple{0}, o::Ordering) = x # Method ambiguity
 merge(x::NTuple, y::NTuple, o::Ordering) =
-    (lt(o, y[1], x[1]) ? (y[1], merge(x, tail(y), o)...) : (x[1], merge(tail(x), y, o)...))
+    (lt(o, y[0], x[0]) ? (y[0], merge(x, tail(y), o)...) : (x[0], merge(tail(x), y, o)...))
 
 ## partialsortperm: the permutation to sort the first k elements of an array ##
 
@@ -1839,9 +1849,9 @@ julia> v[partialsortperm(v, 1)]
 
 julia> p = partialsortperm(v, 1:3)
 3-element view(::Vector{Int64}, 1:3) with eltype Int64:
- 2
- 4
+ 1
  3
+ 2
 
 julia> v[p]
 3-element Vector{Int64}:
@@ -1889,8 +1899,8 @@ julia> ix = [1:4;];
 
 julia> partialsortperm!(ix, v, 2:3)
 2-element view(::Vector{Int64}, 2:3) with eltype Int64:
- 4
  3
+ 2
 ```
 """
 function partialsortperm!(ix::AbstractVector{<:Integer}, v::AbstractVector,
@@ -1937,9 +1947,9 @@ julia> v = [13, 11, 12];
 
 julia> p = sortperm(v)
 3-element Vector{Int64}:
- 2
- 3
  1
+ 2
+ 0
 
 julia> v[p]
 3-element Vector{Int64}:
@@ -1952,15 +1962,15 @@ julia> A = [8 7; 5 6]
  8  7
  5  6
 
+julia> sortperm(A, dims = 0)
+2×2 Matrix{Int64}:
+ 1  3
+ 0  2
+
 julia> sortperm(A, dims = 1)
 2×2 Matrix{Int64}:
- 2  4
+ 2  0
  1  3
-
-julia> sortperm(A, dims = 2)
-2×2 Matrix{Int64}:
- 3  1
- 2  4
 ```
 """
 function sortperm(A::AbstractArray;
@@ -2011,9 +2021,9 @@ julia> v = [3, 1, 2]; p = zeros(Int, 3);
 
 julia> sortperm!(p, v); p
 3-element Vector{Int64}:
- 2
- 3
  1
+ 2
+ 0
 
 julia> v[p]
 3-element Vector{Int64}:
@@ -2023,15 +2033,15 @@ julia> v[p]
 
 julia> A = [8 7; 5 6]; p = zeros(Int,2, 2);
 
+julia> sortperm!(p, A; dims=0); p
+2×2 Matrix{Int64}:
+ 1  3
+ 0  2
+
 julia> sortperm!(p, A; dims=1); p
 2×2 Matrix{Int64}:
- 2  4
+ 2  0
  1  3
-
-julia> sortperm!(p, A; dims=2); p
-2×2 Matrix{Int64}:
- 3  1
- 2  4
 ```
 """
 @inline function sortperm!(ix::AbstractArray{T}, A::AbstractArray;
@@ -2056,22 +2066,25 @@ end
 
 # sortperm for vectors of few unique integers
 function sortperm_int_range(x::Vector{<:Integer}, rangelen, minval)
-    offs = 1 -% minval
+    offs = 0 -% minval
     n = length(x)
 
     counts = fill(0, rangelen+1)
-    counts[1] = 1
-    @inbounds for i = 1:n
-        counts[x[i] +% offs +% 1] += 1
+    @inbounds for i in eachindex(x)
+        counts[x[i] +% offs] += 1
     end
 
-    #cumsum!(counts, counts)
-    @inbounds for i = 2:length(counts)
+    # Convert frequencies to zero-origin insertion offsets.
+    @inbounds for i = lastindex(counts):-1:1
+        counts[i] = counts[i-1]
+    end
+    counts[0] = 0
+    @inbounds for i = 1:lastindex(counts)
         counts[i] += counts[i-1]
     end
 
     P = Vector{Int}(undef, n)
-    @inbounds for i = 1:n
+    @inbounds for i in eachindex(x)
         label = x[i] +% offs
         P[counts[label]] = i
         counts[label] += 1
@@ -2098,12 +2111,12 @@ julia> A = [4 3; 1 2]
  4  3
  1  2
 
-julia> sort(A, dims = 1)
+julia> sort(A, dims = 0)
 2×2 Matrix{Int64}:
  1  2
  4  3
 
-julia> sort(A, dims = 2)
+julia> sort(A, dims = 1)
 2×2 Matrix{Int64}:
  3  4
  1  2
@@ -2118,10 +2131,11 @@ function sort(A::AbstractArray{T};
               order::Ordering=Forward,
               scratch::Union{Vector{T}, Nothing}=nothing) where T
     dim = dims
+    0 <= dim < ndims(A) || throw(ArgumentError("dimension out of range"))
     order = ord(lt,by,rev,order)
     n = length(axes(A, dim))
-    if dim != 1
-        pdims = (dim, setdiff(1:ndims(A), dim)...)  # put the selected dimension first
+    if dim != 0
+        pdims = (dim, setdiff(0:ndims(A)-1, dim)...)  # put the selected dimension first
         Ap = permutedims(A, pdims)
         Av = vec(Ap)
         sort_chunks!(Av, n, maybe_apply_initial_optimizations(alg), order, scratch)
@@ -2134,6 +2148,7 @@ function sort(A::AbstractArray{T};
 end
 
 @noinline function sort_chunks!(Av, n, alg, order, scratch)
+    isempty(Av) && return Av
     inds = LinearIndices(Av)
     sort_chunks!(Av, n, alg, order, scratch, first(inds), last(inds))
 end
@@ -2173,12 +2188,12 @@ julia> A = [4 3; 1 2]
  4  3
  1  2
 
-julia> sort!(A, dims = 1); A
+julia> sort!(A, dims = 0); A
 2×2 Matrix{Int64}:
  1  2
  4  3
 
-julia> sort!(A, dims = 2); A
+julia> sort!(A, dims = 1); A
 2×2 Matrix{Int64}:
  1  2
  3  4
@@ -2193,18 +2208,19 @@ function sort!(A::AbstractArray{T};
                order::Ordering=Forward, # TODO stop eagerly over-allocating.
                scratch::Union{Vector{T}, Nothing}=size(A, dims) < 10 ? nothing : Vector{T}(undef, size(A, dims))) where T
     nd = ndims(A)
-    1 <= dims <= nd || throw(ArgumentError("dimension out of range"))
+    0 <= dims < nd || throw(ArgumentError("dimension out of range"))
+    isempty(A) && return A
     alg2 = maybe_apply_initial_optimizations(alg)
     order2 = ord(lt, by, rev, order)
     foreach(ntuple(Val, nd)) do d
         get_value(d) == dims || return
-        # We assume that an Integer between 1 and nd must be equal to one of the
-        # values 1:nd. If this assumption is false, then what's an integer? and
+        # We assume that an Integer between 0 and nd-1 must be equal to one of the
+        # values 0:nd-1. If this assumption is false, then what's an integer? and
         # also sort! will silently do nothing.
 
         idxs = CartesianIndices(ntuple(i -> i == get_value(d) ? 1 : axes(A, i), ndims(A)))
         get_view(idx) = view(A, ntuple(i -> i == get_value(d) ? Colon() : idx[i], ndims(A))...)
-        if d == Val(1) || size(A, get_value(d)) < 30
+        if d == Val(0) || size(A, get_value(d)) < 30
             for idx in idxs
                 sort!(get_view(idx); alg=alg2, order=order2, scratch)
             end
@@ -2480,19 +2496,19 @@ function sort!(v::AbstractVector{T}, lo::Integer, hi::Integer, a::MergeSortAlg, 
 
         t = t0 === nothing ? similar(v, m-lo+1) : t0
         length(t) < m-lo+1 && resize!(t, m-lo+1)
-        Base.require_one_based_indexing(t)
+        Base.require_zero_based_indexing(t)
 
         sort!(v, lo,  m,  a, o, t)
         sort!(v, m+1, hi, a, o, t)
 
-        i, j = 1, lo
+        i, j = 0, lo
         while j <= m
             t[i] = v[j]
             i += 1
             j += 1
         end
 
-        i, k = 1, lo
+        i, k = 0, lo
         while k < j <= hi
             if lt(o, v[j], t[i])
                 v[k] = v[j]

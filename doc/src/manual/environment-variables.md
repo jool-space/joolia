@@ -5,7 +5,7 @@ the usual way for each operating system, or in a portable way from within Julia.
 Supposing that you want to set the environment variable [`JULIA_EDITOR`](@ref JULIA_EDITOR) to `vim`,
 you can type `ENV["JULIA_EDITOR"] = "vim"` (for instance, in the REPL) to make
 this change on a case by case basis, or add the same to the user configuration
-file `~/.julia/config/startup.jl` in the user's home directory to have a
+file `~/.joolia/config/startup.jl` in the user's home directory to have a
 permanent effect. The current value of the same environment variable can be
 determined by evaluating `ENV["JULIA_EDITOR"]`.
 
@@ -17,7 +17,7 @@ including those which include `JULIA` in their names.
 !!! note
 
     It is recommended to avoid changing environment variables during runtime,
-    such as within a `~/.julia/config/startup.jl`.
+    such as within a `~/.joolia/config/startup.jl`.
 
     One reason is that some julia language variables, such as [`JULIA_NUM_THREADS`](@ref JULIA_NUM_THREADS)
     and [`JULIA_PROJECT`](@ref JULIA_PROJECT), need to be set before Julia starts.

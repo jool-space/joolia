@@ -97,7 +97,7 @@ function update!(hist::HistoryFile)
         lock(hist)
         bytes = read(file)
         function findnext(data::Vector{UInt8}, index::Int, byte::UInt8, limit::Int = length(data))
-            for i in index:limit
+            for i in index:limit-1
                 data[i] == byte && return i
             end
             limit
@@ -105,7 +105,7 @@ function update!(hist::HistoryFile)
         function isstrmatch(data::Vector{UInt8}, at::Int, str::String)
             at + ncodeunits(str) <= length(data) || return false
             for (i, byte) in enumerate(codeunits(str))
-                data[at + i - 1] == byte || return false
+                data[at + i] == byte || return false
             end
             true
         end
@@ -119,7 +119,7 @@ function update!(hist::HistoryFile)
             pos >= length(bytes) && break
             entrystart = pos
             if bytes[pos] != UInt8('#')
-                @warn S"Malformed history entry: expected meta-line starting with {success:'#'} at byte {emphasis:$(offset + pos - 1)} in \
+                @warn S"Malformed history entry: expected meta-line starting with {success:'#'} at byte {emphasis:$(offset + pos)} in \
                        {(underline=grey),link=$(Base.Filesystem.uripath(hist.path)):$(contractuser(hist.path))}, but found \
                        {error:$(sprint(show, Char(bytes[pos])))} instead" _id=:invalid_history_entry maxlog=3 _file=nothing _line=nothing
                 pos = findnext(bytes, pos, UInt8('\n')) + 1
@@ -161,16 +161,16 @@ function update!(hist::HistoryFile)
             end
             if pos >= length(bytes)
                 # Potentially incomplete entry; roll back to start
-                seek(file, offset + entrystart - 1)
+                seek(file, offset + entrystart)
                 break
             elseif bytes[pos] == UInt8(' ')
-                @warn S"Malformed history content: expected line to start with {success:'\\t'} at byte {emphasis:$(offset + pos - 1)} in \
+                @warn S"Malformed history content: expected line to start with {success:'\\t'} at byte {emphasis:$(offset + pos)} in \
                         {(underline=grey),link=$(Base.Filesystem.uripath(hist.path)):$(contractuser(hist.path))}, but found \
                         space ({error:' '}) instead. A text editor may have converted tabs to spaces in the \
                         history file." _id=:invalid_history_content_spc maxlog=1 _file=nothing _line=nothing
                 continue
             elseif bytes[pos] != UInt8('\t')
-                @warn S"Malformed history content: expected line to start with {success:'\\t'} at byte {emphasis:$(offset + pos - 1)} in \
+                @warn S"Malformed history content: expected line to start with {success:'\\t'} at byte {emphasis:$(offset + pos)} in \
                         {(underline=grey),link=$(Base.Filesystem.uripath(hist.path)):$(contractuser(hist.path))}, but found \
                         {error:$(sprint(show, Char(bytes[pos])))} instead" _id=:invalid_history_content maxlog=3 _file=nothing _line=nothing
                 continue
@@ -180,7 +180,7 @@ function update!(hist::HistoryFile)
             while true
                 pos = findnext(bytes, pos, UInt8('\n'))
                 nlines += 1
-                if pos < length(bytes) && bytes[pos+1] == UInt8('\t')
+                if pos + 1 < length(bytes) && bytes[pos+1] == UInt8('\t')
                     pos += 1
                 else
                     break
@@ -192,14 +192,14 @@ function update!(hist::HistoryFile)
             while pos < contentend
                 lineend = findnext(bytes, pos, UInt8('\n'))
                 nbytes = lineend - pos - (lineend == contentend)
-                copyto!(content, bytescopied + 1, bytes, pos + 1, nbytes)
+                copyto!(content, bytescopied, bytes, pos + 1, nbytes)
                 bytescopied += nbytes
                 pos = lineend + 1
             end
             entry = HistEntry(mode, time, String(content), histindex += 1)
             push!(records, entry)
         end
-        seek(file, offset + pos - 1)
+        seek(file, offset + pos)
     finally
         unlock(hist)
     end

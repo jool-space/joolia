@@ -31,7 +31,7 @@ Convert a raw feature byte buffer (from cpufeatures) into an ISA.
 function _featurebytes_to_isa(buf::Vector{UInt8})
     features = Set{UInt32}()
     for byte_idx in 0:length(buf)-1
-        b = buf[byte_idx + 1]
+        b = buf[byte_idx]
         b == 0 && continue
         for bit in 0:7
             if (b >> bit) & 1 != 0

@@ -25,7 +25,7 @@ julia> s = StringView(arr)
 julia> codeunits(s) === arr
 true
 
-julia> arr[2] = Int('b'); s
+julia> arr[1] = Int('b'); s
 "abcd"
 ```
 """
@@ -33,8 +33,8 @@ struct StringView{T <: AbstractVector{UInt8}} <: AbstractString
     data::T
 
     function StringView{T}(data::T) where {T <: AbstractVector{UInt8}}
-        # For now, StringViews code assumes one-based indexing
-        require_one_based_indexing(data)
+        # For now, StringViews code assumes zero-based indexing
+        require_zero_based_indexing(data)
 
         # Prevent someone constructing e.g. a `StringView{AbstractVector{UInt8}}`,
         # the existence of which will complicate the implementation and provide
@@ -62,11 +62,11 @@ end
 function showerror(io::IO, exc::StringIndexError)
     s = exc.string
     print(io, "StringIndexError: ", "invalid index [$(exc.index)]")
-    if firstindex(s) <= exc.index <= ncodeunits(s)
+    if firstindex(s) <= exc.index < ncodeunits(s)
         iprev = thisind(s, exc.index)
         inext = nextind(s, iprev)
         escprev = escape_string(s[iprev:iprev])
-        if inext <= ncodeunits(s)
+        if inext < ncodeunits(s)
             escnext = escape_string(s[inext:inext])
             print(io, ", valid nearby indices [$iprev]=>'$escprev', [$inext]=>'$escnext'")
         else
@@ -195,6 +195,10 @@ String(s::AbstractString) = print_to_string(s)
 unsafe_wrap(::Type{Memory{UInt8}}, s::String) = ccall(:jl_string_to_genericmemory, Ref{Memory{UInt8}}, (Any,), s)
 unsafe_wrap(::Type{Vector{UInt8}}, s::String) = wrap(Array, unsafe_wrap(Memory{UInt8}, s))
 
+# String-backed storage shared by string transformations and IOBuffer.
+StringMemory(n::Integer) = unsafe_wrap(Memory{UInt8}, _string_n(n))
+StringVector(n::Integer) = wrap(Array, StringMemory(n))
+
 Vector{UInt8}(s::CodeUnits{UInt8,String}) = copyto!(Vector{UInt8}(undef, length(s)), s)
 Vector{UInt8}(s::String) = Vector{UInt8}(codeunits(s))
 Array{UInt8}(s::String)  = Vector{UInt8}(codeunits(s))
@@ -204,7 +208,7 @@ String(s::CodeUnits{UInt8,String}) = s.s
 ## low-level functions ##
 
 pointer(s::String) = unsafe_convert(Ptr{UInt8}, s)
-pointer(s::String, i::Integer) = pointer(s) + Int(i)::Int - 1
+pointer(s::String, i::Integer) = pointer(s) + Int(i)::Int
 
 ncodeunits(s::String) = Core.sizeof(s)
 codeunit(s::String) = UInt8
@@ -244,26 +248,26 @@ typemin(::String) = typemin(String)
 
 @propagate_inbounds thisind(s::String, i::Int) = _thisind_str(s, i)
 
-# nothrow: i == ncodeunits(s) always satisfies the bounds check inside _thisind_str
-# (it short-circuits when i == 0, otherwise 1 ≤ i ≤ n).
-@assume_effects :nothrow lastindex(s::String) = thisind(s, ncodeunits(s)::Int)
+# nothrow: i == ncodeunits(s)-1 always satisfies the bounds check inside _thisind_str
+# (it short-circuits when i == -1, otherwise 0 ≤ i < n).
+@assume_effects :nothrow lastindex(s::String) = thisind(s, ncodeunits(s)::Int - 1)
 
 # s should be String, StringView, or SubString{String}
 @inline function _thisind_str(s, i::Int)
-    i == 0 && return 0
+    i == -1 && return -1
     n = ncodeunits(s)
-    i == n + 1 && return i
-    @boundscheck between(i, 1, n) || throw(BoundsError(s, i))
+    i == n && return i
+    @boundscheck between(i, 0, n-1) || throw(BoundsError(s, i))
     @inbounds b = codeunit(s, i)
-    (b & 0xc0 == 0x80) & (i-1 > 0) || return i
+    (b & 0xc0 == 0x80) & (i-1 >= 0) || return i
     (@noinline function _thisind_continued(s, i) # mark the rest of the function as a slow-path
         local b
         @inbounds b = codeunit(s, i-1)
         between(b, 0b11000000, 0b11110111) && return i-1
-        (b & 0xc0 == 0x80) & (i-2 > 0) || return i
+        (b & 0xc0 == 0x80) & (i-2 >= 0) || return i
         @inbounds b = codeunit(s, i-2)
         between(b, 0b11100000, 0b11110111) && return i-2
-        (b & 0xc0 == 0x80) & (i-3 > 0) || return i
+        (b & 0xc0 == 0x80) & (i-3 >= 0) || return i
         @inbounds b = codeunit(s, i-3)
         between(b, 0b11110000, 0b11110111) && return i-3
         return i
@@ -274,9 +278,9 @@ end
 
 # s should be String or SubString{String}
 @inline function _nextind_str(s, i::Int)
-    i == 0 && return 1
+    i == -1 && return 0
     n = ncodeunits(s)
-    @boundscheck between(i, 1, n) || throw(BoundsError(s, i))
+    @boundscheck between(i, 0, n-1) || throw(BoundsError(s, i))
     @inbounds l = codeunit(s, i)
     between(l, 0x80, 0xf7) || return i+1
     (@noinline function _nextind_continued(s, i, n, l) # mark the rest of the function as a slow-path
@@ -291,14 +295,14 @@ end
             @assert l >= 0xc0 "invalid codeunit"
         end
         # first continuation byte
-        (i += 1) > n && return i
+        (i += 1) >= n && return i
         @inbounds b = codeunit(s, i)
         b & 0xc0 ≠ 0x80 && return i
-        ((i += 1) > n) | (l < 0xe0) && return i
+        ((i += 1) >= n) | (l < 0xe0) && return i
         # second continuation byte
         @inbounds b = codeunit(s, i)
         b & 0xc0 ≠ 0x80 && return i
-        ((i += 1) > n) | (l < 0xf0) && return i
+        ((i += 1) >= n) | (l < 0xf0) && return i
         # third continuation byte
         @inbounds b = codeunit(s, i)
         return ifelse(b & 0xc0 ≠ 0x80, i, i+1)
@@ -410,18 +414,18 @@ const _UTF8_DFA_TABLE = let # let block rather than function doesn't pollute bas
     #This converts the state_arrays into the shift encoded _UTF8DFAState
     class_row = zeros(_UTF8DFAState, num_classes)
 
-    for i = 1:num_classes
+    for i = 0:num_classes-1
         row = _UTF8DFAState(0)
-        for j in 1:num_states
+        for j in 0:num_states-1
             #Calculate the shift required for the next state
-            to_shift = UInt8((state_shifts[state_arrays[i,j]+1]) )
+            to_shift = UInt8((state_shifts[state_arrays[i,j]]) )
             #Shift the next state into the position of the current state
             row = row | (_UTF8DFAState(to_shift) << state_shifts[j])
         end
         class_row[i]=row
     end
 
-    map(c->class_row[c+1],character_classes)
+    _UTF8DFAState[class_row[c] for c in character_classes]
 end
 
 
@@ -430,7 +434,7 @@ const _UTF8_DFA_ACCEPT = _UTF8DFAState(4) #This state represents the start and e
 const _UTF8_DFA_INVALID = _UTF8DFAState(10) # If the state machine is ever in this state just stop
 
 # The dfa step is broken out so that it may be used in other functions. The mask was calculated to work with state shifts above
-@inline _utf_dfa_step(state::_UTF8DFAState, byte::UInt8) = @inbounds (_UTF8_DFA_TABLE[byte+1] >> state) & _UTF8DFAState(0x0000001E)
+@inline _utf_dfa_step(state::_UTF8DFAState, byte::UInt8) = @inbounds (_UTF8_DFA_TABLE[byte] >> state) & _UTF8DFAState(0x0000001E)
 
 @inline function _isvalid_utf8_dfa(state::_UTF8DFAState, bytes::AbstractVector{UInt8}, first::Int = firstindex(bytes), last::Int = lastindex(bytes))
     for i = first:last
@@ -464,13 +468,13 @@ function byte_string_classify(bytes::AbstractVector{UInt8})
     chunk_threshold =  chunk_size + (chunk_size ÷ 2)
     n = length(bytes)
     if n > chunk_threshold
-        start = _find_nonascii_chunk(chunk_size,bytes,1,n)
+        start = _find_nonascii_chunk(chunk_size,bytes,firstindex(bytes),lastindex(bytes))
         isnothing(start) && return 1
     else
-        _isascii(bytes,1,n) && return 1
-        start = 1
+        _isascii(bytes,firstindex(bytes),lastindex(bytes)) && return 1
+        start = firstindex(bytes)
     end
-    return _byte_string_classify_nonascii(bytes,start,n)
+    return _byte_string_classify_nonascii(bytes,start,lastindex(bytes))
 end
 
 function _byte_string_classify_nonascii(bytes::AbstractVector{UInt8}, first::Int, last::Int)
@@ -506,7 +510,7 @@ is_valid_continuation(c) = c & 0xc0 == 0x80
 ## required core functionality ##
 
 @inline function iterate(s::Union{String, StringView}, i::Int=firstindex(s))
-    (i % UInt) - 1 < ncodeunits(s) || return nothing
+    (i % UInt) < ncodeunits(s) || return nothing
     b = @inbounds codeunit(s, i)
     u = UInt32(b) << 24
     between(b, 0x80, 0xf7) || return reinterpret(Char, u), i+1
@@ -519,17 +523,17 @@ function iterate_continued(s, i::Int, u::UInt32)
         u < 0xc0000000 && (i += 1; break)
         n = ncodeunits(s)
         # first continuation byte
-        (i += 1) > n && break
+        (i += 1) >= n && break
         @inbounds b = codeunit(s, i)
         b & 0xc0 == 0x80 || break
         u |= UInt32(b) << 16
         # second continuation byte
-        ((i += 1) > n) | (u < 0xe0000000) && break
+        ((i += 1) >= n) | (u < 0xe0000000) && break
         @inbounds b = codeunit(s, i)
         b & 0xc0 == 0x80 || break
         u |= UInt32(b) << 8
         # third continuation byte
-        ((i += 1) > n) | (u < 0xf0000000) && break
+        ((i += 1) >= n) | (u < 0xf0000000) && break
         @inbounds b = codeunit(s, i)
         b & 0xc0 == 0x80 || break
         u |= UInt32(b); i += 1
@@ -554,17 +558,17 @@ function getindex_continued(s, i::Int, u::UInt32)
         end
         n = ncodeunits(s)
 
-        (i += 1) > n && break
+        (i += 1) >= n && break
         @inbounds b = codeunit(s, i) # cont byte 1
         b & 0xc0 == 0x80 || break
         u |= UInt32(b) << 16
 
-        ((i += 1) > n) | (u < 0xe0000000) && break
+        ((i += 1) >= n) | (u < 0xe0000000) && break
         @inbounds b = codeunit(s, i) # cont byte 2
         b & 0xc0 == 0x80 || break
         u |= UInt32(b) << 8
 
-        ((i += 1) > n) | (u < 0xf0000000) && break
+        ((i += 1) >= n) | (u < 0xf0000000) && break
         @inbounds b = codeunit(s, i) # cont byte 3
         b & 0xc0 == 0x80 || break
         u |= UInt32(b)
@@ -596,11 +600,11 @@ end
 
 # nothrow because we know the start and end indices are valid
 @assume_effects :nothrow function length(s::String)
-    return length_continued(s, 1, ncodeunits(s), ncodeunits(s))
+    return length_continued(s, 0, ncodeunits(s)-1, ncodeunits(s))
 end
 
 function length(s::StringView)
-    return length_continued(s, 1, ncodeunits(s), ncodeunits(s))
+    return length_continued(s, 0, ncodeunits(s)-1, ncodeunits(s))
 end
 
 # effects needed because @inbounds
@@ -614,8 +618,8 @@ end
 
 @inline function _length(s::Union{String, StringView}, i::Int, j::Int)
     @boundscheck begin
-        0 < i ≤ ncodeunits(s)+1 || throw(BoundsError(s, i))
-        0 ≤ j < ncodeunits(s)+1 || throw(BoundsError(s, j))
+        0 ≤ i ≤ ncodeunits(s) || throw(BoundsError(s, i))
+        -1 ≤ j < ncodeunits(s) || throw(BoundsError(s, j))
     end
     j < i && return 0
     @inbounds i, k = thisind(s, i), i
@@ -693,7 +697,7 @@ function repeat(c::AbstractChar, r::Integer)
         memset(p, u % UInt8, r)
     elseif n == 2
         p16 = reinterpret(Ptr{UInt16}, p)
-        for i = 1:r
+        for i = 0:r-1
             unsafe_store!(p16, u % UInt16, i)
         end
     elseif n == 3
@@ -701,13 +705,13 @@ function repeat(c::AbstractChar, r::Integer)
         b2 = (u >> 8) % UInt8
         b3 = (u >> 16) % UInt8
         for i = 0:r-1
-            unsafe_store!(p, b1, 3i + 1)
-            unsafe_store!(p, b2, 3i + 2)
-            unsafe_store!(p, b3, 3i + 3)
+            unsafe_store!(p, b1, 3i)
+            unsafe_store!(p, b2, 3i + 1)
+            unsafe_store!(p, b3, 3i + 2)
         end
     elseif n == 4
         p32 = reinterpret(Ptr{UInt32}, p)
-        for i = 1:r
+        for i = 0:r-1
             unsafe_store!(p32, u, i)
         end
     end

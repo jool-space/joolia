@@ -1,5 +1,30 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
+# Public capture positions and byte offsets are zero based; PCRE backreferences retain their IDs.
+@testset "zero-origin regex positions" begin
+    m = match(r"(?<head>α)(b)?", "αx")
+    @test m.offset == 0
+    @test m.match == "α"
+    @test m[0] == "α"
+    @test m[1] === nothing
+    @test m[:head] == "α"
+    @test m.offsets == [0, -1]
+    @test keys(m) == ["head", 1]
+    @test haskey(m, 0)
+    @test !haskey(m, 2)
+    @test match(r"z", "αx") === nothing
+    @test isempty(match(r"x", "x").captures)
+    @test findnext(r"x", "αx", 0) == 2:2
+    @test findnext(r"", "", 0) == 0:-1
+    @test [m.offset for m in eachmatch(r"", "α")] == [0, 2]
+    @test [m.offset for m in eachmatch(r"a", "aba")] == [0, 2]
+    @test [m.offset for m in eachmatch(r"aa", "aaa"; overlap=true)] == [0, 1]
+    @test chopprefix("αx", r"α") == "x"
+    @test chopsuffix("xα", r"α") == "x"
+    @test replace("aαb", r"(α)" => s"\1\1") == "aααb"
+    @test replace("xα", r"(?<tail>α)" => s"\g<tail>!") == "xα!"
+end
+
 @testset "regex" begin
     function collect_eachmatch(re, str; overlap=false)
         [m.match for m in collect(eachmatch(re, str, overlap = overlap))]

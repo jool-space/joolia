@@ -61,7 +61,7 @@ function _rand!(rng::AbstractRNG, z::BigFloat, sp::SamplerBigFloat)
     limbs = sp.limbs
     rand!(rng, limbs)
     @inbounds begin
-        limbs[1] <<= sp.shift
+        limbs[0] <<= sp.shift
         randbool = iszero(limbs[end] & Limb_high_bit)
         limbs[end] |= Limb_high_bit
     end
@@ -183,7 +183,7 @@ end
 
 function Sampler(::Type{RNG}, ::Type{T}, n::Repetition) where {T<:Tuple, RNG<:AbstractRNG}
     tail_sp_ = Sampler(RNG, Tuple{Base.tail(fieldtypes(T))...}, n)
-    SamplerTag{Ref{T}}((Sampler(RNG, fieldtype(T, 1), n), tail_sp_.data...))
+    SamplerTag{Ref{T}}((Sampler(RNG, fieldtype(T, 0), n), tail_sp_.data...))
     # Ref so that the gentype is `T` in SamplerTag's constructor
 end
 
@@ -196,7 +196,7 @@ function Sampler(::Type{RNG}, ::Type{Tuple{Vararg{T, N}}}, n::Repetition) where 
 end
 
 function rand(rng::AbstractRNG, sp::SamplerTag{Ref{T}}) where T<:Tuple
-    ntuple(i -> rand(rng, sp.data[min(i, length(sp.data))]), Val{fieldcount(T)}())::T
+    ntuple(i -> rand(rng, sp.data[min(i, lastindex(sp.data))]), Val{fieldcount(T)}())::T
 end
 
 ### random pairs
@@ -422,7 +422,7 @@ function SamplerBigInt(::Type{RNG}, r::AbstractUnitRange{BigInt}, N::Repetition=
     m = last(r) - first(r)
     m.size < 0 && empty_collection_error()
     nlimbs = Int(m.size)
-    hm = nlimbs == 0 ? Limb(0) : GC.@preserve m unsafe_load(m.d, nlimbs)
+    hm = nlimbs == 0 ? Limb(0) : GC.@preserve m unsafe_load(m.d, nlimbs-1)
     highsp = Sampler(RNG, Limb(0):hm, N)
     nlimbsmax = max(nlimbs, abs(last(r).size), abs(first(r).size))
     return SamplerBigInt(first(r), m, nlimbs, nlimbsmax, highsp)
@@ -444,18 +444,18 @@ function rand!(rng::AbstractRNG, x::BigInt, sp::SamplerBigInt)
     # 2. the high limb hx of x is sampled from 0:hm where hm is the
     #    high limb of m
     # We repeat 1. and 2. until x <= m
-    hm = GC.@preserve sp unsafe_load(sp.m.d, nlimbs)
+    hm = GC.@preserve sp unsafe_load(sp.m.d, nlimbs-1)
     GC.@preserve x begin
         limbs = UnsafeView(x.d, nlimbs-1)
         while true
             rand!(rng, limbs)
-            hx = limbs[nlimbs] = rand(rng, sp.highsp)
+            hx = limbs[nlimbs-1] = rand(rng, sp.highsp)
             hx < hm && break # avoid calling mpn_cmp most of the time
             MPZ.mpn_cmp(x, sp.m, nlimbs) <= 0 && break
         end
         # adjust x.size (normally done by mpz_limbs_finish, in GMP version >= 6)
         while nlimbs > 0
-            limbs[nlimbs] != 0 && break
+            limbs[nlimbs-1] != 0 && break
             nlimbs -= 1
         end
         x.size = nlimbs
@@ -531,7 +531,7 @@ _Sampler(::Type{<:AbstractRNG}, t::Union{AbstractDict,AbstractSet}, ::Val{1}) =
     SamplerTrivial(t)
 
 rand(rng::AbstractRNG, sp::SamplerTrivial{<:Union{AbstractDict,AbstractSet}}) =
-    @inbounds Iterators.nth(sp[], rand(rng, 1:length(sp[])))
+    @inbounds Iterators.nth(sp[], rand(rng, 0:length(sp[])-1))
 
 
 ## random characters from a string
@@ -543,7 +543,7 @@ Sampler(RNG::Type{<:AbstractRNG}, str::AbstractString, n::Val{Inf}) = Sampler(RN
 # when generating only one char from a string, the specialized method below
 # is usually more efficient
 Sampler(RNG::Type{<:AbstractRNG}, str::AbstractString, ::Val{1}) =
-    SamplerSimple(str, Sampler(RNG, 1:_lastindex(str), Val(Inf)))
+    SamplerSimple(str, Sampler(RNG, 0:_lastindex(str)-1, Val(Inf)))
 
 isvalid_unsafe(s::String, i) = !Base.is_valid_continuation(GC.@preserve s unsafe_load(pointer(s), i))
 isvalid_unsafe(s::AbstractString, i) = isvalid(s, i)
@@ -567,7 +567,7 @@ Sampler(::Type{<:AbstractRNG}, t::Tuple{A}, ::Repetition) where {A} =
     SamplerTrivial(t)
 
 rand(rng::AbstractRNG, sp::SamplerTrivial{Tuple{A}}) where {A} =
-    @inbounds return sp[][1]
+    @inbounds return sp[][0]
 
 ### 2
 
@@ -575,7 +575,7 @@ Sampler(RNG::Type{<:AbstractRNG}, t::Tuple{A,B}, n::Repetition) where {A,B} =
     SamplerSimple(t, Sampler(RNG, Bool, n))
 
 rand(rng::AbstractRNG, sp::SamplerSimple{Tuple{A,B}}) where {A,B} =
-    @inbounds return sp[][1 + rand(rng, sp.data)]
+    @inbounds return sp[][rand(rng, sp.data)]
 
 ### 3
 
@@ -588,7 +588,7 @@ function rand(rng::AbstractRNG, sp::SamplerSimple{Tuple{A,B,C}}) where {A,B,C}
         r = rand(rng, sp.data)
         r != 0x000fffffffffffff && break # _very_ likely
     end
-    @inbounds return sp[][1 + r ÷ 0x0005555555555555]
+    @inbounds return sp[][r ÷ 0x0005555555555555]
 end
 
 ### n
@@ -607,7 +607,7 @@ end
     if l < typemax(UInt32) && ispow2(l)
         quote
             r = rand(rng, sp.data) & ($l-1)
-            @inbounds return sp[][1 + r]
+            @inbounds return sp[][r]
         end
     else
         :(@inbounds return sp[][rand(rng, sp.data)])

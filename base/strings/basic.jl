@@ -10,9 +10,9 @@ about strings:
 
 * Strings are encoded in terms of fixed-size "code units"
   * Code units can be extracted with `codeunit(s, i)`
-  * The first code unit has index `1`
-  * The last code unit has index `ncodeunits(s)`
-  * Any index `i` such that `1 ≤ i ≤ ncodeunits(s)` is in bounds
+  * The first code unit has index `0`
+  * The last code unit has index `ncodeunits(s)-1`
+  * Any index `i` such that `0 ≤ i < ncodeunits(s)` is in bounds
 * String indexing is done in terms of these code units:
   * Characters are extracted by `s[i]` with a valid string index `i`
   * Each `AbstractChar` in a string is encoded by one or more code units
@@ -46,7 +46,7 @@ AbstractString
     ncodeunits(s::AbstractString)::Int
 
 Return the number of code units in a string. Indices that are in bounds to
-access this string must satisfy `1 ≤ i ≤ ncodeunits(s)`. Not all such indices
+access this string must satisfy `0 ≤ i < ncodeunits(s)`. Not all such indices
 are valid – they may not be the start of a character, but they will return a
 code unit value when calling `codeunit(s,i)`.
 
@@ -75,7 +75,7 @@ UTF-8 encoded strings, this would be `UInt8`; for UCS-2 and UTF-16 it would be
 `UInt16`; for UTF-32 it would be `UInt32`. The code unit type need not be
 limited to these three types, but it's hard to think of widely used string
 encodings that don't use one of these units. `codeunit(s)` is the same as
-`typeof(codeunit(s,1))` when `s` is a non-empty string.
+`typeof(codeunit(s,0))` when `s` is a non-empty string.
 
 See also [`ncodeunits`](@ref).
 """
@@ -95,7 +95,7 @@ I.e. the value returned by `codeunit(s, i)` is of the type returned by
 
 # Examples
 ```jldoctest
-julia> a = codeunit("Hello", 2)
+julia> a = codeunit("Hello", 1)
 0x65
 
 julia> typeof(a)
@@ -125,17 +125,17 @@ See also [`getindex`](@ref), [`iterate`](@ref), [`thisind`](@ref),
 ```jldoctest
 julia> str = "αβγdef";
 
-julia> isvalid(str, 1)
+julia> isvalid(str, 0)
 true
 
-julia> str[1]
+julia> str[0]
 'α': Unicode U+03B1 (category Ll: Letter, lowercase)
 
-julia> isvalid(str, 2)
+julia> isvalid(str, 1)
 false
 
-julia> str[2]
-ERROR: StringIndexError: invalid index [2], valid nearby indices [1]=>'α', [3]=>'β'
+julia> str[1]
+ERROR: StringIndexError: invalid index [1], valid nearby indices [0]=>'α', [2]=>'β'
 Stacktrace:
 [...]
 ```
@@ -176,15 +176,15 @@ julia> sizeof("∀")
 ```
 """
 sizeof(s::AbstractString) = ncodeunits(s)::Int * sizeof(codeunit(s)::CodeunitType)
-firstindex(s::AbstractString) = 1
-lastindex(s::AbstractString) = thisind(s, ncodeunits(s)::Int)
+firstindex(s::AbstractString) = 0
+lastindex(s::AbstractString) = thisind(s, ncodeunits(s)::Int - 1)
 isempty(s::AbstractString) = iszero(ncodeunits(s)::Int)
 
 @propagate_inbounds first(s::AbstractString) = s[firstindex(s)]
 
 function getindex(s::AbstractString, i::Integer)
     @boundscheck checkbounds(s, i)
-    @inbounds return isvalid(s, i) ? (iterate(s, i)::NTuple{2,Any})[1] : string_index_err(s, i)
+    @inbounds return isvalid(s, i) ? (iterate(s, i)::NTuple{2,Any})[0] : string_index_err(s, i)
 end
 
 getindex(s::AbstractString, i::Colon) = s
@@ -202,9 +202,9 @@ end
 ## bounds checking ##
 
 checkbounds(::Type{Bool}, s::AbstractString, i::Integer) =
-    1 ≤ i ≤ ncodeunits(s)::Int
+    0 ≤ i < ncodeunits(s)::Int
 checkbounds(::Type{Bool}, s::AbstractString, r::AbstractRange{<:Integer}) =
-    isempty(r) || (1 ≤ minimum(r) && maximum(r) ≤ ncodeunits(s)::Int)
+    isempty(r) || (0 ≤ minimum(r) && maximum(r) < ncodeunits(s)::Int)
 checkbounds(::Type{Bool}, s::AbstractString, I::AbstractArray{<:Real}) =
     all(i -> checkbounds(Bool, s, i), I)
 checkbounds(::Type{Bool}, s::AbstractString, I::AbstractArray{<:Integer}) =
@@ -375,8 +375,8 @@ valid character indices. With only a single string argument, this computes
 the number of characters in the entire string. With `i` and `j` arguments it
 computes the number of indices between `i` and `j` inclusive that are valid
 indices in the string `s`. In addition to in-bounds values, `i` may take the
-out-of-bounds value `ncodeunits(s) + 1` and `j` may take the out-of-bounds
-value `0`.
+out-of-bounds value `ncodeunits(s)` and `j` may take the out-of-bounds
+value `-1`.
 
 !!! note
     The time complexity of this operation is linear in general. That is, it
@@ -393,12 +393,12 @@ julia> length("jμΛIα")
 5
 ```
 """
-length(s::AbstractString) = @inbounds return length(s, 1, ncodeunits(s)::Int)
+length(s::AbstractString) = @inbounds return length(s, 0, ncodeunits(s)::Int - 1)
 
 function length(s::AbstractString, i::Int, j::Int)
     @boundscheck begin
-        0 < i ≤ ncodeunits(s)::Int+1 || throw(BoundsError(s, i))
-        0 ≤ j < ncodeunits(s)::Int+1 || throw(BoundsError(s, j))
+        0 ≤ i ≤ ncodeunits(s)::Int || throw(BoundsError(s, i))
+        -1 ≤ j < ncodeunits(s)::Int || throw(BoundsError(s, j))
     end
     n = 0
     for k = i:j
@@ -416,39 +416,39 @@ end
 If `i` is in bounds in `s` return the index of the start of the character whose
 encoding code unit `i` is part of. In other words, if `i` is the start of a
 character, return `i`; if `i` is not the start of a character, rewind until the
-start of a character and return that index. If `i` is equal to 0 or `ncodeunits(s)+1`
+start of a character and return that index. If `i` is equal to -1 or `ncodeunits(s)`
 return `i`. In all other cases throw `BoundsError`.
 
 # Examples
 ```jldoctest
+julia> thisind("α", -1)
+-1
+
 julia> thisind("α", 0)
 0
 
 julia> thisind("α", 1)
-1
+0
 
 julia> thisind("α", 2)
-1
+2
 
 julia> thisind("α", 3)
-3
-
-julia> thisind("α", 4)
-ERROR: BoundsError: attempt to access 2-codeunit String at index [4]
+ERROR: BoundsError: attempt to access 2-codeunit String at index [3]
 [...]
 
-julia> thisind("α", -1)
-ERROR: BoundsError: attempt to access 2-codeunit String at index [-1]
+julia> thisind("α", -2)
+ERROR: BoundsError: attempt to access 2-codeunit String at index [-2]
 [...]
 ```
 """
 thisind(s::AbstractString, i::Integer) = thisind(s, Int(i)::Int)
 
 function thisind(s::AbstractString, i::Int)
-    z = ncodeunits(s)::Int + 1
+    z = ncodeunits(s)::Int
     i == z && return i
-    @boundscheck 0 ≤ i ≤ z || throw(BoundsError(s, i))
-    @inbounds while 1 < i && !(isvalid(s, i)::Bool)
+    @boundscheck -1 ≤ i ≤ z || throw(BoundsError(s, i))
+    @inbounds while 0 < i && !(isvalid(s, i)::Bool)
         i -= 1
     end
     return i
@@ -463,39 +463,39 @@ end
   encoding starts before index `i`. In other words, if `i` is the start of a
   character, return the start of the previous character; if `i` is not the start
   of a character, rewind until the start of a character and return that index.
-  If `i` is equal to `1` return `0`.
-  If `i` is equal to `ncodeunits(str)+1` return `lastindex(str)`.
+  If `i` is equal to `0` return `-1`.
+  If `i` is equal to `ncodeunits(str)` return `lastindex(str)`.
   Otherwise throw `BoundsError`.
 
 * Case `n > 1`
 
   Behaves like applying `n` times `prevind` for `n==1`. The only difference
-  is that if `n` is so large that applying `prevind` would reach `0` then each remaining
+  is that if `n` is so large that applying `prevind` would reach `-1` then each remaining
   iteration decreases the returned value by `1`.
   This means that in this case `prevind` can return a negative value.
 
 * Case `n == 0`
 
-  Return `i` only if `i` is a valid index in `str` or is equal to `ncodeunits(str)+1`.
+  Return `i` only if `i` is a valid index in `str` or is equal to `ncodeunits(str)`.
   Otherwise `StringIndexError` or `BoundsError` is thrown.
 
 # Examples
 ```jldoctest
-julia> prevind("α", 3)
-1
-
-julia> prevind("α", 1)
+julia> prevind("α", 2)
 0
 
 julia> prevind("α", 0)
-ERROR: BoundsError: attempt to access 2-codeunit String at index [0]
+-1
+
+julia> prevind("α", -1)
+ERROR: BoundsError: attempt to access 2-codeunit String at index [-1]
 [...]
 
-julia> prevind("α", 2, 2)
-0
-
-julia> prevind("α", 2, 3)
+julia> prevind("α", 1, 2)
 -1
+
+julia> prevind("α", 1, 3)
+-2
 ```
 """
 prevind(s::AbstractString, i::Integer, n::Integer) = prevind(s, Int(i)::Int, Int(n)::Int)
@@ -504,10 +504,10 @@ prevind(s::AbstractString, i::Int)                 = prevind(s, i, 1)
 
 function prevind(s::AbstractString, i::Int, n::Int)
     n < 0 && throw(ArgumentError("n cannot be negative: $n"))
-    z = ncodeunits(s)::Int + 1
-    @boundscheck 0 < i ≤ z || throw(BoundsError(s, i))
+    z = ncodeunits(s)::Int
+    @boundscheck 0 ≤ i ≤ z || throw(BoundsError(s, i))
     n == 0 && return thisind(s, i)::Int == i ? i : string_index_err(s, i)
-    while n > 0 && 1 < i
+    while n > 0 && 0 < i
         @inbounds n -= isvalid(s, i -= 1)::Bool
     end
     return i - n
@@ -522,39 +522,39 @@ end
   encoding starts after index `i`. In other words, if `i` is the start of a
   character, return the start of the next character; if `i` is not the start
   of a character, move forward until the start of a character and return that index.
-  If `i` is equal to `0` return `1`.
-  If `i` is in bounds but greater or equal to `lastindex(str)` return `ncodeunits(str)+1`.
+  If `i` is equal to `-1` return `0`.
+  If `i` is in bounds but greater or equal to `lastindex(str)` return `ncodeunits(str)`.
   Otherwise throw `BoundsError`.
 
 * Case `n > 1`
 
   Behaves like applying `n` times `nextind` for `n==1`. The only difference
-  is that if `n` is so large that applying `nextind` would reach `ncodeunits(str)+1` then
+  is that if `n` is so large that applying `nextind` would reach `ncodeunits(str)` then
   each remaining iteration increases the returned value by `1`. This means that in this
-  case `nextind` can return a value greater than `ncodeunits(str)+1`.
+  case `nextind` can return a value greater than `ncodeunits(str)`.
 
 * Case `n == 0`
 
-  Return `i` only if `i` is a valid index in `str` or is equal to `0`.
+  Return `i` only if `i` is a valid index in `str` or is equal to `-1`.
   Otherwise `StringIndexError` or `BoundsError` is thrown.
 
 # Examples
 ```jldoctest
+julia> nextind("α", -1)
+0
+
 julia> nextind("α", 0)
-1
+2
 
-julia> nextind("α", 1)
-3
-
-julia> nextind("α", 3)
-ERROR: BoundsError: attempt to access 2-codeunit String at index [3]
+julia> nextind("α", 2)
+ERROR: BoundsError: attempt to access 2-codeunit String at index [2]
 [...]
+
+julia> nextind("α", -1, 2)
+2
 
 julia> nextind("α", 0, 2)
 3
-
-julia> nextind("α", 1, 2)
-4
 ```
 """
 nextind(s::AbstractString, i::Integer, n::Integer) = nextind(s, Int(i)::Int, Int(n)::Int)
@@ -563,8 +563,8 @@ nextind(s::AbstractString, i::Int)                 = nextind(s, i, 1)
 
 function nextind(s::AbstractString, i::Int, n::Int)
     n < 0 && throw(ArgumentError("n cannot be negative: $n"))
-    z = ncodeunits(s)::Int
-    @boundscheck 0 ≤ i ≤ z || throw(BoundsError(s, i))
+    z = ncodeunits(s)::Int - 1
+    @boundscheck -1 ≤ i ≤ z || throw(BoundsError(s, i))
     n == 0 && return thisind(s, i)::Int == i ? i : string_index_err(s, i)
     while n > 0 && i < z
         @inbounds n -= isvalid(s, i += 1)::Bool
@@ -580,9 +580,9 @@ end
 keys(s::AbstractString) = EachStringIndex(s)
 
 length(e::EachStringIndex) = length(e.s)
-first(::EachStringIndex) = 1
+first(::EachStringIndex) = 0
 last(e::EachStringIndex) = lastindex(e.s)
-iterate(e::EachStringIndex, state=firstindex(e.s)) = state > ncodeunits(e.s) ? nothing : (state, nextind(e.s, state))
+iterate(e::EachStringIndex, state=firstindex(e.s)) = state >= ncodeunits(e.s) ? nothing : (state, nextind(e.s, state))
 eltype(::Type{<:EachStringIndex}) = Int
 
 """
@@ -656,17 +656,17 @@ end
 
 function map(f, s::AbstractString)
     out = StringVector(max(4, sizeof(s)::Int÷sizeof(codeunit(s)::CodeunitType)))
-    index = UInt(1)
+    index = UInt(0)
     for c::AbstractChar in s
         c′ = f(c)
         isa(c′, AbstractChar) || throw(ArgumentError(
             "map(f, s::AbstractString) requires f to return AbstractChar; " *
             "try map(f, collect(s)) or a comprehension instead"))
-        index + 3 > length(out) && resize!(out, unsigned(2 * length(out)))
+        index + 4 > length(out) && resize!(out, unsigned(2 * length(out)))
         index += __unsafe_string!(out, convert(Char, c′), index)
     end
-    resize!(out, index-1)
-    sizehint!(out, index-1)
+    resize!(out, index)
+    sizehint!(out, index)
     return String(out)
 end
 
@@ -697,7 +697,7 @@ julia> first("∀ϵ≠0: ϵ²>0", 3)
 "∀ϵ≠"
 ```
 """
-first(s::AbstractString, n::Integer) = @inbounds s[1:min(end, nextind(s, 0, n))]
+first(s::AbstractString, n::Integer) = @inbounds s[0:min(end, nextind(s, -1, n))]
 
 """
     last(s::AbstractString, n::Integer)
@@ -716,7 +716,7 @@ julia> last("∀ϵ≠0: ϵ²>0", 3)
 "²>0"
 ```
 """
-last(s::AbstractString, n::Integer) = @inbounds s[max(1, prevind(s, ncodeunits(s)+1, n)):end]
+last(s::AbstractString, n::Integer) = @inbounds s[max(0, prevind(s, ncodeunits(s), n)):end]
 
 """
     reverseind(v, i)
@@ -739,7 +739,7 @@ julia> for i in eachindex(s)
 Julia🚀
 ```
 """
-reverseind(s::AbstractString, i::Integer) = thisind(s, ncodeunits(s)-i+1)
+reverseind(s::AbstractString, i::Integer) = thisind(s, ncodeunits(s)-i-1)
 
 """
     repeat(s::AbstractString, r::Integer)

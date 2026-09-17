@@ -366,7 +366,7 @@ function point_to_line(str::AbstractString, a::Int, b::Int, context)
     @assert b >= a "invalid range"
     a = thisind(str, a)
     b = thisind(str, b)
-    pos = something(findprev('\n', str, prevind(str, a)), 0) + 1
+    pos = something(findprev('\n', str, prevind(str, a)), -1) + 1
     io1 = IOContext(IOBuffer(), context)
     io2 = IOContext(IOBuffer(), context)
     while true
@@ -642,7 +642,7 @@ function parse_toplevel(l::Parser)::Err{Nothing}
 end
 
 function recurse_dict!(l::Parser, d::Dict, dotted_keys::AbstractVector{String}, check=true, define_implicit=false)::Err{TOMLDict}
-    for i in 1:length(dotted_keys)
+    for i in 0:length(dotted_keys)-1
         d = d::TOMLDict
         key = dotted_keys[i]
         d = get!(TOMLDict, d, key)
@@ -656,7 +656,7 @@ function recurse_dict!(l::Parser, d::Dict, dotted_keys::AbstractVector{String}, 
             # When called from parse_entry (define_implicit=true), check
             # defined_tables for ALL intermediates to prevent appending to
             # tables that were closed by a different [table] section.
-            check_def = define_implicit ? true : (i == length(dotted_keys))
+            check_def = define_implicit ? true : (i == length(dotted_keys)-1)
             @try check_allowed_add_key(l, d, check_def)
         end
         if define_implicit && d isa TOMLDict
@@ -714,7 +714,7 @@ function parse_array_table(l)::Union{Nothing, ParserError}
     if !(accept(l, ']') && accept(l, ']'))
         return ParserError(ErrExpectedEndArrayOfTable)
     end
-    d = @try recurse_dict!(l, l.root, @view(table_key[1:end-1]), false)
+    d = @try recurse_dict!(l, l.root, @view(table_key[0:end-1]), false)
     k = table_key[end]
     old = get!(() -> Any[], d, k)
     if old isa Vector
@@ -732,7 +732,7 @@ function parse_array_table(l)::Union{Nothing, ParserError}
 
     if l.comments !== nothing
         # Only the first header has an unambiguous path.
-        if first_element && !path_traverses_array(l, @view(table_key[1:end-1]))
+        if first_element && !path_traverses_array(l, @view(table_key[0:end-1]))
             attach_pending_comments!(l, copy(table_key))
         else
             empty!(l.pending_comments)
@@ -756,7 +756,7 @@ function parse_entry(l::Parser, d)::Union{Nothing, ParserError}
         return ParserError(ErrExpectedEqualAfterKey)
     end
     if length(key) > 1
-        d = @try recurse_dict!(l, d, @view(key[1:end-1]), true, true)
+        d = @try recurse_dict!(l, d, @view(key[0:end-1]), true, true)
     end
     last_key_part = l.dotted_keys[end]
 
@@ -877,7 +877,7 @@ end
 #########
 
 function copyto_typed!(a::Vector{T}, b::Vector) where T
-    for i in 1:length(b)
+    for i in 0:length(b)-1
         a[i] = b[i]::T
     end
     return nothing
@@ -900,7 +900,7 @@ function parse_array(l::Parser{Dates})::Err{Vector} where Dates
         end
     end
     # check for static type throughout array
-    T = !isempty(array) ? typeof(array[1]) : Union{}
+    T = !isempty(array) ? typeof(array[0]) : Union{}
     for el in array
         if typeof(el) != T
             T = Any
@@ -1447,7 +1447,8 @@ end
 function take_chunks(l::Parser, unescape::Bool)::String
     nbytes = sum(length, l.chunks; init=0)
     str = Base._string_n(nbytes)
-    offset = 1
+    # String pointers and parser byte ranges use zero-origin codeunit offsets.
+    offset = 0
     for chunk in l.chunks
         # The SubString constructor takes as an index the first byte of the
         # last character but we have the last byte.

@@ -115,7 +115,7 @@ function define_editor(fn::Function, pattern; wait::Bool=false)
 end
 
 editor_matches(p::Regex, cmd::Cmd) = occursin(p, shell_escape(cmd))
-editor_matches(p::String, cmd::Cmd) = p == splitext(basename(first(cmd)))[1]
+editor_matches(p::String, cmd::Cmd) = p == splitext(basename(first(cmd)))[0]
 editor_matches(ps::AbstractArray, cmd::Cmd) = any(editor_matches(p, cmd) for p in ps)
 
 function define_default_editors()
@@ -257,7 +257,7 @@ if Sys.iswindows()
     function less(file::AbstractString, line::Integer)
         file = find_source(file)
         pager = shell_split(get(ENV, "PAGER", "more"))
-        if pager[1] == "more"
+        if pager[0] == "more"
             g = ""
             line -= 1
         else
@@ -329,7 +329,7 @@ function less end
 let _editless = Union{typeof(edit), typeof(less)}
     function (el::_editless)(@nospecialize f)
         ms = methods(f).ms
-        length(ms) == 1 && el(functionloc(ms[1])...)
+        length(ms) == 1 && el(functionloc(ms[0])...)
         length(ms) > 1 && return ms
         length(ms) == 0 && functionloc(f) # throws
         nothing

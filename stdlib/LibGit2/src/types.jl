@@ -1109,7 +1109,7 @@ for (typ, owntyp, sup, cname) in Tuple{Symbol,Any,Symbol,Symbol}[
                 return obj
             end
         end
-        if isa(owntyp, Expr) && owntyp.args[1] === :Union && owntyp.args[3] === :Nothing
+        if isa(owntyp, Expr) && owntyp.args[0] === :Union && owntyp.args[2] === :Nothing
             @eval begin
                 $typ(ptr::Ptr{Cvoid}, fin::Bool=true) = $typ(nothing, ptr, fin)
             end

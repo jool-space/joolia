@@ -111,7 +111,7 @@ function ConditionSet(spec::S) where {S <: AbstractString}
         isempty(cond) && return
         kind = first(cond)
         if kind ∈ ('!', '=', '`', '/', '~')
-            value = @view cond[2:end]
+            value = @view cond[1:end]
             if kind ∈ ('`', '~')
                 value = strip(value)
             elseif !all(isspace, value)
@@ -134,12 +134,12 @@ function ConditionSet(spec::S) where {S <: AbstractString}
                 push!(condset.fuzzy, value)
             end
         else
-            if startswith(cond, '\\') && !(length(cond) > 1 && cond[2] == '\\')
-                cond = @view cond[2:end]
+            if startswith(cond, '\\') && !(length(cond) > 1 && cond[1] == '\\')
+                cond = @view cond[1:end]
             else
                 rang = something(findfirst('>', cond), typemax(Int))
-                if rang == something(findfirst(isspace, cond), ncodeunits(cond) + 1) - 1
-                    mode = @view cond[1:prevind(cond, rang)]
+                if rang == something(findfirst(isspace, cond), ncodeunits(cond)) - 1
+                    mode = @view cond[0:prevind(cond, rang)]
                     push!(condset.modes, SubString(lowercase(mode)))
                     cond = @view cond[rang + 1:end]
                 end
@@ -159,7 +159,7 @@ function ConditionSet(spec::S) where {S <: AbstractString}
     while pos <= lastind
         chr = spec[pos]
         if escaped
-            chr == FILTER_SEPARATOR && push!(dropbytes, pos - mark)
+            chr == FILTER_SEPARATOR && push!(dropbytes, pos - mark - 1)
             escaped = false
         elseif chr == '\\'
             escaped = true
@@ -282,7 +282,7 @@ function filterchunkrev!(out::Vector{HistEntry}, candidates::DenseVector{HistEnt
     for batch in Iterators.partition(idx:-1:1, batchsize)
         time() > maxtime && break
         for outer idx in batch
-            entry = candidates[idx]
+            entry = candidates[idx - 1]
             if (entry.mode, entry.content) ∈ seen
                 continue
             end
@@ -334,16 +334,18 @@ function matchregions(spec::FilterSpec, candidate::AbstractString)
     end
     for rx in spec.regexps
         for (; match) in eachmatch(rx, candidate)
-            push!(matches, 1+match.offset:thisind(candidate, match.offset + match.ncodeunits))
+            match_end = match.offset + match.ncodeunits
+            match_last = match_end == ncodeunits(candidate) ? lastindex(candidate) : prevind(candidate, match_end)
+            push!(matches, match.offset:match_last)
         end
     end
     sort!(matches, by = m -> (first(m), -last(m)))
     # Combine adjacent matches separated by a single space
     for (i, match) in enumerate(matches)
-        i == length(matches) && break
+        i == lastindex(matches) && break
         nextmatch = matches[i + 1]
-        nxt = nextind(candidate, last(match))
-        nxt > ncodeunits(candidate) && continue
+        nxt = last(match) == lastindex(candidate) ? ncodeunits(candidate) : nextind(candidate, last(match))
+        nxt >= ncodeunits(candidate) && continue
         if nextind(candidate, nxt) == first(nextmatch) && candidate[nxt] == ' '
             matches[i] = first(match):last(nextmatch)
             matches[i+1] = nextind(candidate, last(nextmatch)):last(nextmatch)

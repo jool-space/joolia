@@ -847,7 +847,7 @@ OncePerProcess(initializer) = OncePerProcess{Base.promote_op(initializer), typeo
 end
 
 function copyto_monotonic!(dest::AtomicMemory, src)
-    i = 1
+    i = 0
     for j in eachindex(src)
         if isassigned(src, j)
             @atomic :monotonic dest[i] = src[j]
@@ -860,7 +860,7 @@ function copyto_monotonic!(dest::AtomicMemory, src)
 end
 
 function fill_monotonic!(dest::AtomicMemory, x)
-    for i = 1:length(dest)
+    for i in eachindex(dest)
         @atomic :monotonic dest[i] = x
     end
     dest
@@ -931,20 +931,20 @@ OncePerThread(initializer) = OncePerThread{Base.promote_op(initializer), typeof(
     ss = @atomic :acquire once.ss
     xs = @atomic :monotonic once.xs
     # n.b. length(xs) >= length(ss)
-    if tid <= 0 || tid > length(ss) || (@atomic :acquire ss[tid]) != PerStateHasrun
+    if tid < 0 || tid >= length(ss) || (@atomic :acquire ss[tid]) != PerStateHasrun
         (@noinline function init_perthread(once::OncePerThread{T,F}, tid::Int) where {T,F}
             local ss = @atomic :acquire once.ss
             local xs = @atomic :monotonic once.xs
             local len = length(ss)
             # slow path to allocate it
-            nt = Threads.maxthreadid()
-            0 < tid <= nt || throw(ArgumentError("thread id outside of allocated range"))
-            if tid <= length(ss) && (@atomic :acquire ss[tid]) == PerStateErrored
+            nt = Threads.maxthreadid() + 1
+            0 <= tid < nt || throw(ArgumentError("thread id outside of allocated range"))
+            if tid < length(ss) && (@atomic :acquire ss[tid]) == PerStateErrored
                 error("OncePerThread initializer failed previously")
             end
             newxs = xs
             newss = ss
-            if tid > len
+            if tid >= len
                 # attempt to do all allocations outside of PerThreadLock for better scaling
                 @assert length(xs) >= length(ss) "logical constraint violation"
                 newxs = typeof(xs)(undef, len + nt)
@@ -955,7 +955,7 @@ OncePerThread(initializer) = OncePerThread{Base.promote_op(initializer), typeof(
             try
                 ss = @atomic :monotonic once.ss
                 xs = @atomic :monotonic once.xs
-                if tid > length(ss)
+                if tid >= length(ss)
                     if length(ss) == 0 # We are the first to initialize
                         ccall(:jl_set_precompile_field_replace, Cvoid, (Any, Any, Any),
                             once, :xs, xs)

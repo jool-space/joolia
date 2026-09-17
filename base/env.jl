@@ -204,12 +204,12 @@ if Sys.iswindows()
     end
     function iterate(hash::EnvDict, block::Tuple{Ptr{UInt16},Ptr{UInt16}} = GESW())
         while true
-            if unsafe_load(block[1]) == 0
-                ccall(:FreeEnvironmentStringsW, stdcall, Int32, (Ptr{UInt16},), block[2])
+            if unsafe_load(block[0]) == 0
+                ccall(:FreeEnvironmentStringsW, stdcall, Int32, (Ptr{UInt16},), block[1])
                 return nothing
             end
-            pos = block[1]
-            blk = block[2]
+            pos = block[0]
+            blk = block[1]
             len = ccall(:wcslen, UInt, (Ptr{UInt16},), pos)
             buf = Vector{UInt16}(undef, len)
             GC.@preserve buf unsafe_copyto!(pointer(buf), pos, len)
@@ -224,7 +224,7 @@ if Sys.iswindows()
                 @warn "malformed environment entry" env
                 continue
             end
-            return (Pair{String,String}(winuppercase(env[1:prevind(env, m)]), env[nextind(env, m):end]), (pos, blk))
+            return (Pair{String,String}(winuppercase(env[0:prevind(env, m)]), env[nextind(env, m):end]), (pos, blk))
         end
     end
 else # !windows
@@ -232,7 +232,7 @@ else # !windows
         envs = _environ()
         envs == C_NULL && error("Failed to resolve `environ`.")
         while true
-            envp = unsafe_load(envs, i + 1)
+            envp = unsafe_load(envs, i)
             envp == C_NULL && return nothing
             env = unsafe_string(envp)
             i += 1
@@ -241,7 +241,7 @@ else # !windows
                 @warn "malformed environment entry" env
                 continue
             end
-            return (Pair{String,String}(env[1:prevind(env, m)], env[nextind(env, m):end]), i)
+            return (Pair{String,String}(env[0:prevind(env, m)], env[nextind(env, m):end]), i)
         end
     end
 end # os-test

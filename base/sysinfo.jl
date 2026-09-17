@@ -281,16 +281,17 @@ providing details such as average CPU speed and total time spent in different mo
 Note: Included in the detailed system information via `versioninfo(verbose=true)`.
 """
 function cpu_summary(io::IO=stdout, cpu::AbstractVector{CPUinfo} = cpu_info())
-    model = cpu[1].model
-    first = 1
-    for i = 2:length(cpu)
+    isempty(cpu) && return nothing
+    first = firstindex(cpu)
+    model = cpu[first].model
+    for i = first+1:lastindex(cpu)
         if model != cpu[i].model
             _cpu_summary(io, cpu, first, i-1)
             first = i
             model = cpu[i].model
         end
     end
-    _cpu_summary(io, cpu, first, length(cpu))
+    _cpu_summary(io, cpu, first, lastindex(cpu))
 end
 
 """
@@ -311,7 +312,7 @@ function cpu_info()
     err = ccall(:uv_cpu_info, Int32, (Ptr{Ptr{UV_cpu_info_t}}, Ptr{Int32}), UVcpus, count)
     Base.uv_error("uv_cpu_info", err)
     cpus = Vector{CPUinfo}(undef, count[])
-    for i = 1:length(cpus)
+    for i in eachindex(cpus)
         cpus[i] = CPUinfo(unsafe_load(UVcpus[], i))
     end
     ccall(:uv_free_cpu_info, Cvoid, (Ptr{UV_cpu_info_t}, Int32), UVcpus[], count[])

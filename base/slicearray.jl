@@ -36,7 +36,7 @@ struct Slices{P,SM,AX,S,N} <: AbstractSlices{S,N}
     axes::AX
 end
 
-unitaxis(::AbstractArray) = Base.OneTo(1)
+unitaxis(::AbstractArray) = Base.ZeroTo(1)
 
 function Slices(A::P, slicemap::SM, ax::AX) where {P,SM,AX}
     length(slicemap) >= ndims(A) ||
@@ -50,26 +50,26 @@ end
 
 _slice_check_dims() = nothing
 function _slice_check_dims(dim, dims...)
-    1 <= dim || throw(DimensionMismatch("Invalid dimension $dim"))
+    0 <= dim || throw(DimensionMismatch("Invalid dimension $dim"))
     dim in dims && throw(DimensionMismatch("Dimensions $dims are not unique"))
     _slice_check_dims(dims...)
 end
 
 @constprop :aggressive function _eachslice(A::AbstractArray{T,N}, dims::NTuple{M,Integer}, drop::Bool) where {T,N,M}
     _slice_check_dims(dims...)
-    N_ = foldl(max, dims; init=N)
+    N_ = foldl(max, dims; init=N-1) + 1
 
     if drop
-        # if N = 4, dims = (3,1) then
-        # axes = (axes(A,3), axes(A,1))
-        # slicemap = (2, :, 1, :)
+        # if N = 4, dims = (2,0) then
+        # axes = (axes(A,2), axes(A,0))
+        # slicemap = (1, :, 0, :)
         ax = map(dim -> axes(A,dim), dims)
         slicemap = ntuple(dim -> something(findfirst(isequal(dim), dims), (:)),  N_)
         return Slices(A, slicemap, ax)
     else
-        # if N = 4, dims = (3,1) then
-        # axes = (axes(A,1), OneTo(1), axes(A,3), OneTo(1))
-        # slicemap = (1, :, 3, :)
+        # if N = 4, dims = (2,0) then
+        # axes = (axes(A,0), ZeroTo(1), axes(A,2), ZeroTo(1))
+        # slicemap = (0, :, 2, :)
         ax = ntuple(dim -> dim in dims ? axes(A,dim) : unitaxis(A), N_)
         slicemap = ntuple(dim -> dim in dims ? dim : (:), N_)
         return Slices(A, slicemap, ax)
@@ -110,20 +110,20 @@ julia> m = [1 2 3; 4 5 6; 7 8 9]
  4  5  6
  7  8  9
 
-julia> s = eachslice(m, dims=1)
-3-element RowSlices{Matrix{Int64}, Tuple{Base.OneTo{Int64}}, SubArray{Int64, 1, Matrix{Int64}, Tuple{Int64, Base.Slice{Base.OneTo{Int64}}}, true}}:
+julia> s = eachslice(m, dims=0)
+3-element RowSlices{Matrix{Int64}, Tuple{Base.ZeroTo{Int64}}, SubArray{Int64, 1, Matrix{Int64}, Tuple{Int64, Base.Slice{Base.ZeroTo{Int64}}}, true}}:
  [1, 2, 3]
  [4, 5, 6]
  [7, 8, 9]
 
-julia> s[1]
-3-element view(::Matrix{Int64}, 1, :) with eltype Int64:
+julia> s[0]
+3-element view(::Matrix{Int64}, 0, :) with eltype Int64:
  1
  2
  3
 
-julia> eachslice(m, dims=1, drop=false)
-3×1 Slices{Matrix{Int64}, Tuple{Int64, Colon}, Tuple{Base.OneTo{Int64}, Base.OneTo{Int64}}, SubArray{Int64, 1, Matrix{Int64}, Tuple{Int64, Base.Slice{Base.OneTo{Int64}}}, true}, 2}:
+julia> eachslice(m, dims=0, drop=false)
+3×1 Slices{Matrix{Int64}, Tuple{Int64, Colon}, Tuple{Base.ZeroTo{Int64}, Base.ZeroTo{Int64}}, SubArray{Int64, 1, Matrix{Int64}, Tuple{Int64, Base.Slice{Base.ZeroTo{Int64}}}, true}, 2}:
  [1, 2, 3]
  [4, 5, 6]
  [7, 8, 9]
@@ -139,7 +139,7 @@ end
 Create a [`RowSlices`](@ref) object that is a vector of rows of matrix or vector `A`.
 Row slices are returned as `AbstractVector` views of `A`.
 
-For the inverse, see [`stack`](@ref)`(rows; dims=1)`.
+For the inverse, see [`stack`](@ref)`(rows; dims=0)`.
 
 !!! compat "Julia 1.1"
      This function requires at least Julia 1.1.
@@ -158,18 +158,18 @@ julia> a = [1 2; 3 4]
  3  4
 
 julia> s = eachrow(a)
-2-element RowSlices{Matrix{Int64}, Tuple{Base.OneTo{Int64}}, SubArray{Int64, 1, Matrix{Int64}, Tuple{Int64, Base.Slice{Base.OneTo{Int64}}}, true}}:
+2-element RowSlices{Matrix{Int64}, Tuple{Base.ZeroTo{Int64}}, SubArray{Int64, 1, Matrix{Int64}, Tuple{Int64, Base.Slice{Base.ZeroTo{Int64}}}, true}}:
  [1, 2]
  [3, 4]
 
-julia> s[1]
-2-element view(::Matrix{Int64}, 1, :) with eltype Int64:
+julia> s[0]
+2-element view(::Matrix{Int64}, 0, :) with eltype Int64:
  1
  2
 ```
 """
-eachrow(A::AbstractMatrix) = _eachslice(A, (1,), true)
-eachrow(A::AbstractVector) = eachrow(reshape(A, size(A,1), 1))
+eachrow(A::AbstractMatrix) = _eachslice(A, (0,), true)
+eachrow(A::AbstractVector) = eachrow(reshape(A, size(A,0), 1))
 
 """
     eachcol(A::AbstractVecOrMat) <: AbstractVector
@@ -196,18 +196,18 @@ julia> a = [1 2; 3 4]
  3  4
 
 julia> s = eachcol(a)
-2-element ColumnSlices{Matrix{Int64}, Tuple{Base.OneTo{Int64}}, SubArray{Int64, 1, Matrix{Int64}, Tuple{Base.Slice{Base.OneTo{Int64}}, Int64}, true}}:
+2-element ColumnSlices{Matrix{Int64}, Tuple{Base.ZeroTo{Int64}}, SubArray{Int64, 1, Matrix{Int64}, Tuple{Base.Slice{Base.ZeroTo{Int64}}, Int64}, true}}:
  [1, 3]
  [2, 4]
 
-julia> s[1]
-2-element view(::Matrix{Int64}, :, 1) with eltype Int64:
+julia> s[0]
+2-element view(::Matrix{Int64}, :, 0) with eltype Int64:
  1
  3
 ```
 """
-eachcol(A::AbstractMatrix) = _eachslice(A, (2,), true)
-eachcol(A::AbstractVector) = eachcol(reshape(A, size(A, 1), 1))
+eachcol(A::AbstractMatrix) = _eachslice(A, (1,), true)
+eachcol(A::AbstractVector) = eachcol(reshape(A, size(A, 0), 1))
 
 """
     RowSlices{M,AX,S}

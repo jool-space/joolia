@@ -773,10 +773,10 @@ julia> uppercasefirst("python")
 """
 function uppercasefirst(s::AbstractString)
     isempty(s) && return ""
-    c = s[1]
+    c = s[0]
     c′ = titlecase(c)
     c == c′ ? convert(String, s) :
-    string(c′, SubString(s, nextind(s, 1)))
+    string(c′, SubString(s, nextind(s, 0)))
 end
 
 # TODO: improve performance characteristics, room for a ~5x improvement.
@@ -807,10 +807,10 @@ julia> lowercasefirst("Julia")
 """
 function lowercasefirst(s::AbstractString)
     isempty(s) && return ""
-    c = s[1]
+    c = s[0]
     c′ = lowercase(c)
     c == c′ ? convert(String, s) :
-    string(c′, SubString(s, nextind(s, 1)))
+    string(c′, SubString(s, nextind(s, 0)))
 end
 
 # TODO: improve performance characteristics, room for a ~5x improvement.
@@ -873,7 +873,7 @@ function iterate(g::GraphemeIterator, i_=(Int32(0),firstindex(g.s)))
     y = iterate(s, i)
     y === nothing && return nothing
     c0, k = y
-    while k <= ncodeunits(s) # loop until next grapheme is s[i:j]
+    while k <= lastindex(s) # loop until next grapheme is s[i:j]
         c, ℓ = iterate(s, k)::NTuple{2,Any}
         isgraphemebreak!(state, c0, c) && break
         j = k

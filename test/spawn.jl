@@ -83,18 +83,28 @@ end
 # Simulate what the REPL shell mode does: parse the line, dispatch
 # simple commands through cmd_gen, and call repl_cmd.
 function shell_mode_run(line::String; stdout=nothing)
-    cmd_ex = Base.shell_parse(line)[1]
+    cmd_ex = Base.shell_parse(line)[0]
     if Meta.isexpr(cmd_ex, :tuple)
         cmd_ex = :(Base.cmd_gen($cmd_ex))
     end
     eval(:(Base.repl_cmd($cmd_ex, $(something(stdout, devnull)))))
 end
 
+@test Base.UV_UNKNOWN_HANDLE == 0
+@test Base.UV_ASYNC == 1
+@test Base.UV_FILE == 17
+@test Base.UV_HANDLE_TYPE_MAX == 18
+@test Base.UV_UNKNOWN_REQ == 0
+@test Base.UV_REQ_TYPE_PRIVATE == 11
+@test Base.UV_REQ_TYPE_MAX == 12
+@test Base.UV_EPERM == -1
+
 #### Examples used in the manual ####
 
 @test read(`$echocmd hello \| sort`, String) == "hello | sort\n"
 @test read(pipeline(`$echocmd hello`, sortcmd), String) == "hello\n"
 @test length(run(pipeline(`$echocmd hello`, sortcmd), wait=false).processes) == 2
+
 
 out = read(`$echocmd hello` & `$echocmd world`, String)
 @test occursin("world", out)
@@ -265,6 +275,14 @@ end
 
 # issue #4535
 exename = `$(Base.julia_cmd()) --startup-file=no --color=no`
+
+@testset "zero-origin process descriptors" begin
+    @test read(`$echocmd process-zero`, String) == "process-zero\n"
+    @test read(pipeline(`$echocmd process-zero`, catcmd), String) == "process-zero\n"
+    @test read(pipeline(`$echocmd process-input`, `$exename -e 'print(read(stdin, String))'`), String) == "process-input\n"
+    @test read(pipeline(`$exename -e 'print(stderr, "process-error")'`, stderr=catcmd), String) == "process-error"
+    Sys.islinux() && @test success(setcpuaffinity(truecmd, [UInt16(0)]))
+end
 if valgrind_off
     # If --trace-children=yes is passed to valgrind, we will get a
     # valgrind banner here, not "Hello World\n".
@@ -559,8 +577,8 @@ end
 # Tilde expansion in backtick commands
 @test samepath(only(`~`.exec), homedir())
 @test samepath(only(`~/foo`.exec), joinpath(homedir(), "foo"))
-@test samepath(`foo ~`.exec[2], homedir())
-@test samepath(`foo ~/bar`.exec[2], joinpath(homedir(), "bar"))
+@test samepath(`foo ~`.exec[1], homedir())
+@test samepath(`foo ~/bar`.exec[1], joinpath(homedir(), "bar"))
 @test `foo~bar` == Cmd(["foo~bar"])  # ~ mid-word: no expansion
 @test `foo~` == Cmd(["foo~"])        # ~ end-word: no expansion
 @test `'~'` == Cmd(["~"])            # ~ in single quotes: no expansion
@@ -658,7 +676,7 @@ mktempdir() do dir
 
     # simple commands still return Cmd (not wrapped in pipeline)
     @test `$echocmd hello` isa Cmd
-    @test Meta.isexpr(Base.shell_parse("echo hello")[1], :tuple)
+    @test Meta.isexpr(Base.shell_parse("echo hello")[0], :tuple)
 
     # Shell mode end-to-end tests
     # Use shell-escaped commands and paths so that shell_parse handles
@@ -877,12 +895,12 @@ end
 let c = `ls -l "foo bar"`
     @test collect(c) == ["ls", "-l", "foo bar"]
     @test collect(Iterators.reverse(c)) == reverse!(["ls", "-l", "foo bar"])
-    @test first(c) == "ls" == c[1]
-    @test last(c) == "foo bar" == c[3] == c[end]
-    @test c[1:2] == ["ls", "-l"]
+    @test first(c) == "ls" == c[0]
+    @test last(c) == "foo bar" == c[2] == c[end]
+    @test c[0:1] == ["ls", "-l"]
     @test eltype(c) == String
     @test length(c) == 3
-    @test eachindex(c) == 1:3
+    @test eachindex(c) == 0:2
 end
 
 ## Deadlock in spawning a cmd (#22832)
@@ -914,19 +932,19 @@ end
 
 # Second return of shell_parse
 let s = "   \$abc   "
-    @test Base.shell_parse(s)[2] === findfirst('a', s)
+    @test Base.shell_parse(s)[1] === findfirst('a', s)
     s = "abc def"
-    @test Base.shell_parse(s)[2] === findfirst('d', s)
+    @test Base.shell_parse(s)[1] === findfirst('d', s)
     s = "abc 'de'f\"\"g"
-    @test Base.shell_parse(s)[2] === findfirst('\'', s)
+    @test Base.shell_parse(s)[1] === findfirst('\'', s)
     s = "abc \$x'de'f\"\"g"
-    @test Base.shell_parse(s)[2] === findfirst('\'', s)
+    @test Base.shell_parse(s)[1] === findfirst('\'', s)
     s = "abc def\$x'g'"
-    @test Base.shell_parse(s)[2] === findfirst('\'', s)
+    @test Base.shell_parse(s)[1] === findfirst('\'', s)
     s = "abc def\$x "
-    @test Base.shell_parse(s)[2] === findfirst('x', s)
+    @test Base.shell_parse(s)[1] === findfirst('x', s)
     s = "abc \$(d)ef\$(x "
-    @test Base.shell_parse(s)[2] === findfirst('x', s) - 1
+    @test Base.shell_parse(s)[1] === findfirst('x', s) - 1
 end
 
 # Logging macros should not output to finalized streams (#26687)
@@ -1325,5 +1343,25 @@ end
             @test success(proc)
             @test String(take!(buf)) == "Hello Socket!\n"
         end
+    end
+end
+
+# Pipe endpoints follow their iteration order, with zero-origin positional access.
+@testset "zero-origin pipe endpoints" begin
+    p = Pipe()
+    @test p[0] === p.out
+    @test p[1] === p.in
+    rd, wr = p
+    @test rd === p[0] && wr === p[1]
+    @test_throws KeyError p[-1]
+    @test_throws KeyError p[2]
+    Base.link_pipe!(p; reader_supports_async=true, writer_supports_async=true)
+    try
+        reader = @async read(p[0], String)
+        write(p[1], "zero-origin pipe")
+        close(p[1])
+        @test fetch(reader) == "zero-origin pipe"
+    finally
+        close(p)
     end
 end

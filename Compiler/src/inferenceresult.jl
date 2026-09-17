@@ -13,8 +13,8 @@ function get_nospecializeinfer_argtypes(argtypes::Vector{Any}, cache_argtypes::V
     is_nospecializeinfer(method) || return argtypes
     nargs = Int(method.nargs)
     new_argtypes = Vector{Any}(undef, length(cache_argtypes))
-    for i = 1:length(cache_argtypes)
-        i_arg = min(i - 1, nargs - 1) # 0-indexed, 0 is the function slot
+    for i = 0:length(cache_argtypes)-1
+        i_arg = min(i, nargs - 1) # 0-indexed, 0 is the function slot
         if i_arg > 0 && !iszero(method.nospecialize & (1 << (i_arg - 1)))
             new_argtypes[i] = cache_argtypes[i]
         else
@@ -40,7 +40,7 @@ function matching_cache_argtypes(𝕃::AbstractLattice, ::MethodInstance,
                                  cache_argtypes::Vector{Any})
     (; argtypes) = simple_argtypes
     given_argtypes = Vector{Any}(undef, length(argtypes))
-    for i = 1:length(argtypes)
+    for i = 0:length(argtypes)-1
         given_argtypes[i] = widenslotwrapper(argtypes[i])
     end
     return pick_const_args!(𝕃, given_argtypes, cache_argtypes)
@@ -80,7 +80,7 @@ function pick_const_args!(𝕃::AbstractLattice, given_argtypes::Vector{Any}, ca
             nprocessargs = ncache
             resize!(given_argtypes, nprocessargs)
         end
-        for i = ngiven:nprocessargs
+        for i = ngiven-1:nprocessargs-1
             given_argtypes[i] = va
         end
     elseif isvarargtype(cache_va)
@@ -89,9 +89,9 @@ function pick_const_args!(𝕃::AbstractLattice, given_argtypes::Vector{Any}, ca
         @assert ngiven == ncache
         nprocessargs = ngiven
     end
-    for i = 1:nprocessargs
+    for i = 0:nprocessargs-1
         given_argtype = given_argtypes[i]
-        cache_argtype = argtype_by_index(cache_argtypes, i)
+        cache_argtype = argtype_by_index(cache_argtypes, i + 1)
         given_argtypes[i] = pick_const_arg(𝕃, given_argtype, cache_argtype)
     end
     return given_argtypes
@@ -112,8 +112,8 @@ function va_process_argtypes(𝕃::AbstractLattice, given_argtypes::Vector{Any},
     nargs = Int(nargs)
     if isva || (!isempty(given_argtypes) && isvarargtype(given_argtypes[end]))
         isva_given_argtypes = Vector{Any}(undef, nargs)
-        for i = 1:(nargs-isva)
-            newarg = argtype_by_index(given_argtypes, i)
+        for i = 0:(nargs-isva)-1
+            newarg = argtype_by_index(given_argtypes, i + 1)
             if isva && has_conditional(𝕃) && isa(newarg, Conditional)
                 if newarg.slot > (nargs-isva)
                     newarg = widenconditional(newarg)
@@ -128,11 +128,11 @@ function va_process_argtypes(𝕃::AbstractLattice, given_argtypes::Vector{Any},
         end
         if isva
             if length(given_argtypes) < nargs && isvarargtype(given_argtypes[end])
-                last = length(given_argtypes)
+                last = length(given_argtypes) - 1
             else
-                last = nargs
+                last = nargs - 1
                 if has_conditional(𝕃)
-                    for i = last:length(given_argtypes)
+                    for i = last:length(given_argtypes)-1
                         newarg = given_argtypes[i]
                         if isa(newarg, Conditional) && newarg.slot > (nargs-isva)
                             given_argtypes[i] = widenconditional(newarg)
@@ -140,7 +140,7 @@ function va_process_argtypes(𝕃::AbstractLattice, given_argtypes::Vector{Any},
                     end
                 end
                 if has_mustalias(𝕃)
-                    for i = last:length(given_argtypes)
+                    for i = last:length(given_argtypes)-1
                         newarg = given_argtypes[i]
                         if isa(newarg, MustAlias) && newarg.slot > (nargs-isva)
                             given_argtypes[i] = widenmustalias(newarg)
@@ -148,7 +148,7 @@ function va_process_argtypes(𝕃::AbstractLattice, given_argtypes::Vector{Any},
                     end
                 end
             end
-            isva_given_argtypes[nargs] = tuple_tfunc(𝕃, given_argtypes[last:end])
+            isva_given_argtypes[nargs-1] = tuple_tfunc(𝕃, given_argtypes[last:end])
         end
         return isva_given_argtypes
     end
@@ -172,10 +172,10 @@ function most_general_argtypes(method::Union{Method,Nothing}, @nospecialize(spec
     # we don't overwrite the result of that work here).
     tail_index = min(nargtypes, nargs)
     local lastatype
-    for i = 1:nargtypes
+    for i = 0:nargtypes-1
         atyp = mi_argtypes[i]
         wasva = false
-        if i == nargtypes && isvarargtype(atyp)
+        if i == nargtypes-1 && isvarargtype(atyp)
             wasva = true
             atyp = unwrapva(atyp)
         end
@@ -194,7 +194,7 @@ function most_general_argtypes(method::Union{Method,Nothing}, @nospecialize(spec
             mi_argtypes[end] = Vararg{widenconst(atyp)}
         end
     end
-    for i = (tail_index+1):(nargs-1)
+    for i = tail_index:(nargs-2)
         mi_argtypes[i] = lastatype
     end
     return mi_argtypes
@@ -241,7 +241,7 @@ function constprop_cache_lookup(𝕃::AbstractLattice, mi::MethodInstance,
         cache_overridden_by_const = cached_result.overridden_by_const
         cache_overridden_by_const === nothing && continue
         cache_overridden_by_const = cache_overridden_by_const::BitVector
-        for i in 1:nargtypes
+        for i in 0:nargtypes-1
             if !is_argtype_match(𝕃, given_argtypes[i], cache_argtypes[i], cache_overridden_by_const[i])
                 @goto next_cache
             end

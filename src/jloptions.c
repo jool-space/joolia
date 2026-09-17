@@ -42,7 +42,7 @@ uint64_t parse_heap_size_option(const char *optarg, const char *option_name, int
     char unit[4] = {0};
     int nparsed = sscanf(optarg, "%Lf%3s", &value, unit);
     if (nparsed == 0 || strlen(unit) > 2 || (strlen(unit) == 2 && ascii_tolower(unit[1]) != 'b')) {
-        jl_errorf("julia: invalid argument to %s (%s)", option_name, optarg);
+        jl_errorf("joolia: invalid argument to %s (%s)", option_name, optarg);
     }
     uint64_t multiplier = 1ull;
     switch (ascii_tolower(unit[0])) {
@@ -64,7 +64,7 @@ uint64_t parse_heap_size_option(const char *optarg, const char *option_name, int
         case '%':
             if (allow_pct) {
                 if (value > 100)
-                    jl_errorf("julia: invalid percentage specified in %s", option_name);
+                    jl_errorf("joolia: invalid percentage specified in %s", option_name);
                 uint64_t mem = uv_get_total_memory();
                 uint64_t cmem = uv_get_constrained_memory();
                 if (cmem > 0 && cmem < mem)
@@ -73,12 +73,12 @@ uint64_t parse_heap_size_option(const char *optarg, const char *option_name, int
                 break;
             }
         default:
-            jl_errorf("julia: invalid argument to %s (%s)", option_name, optarg);
+            jl_errorf("joolia: invalid argument to %s (%s)", option_name, optarg);
             break;
     }
     long double sz = value * multiplier;
     if (isnan(sz) || sz < 0) {
-        jl_errorf("julia: invalid argument to %s (%s)", option_name, optarg);
+        jl_errorf("joolia: invalid argument to %s (%s)", option_name, optarg);
     }
     const long double limit = ldexpl(1.0, 64); // UINT64_MAX + 1
     return sz < limit ? (uint64_t)sz : UINT64_MAX;
@@ -171,7 +171,7 @@ JL_DLLEXPORT void jl_init_options(void) JL_NOTSAFEPOINT
     jl_options_initialized = 1;
 }
 
-static const char usage[] = "\n    julia [switches] -- [programfile] [args...]\n\n";
+static const char usage[] = "\n    joolia [switches] -- [programfile] [args...]\n\n";
 static const char opts[]  =
     "Switches (a '*' marks the default value, if applicable; settings marked '($)' may trigger package\n"
     "precompilation):\n\n"
@@ -190,11 +190,11 @@ static const char opts[]  =
     "                                               from the programfile or a path relative to\n"
     "                                               programfile.\n"
     " -J, --sysimage <file>                         Start up with the given system image file\n"
-    " -H, --home <dir>                              Set location of `julia` executable\n"
+    " -H, --home <dir>                              Set location of `joolia` executable\n"
     " --startup-file={yes*|no}                      Load `JULIA_DEPOT_PATH/config/startup.jl`; \n"
     "                                               if `JULIA_DEPOT_PATH` environment variable is unset,\n"
     "                                               load `~/.julia/config/startup.jl`\n"
-    " --handle-signals={yes*|no}                    Enable or disable Julia's default signal handlers\n"
+    " --handle-signals={yes*|no}                    Enable or disable joolia's default signal handlers\n"
     " --sysimage-native-code={yes*|no}              Use native code from system image if available\n"
     " --compiled-modules={yes*|no|existing|strict}  Enable or disable incremental precompilation of\n"
     "                                               modules. The `existing` option allows use of existing\n"
@@ -221,7 +221,7 @@ static const char opts[]  =
     "                                               threadpool; `auto` tries to infer a useful\n"
     "                                               default number of threads to use but the exact\n"
     "                                               behavior might change in the future. Currently sets\n"
-    "                                               N to the number of CPUs assigned to this Julia\n"
+    "                                               N to the number of CPUs assigned to this joolia\n"
     "                                               process based on the OS-specific affinity assignment\n"
     "                                               interface if supported (Linux and Windows) or to the\n"
     "                                               number of CPU threads if not supported (MacOS) or if\n"
@@ -265,7 +265,7 @@ static const char opts[]  =
     " --min-optlevel={0*|1|2|3}                     Set a lower bound on the optimization level\n"
 #ifdef JL_DEBUG_BUILD
     " -g, --debug-info=[{0|1|2*}]                   Set the level of debug info generation in the\n"
-    "                                               julia-debug build ($)\n"
+    "                                               joolia-debug build ($)\n"
 #else
     " -g, --debug-info=[{0|1*|2}]                   Set the level of debug info generation (level 2 if\n"
     "                                               `-g` is used without a level) ($)\n"
@@ -378,7 +378,7 @@ static const char opts_hidden[] =
     " --target-sanitize=address                     Instrument generated code for AddressSanitizer.\n"
     "                                               The above options control the instrumentation of\n"
     "                                               code generated by --output-* only. JITed code is\n"
-    "                                               instrumented if Julia itself is built with\n"
+    "                                               instrumented if joolia itself is built with\n"
     "                                               sanitizers.\n"
 ;
 
@@ -576,7 +576,7 @@ restart_switch:
             }
             break;
         case 'v': // version
-            jl_safe_fprintf(ios_stdout, "julia version %s\n", JULIA_VERSION_STRING);
+            jl_safe_fprintf(ios_stdout, "joolia version %s\n", JULIA_VERSION_STRING);
             exit(0);
         case 'h': // help
             ios_puts(usage, ios_stdout);
@@ -597,7 +597,7 @@ restart_switch:
                 else if (!strcmp(optarg,"2"))
                     jl_options.debug_level = 2;
                 else
-                    jl_errorf("julia: invalid argument to -g (%s)", optarg);
+                    jl_errorf("joolia: invalid argument to -g (%s)", optarg);
                 break;
             }
             else {
@@ -653,7 +653,7 @@ restart_switch:
             else if (!strcmp(optarg, "short"))
                 jl_options.banner = 2;
             else
-                jl_errorf("julia: invalid argument to --banner={yes|no|auto|short} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --banner={yes|no|auto|short} (%s)", optarg);
             break;
         case opt_experimental_features:
             jl_options.use_experimental_features = JL_OPTIONS_USE_EXPERIMENTAL_FEATURES_YES;
@@ -665,12 +665,12 @@ restart_switch:
             else if (!strcmp(optarg,"no")) {
                 jl_options.use_sysimage_native_code = JL_OPTIONS_USE_SYSIMAGE_NATIVE_CODE_NO;
                 if (jl_options.depwarn == JL_OPTIONS_DEPWARN_ERROR)
-                    jl_errorf("julia: --sysimage-native-code=no is deprecated");
+                    jl_errorf("joolia: --sysimage-native-code=no is deprecated");
                 else if (jl_options.depwarn == JL_OPTIONS_DEPWARN_ON)
                     jl_safe_printf("WARNING: --sysimage-native-code=no is deprecated\n");
             }
             else {
-                jl_errorf("julia: invalid argument to --sysimage-native-code={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --sysimage-native-code={yes|no} (%s)", optarg);
             }
             break;
         case opt_compiled_modules:
@@ -683,7 +683,7 @@ restart_switch:
             else if (!strcmp(optarg,"strict"))
                 jl_options.use_compiled_modules = JL_OPTIONS_USE_COMPILED_MODULES_STRICT;
             else
-                jl_errorf("julia: invalid argument to --compiled-modules={yes|no|existing|strict} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --compiled-modules={yes|no|existing|strict} (%s)", optarg);
             break;
         case opt_pkgimages:
             if (!strcmp(optarg,"yes"))
@@ -693,12 +693,12 @@ restart_switch:
             else if (!strcmp(optarg,"existing"))
                 jl_options.use_pkgimages = JL_OPTIONS_USE_PKGIMAGES_EXISTING;
             else
-                jl_errorf("julia: invalid argument to --pkgimages={yes|no|existing} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --pkgimages={yes|no|existing} (%s)", optarg);
             break;
         case 'C': // cpu-target
             jl_options.cpu_target = strdup(optarg);
             if (!jl_options.cpu_target)
-                jl_error("julia: failed to allocate memory");
+                jl_error("joolia: failed to allocate memory");
             break;
         case 't': // threads
         {
@@ -719,14 +719,14 @@ restart_switch:
                         errno = 0;
                         nthreadsi = strtol(&optarg[5], &endptr, 10);
                         if (errno != 0 || endptr == &optarg[5] || *endptr != 0 || nthreadsi < 0 || nthreadsi >= INT16_MAX)
-                            jl_errorf("julia: -t,--threads=auto,<m>; m must be an integer >= 0");
+                            jl_errorf("joolia: -t,--threads=auto,<m>; m must be an integer >= 0");
                     }
                 }
             }
             else {
                 nthreads = strtol(optarg, &endptr, 10);
                 if (errno != 0 || optarg == endptr || nthreads < 1 || nthreads >= INT16_MAX)
-                    jl_errorf("julia: -t,--threads=<n>[,auto|<m>]; n must be an integer >= 1");
+                    jl_errorf("joolia: -t,--threads=<n>[,auto|<m>]; n must be an integer >= 1");
                 if (*endptr == ',') {
                     if (!strncmp(&endptr[1], "auto", 4))
                         nthreadsi = 1;
@@ -736,7 +736,7 @@ restart_switch:
                         nthreadsi = strtol(&endptr[1], &endptri, 10);
                         // Allow 0 for interactive
                         if (errno != 0 || endptri == &endptr[1] || *endptri != 0 || nthreadsi < 0 || nthreadsi >= INT16_MAX)
-                            jl_errorf("julia: -t,--threads=<n>,<m>; m must be an integer >= 0");
+                            jl_errorf("joolia: -t,--threads=<n>,<m>; m must be an integer >= 0");
                         if (nthreadsi == 0)
                             jl_options.nthreadpools = 1;
                     }
@@ -762,14 +762,14 @@ restart_switch:
             else {
                 long nprocs = strtol(optarg, &endptr, 10);
                 if (errno != 0 || optarg == endptr || *endptr != 0 || nprocs < 1 || nprocs >= INT16_MAX)
-                    jl_errorf("julia: -p,--procs=<n> must be an integer >= 1");
+                    jl_errorf("joolia: -p,--procs=<n> must be an integer >= 1");
                 jl_options.nprocs = (int)nprocs;
             }
             break;
         case opt_machine_file:
             jl_options.machine_file = strdup(optarg);
             if (!jl_options.machine_file)
-                jl_error("julia: failed to allocate memory");
+                jl_error("joolia: failed to allocate memory");
             break;
         case 'P':
             jl_options.project = optarg ? strdup(optarg) : "@.";
@@ -782,7 +782,7 @@ restart_switch:
             else if (!strcmp(optarg, "auto"))
                 jl_options.color = JL_OPTIONS_COLOR_AUTO;
             else
-                jl_errorf("julia: invalid argument to --color={yes|no|auto} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --color={yes|no|auto} (%s)", optarg);
             break;
         case opt_history_file:
             if (!strcmp(optarg,"yes"))
@@ -790,7 +790,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.historyfile = JL_OPTIONS_HISTORYFILE_OFF;
             else
-                jl_errorf("julia: invalid argument to --history-file={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --history-file={yes|no} (%s)", optarg);
             break;
         case opt_startup_file:
             if (!strcmp(optarg,"yes"))
@@ -798,7 +798,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.startupfile = JL_OPTIONS_STARTUPFILE_OFF;
             else
-                jl_errorf("julia: invalid argument to --startup-file={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --startup-file={yes|no} (%s)", optarg);
             break;
         case opt_compile:
             if (!strcmp(optarg,"yes"))
@@ -810,7 +810,7 @@ restart_switch:
             else if (!strcmp(optarg,"min"))
                 jl_options.compile_enabled = JL_OPTIONS_COMPILE_MIN;
             else
-                jl_errorf("julia: invalid argument to --compile (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --compile (%s)", optarg);
             break;
         case opt_code_coverage:
             if (optarg != NULL) {
@@ -831,7 +831,7 @@ restart_switch:
                     jl_options.tracked_path = optarg + 1; // skip `@`
                 }
                 else
-                    jl_errorf("julia: invalid argument to --code-coverage (%s)", optarg);
+                    jl_errorf("joolia: invalid argument to --code-coverage (%s)", optarg);
                 break;
             }
             else {
@@ -844,7 +844,7 @@ restart_switch:
             else if (!strcmp(optarg, "count"))
                 jl_options.code_coverage_mode = JL_COVERAGE_MODE_COUNT;
             else
-                jl_errorf("julia: invalid argument to --code-coverage-mode (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --code-coverage-mode (%s)", optarg);
             break;
         case opt_track_allocation:
             if (optarg != NULL) {
@@ -859,7 +859,7 @@ restart_switch:
                     jl_options.tracked_path = optarg + 1; // skip `@`
                 }
                 else
-                    jl_errorf("julia: invalid argument to --track-allocation (%s)", optarg);
+                    jl_errorf("joolia: invalid argument to --track-allocation (%s)", optarg);
                 break;
             }
             else {
@@ -877,7 +877,7 @@ restart_switch:
                 else if (!strcmp(optarg,"3"))
                     jl_options.opt_level = 3;
                 else
-                    jl_errorf("julia: invalid argument to -O (%s)", optarg);
+                    jl_errorf("joolia: invalid argument to -O (%s)", optarg);
                 break;
             }
             else {
@@ -895,7 +895,7 @@ restart_switch:
                 else if (!strcmp(optarg,"3"))
                     jl_options.opt_level_min = 3;
                 else
-                    jl_errorf("julia: invalid argument to --min-optlevel (%s)", optarg);
+                    jl_errorf("joolia: invalid argument to --min-optlevel (%s)", optarg);
                 break;
             }
             else {
@@ -913,7 +913,7 @@ restart_switch:
             else if (!strcmp(optarg,"auto"))
                 jl_options.check_bounds = JL_OPTIONS_CHECK_BOUNDS_DEFAULT;
             else
-                jl_errorf("julia: invalid argument to --check-bounds={yes|no|auto} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --check-bounds={yes|no|auto} (%s)", optarg);
             break;
         case opt_output_bc:
             jl_options.outputbc = optarg;
@@ -941,7 +941,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.incremental = 0;
             else
-                jl_errorf("julia: invalid argument to --output-incremental={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --output-incremental={yes|no} (%s)", optarg);
             break;
         case opt_depwarn:
             if (!strcmp(optarg,"yes"))
@@ -951,7 +951,7 @@ restart_switch:
             else if (!strcmp(optarg,"error"))
                 jl_options.depwarn = JL_OPTIONS_DEPWARN_ERROR;
             else
-                jl_errorf("julia: invalid argument to --depwarn={yes|no|error} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --depwarn={yes|no|error} (%s)", optarg);
             break;
         case opt_warn_overwrite:
             if (!strcmp(optarg,"yes"))
@@ -959,7 +959,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.warn_overwrite = JL_OPTIONS_WARN_OVERWRITE_OFF;
             else
-                jl_errorf("julia: invalid argument to --warn-overwrite={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --warn-overwrite={yes|no} (%s)", optarg);
             break;
         case opt_warn_scope:
             if (!strcmp(optarg,"yes"))
@@ -967,7 +967,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.warn_scope = JL_OPTIONS_WARN_SCOPE_OFF;
             else
-                jl_errorf("julia: invalid argument to --warn-scope={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --warn-scope={yes|no} (%s)", optarg);
             break;
         case opt_inline:
             if (!strcmp(optarg,"yes"))
@@ -975,7 +975,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.can_inline = 0;
             else {
-                jl_errorf("julia: invalid argument to --inline (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --inline (%s)", optarg);
             }
             break;
         case opt_polly:
@@ -984,7 +984,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.polly = JL_OPTIONS_POLLY_OFF;
             else {
-                jl_errorf("julia: invalid argument to --polly (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --polly (%s)", optarg);
             }
             break;
         case opt_trace_compile:
@@ -1008,20 +1008,20 @@ restart_switch:
             else if (!strcmp(optarg,"user"))
                 jl_options.fast_math = JL_OPTIONS_FAST_MATH_DEFAULT;
             else
-                jl_errorf("julia: invalid argument to --math-mode={ieee|user} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --math-mode={ieee|user} (%s)", optarg);
             break;
         case opt_worker:
             jl_options.worker = 1;
             if (optarg != NULL) {
                 jl_options.cookie = strdup(optarg);
                 if (!jl_options.cookie)
-                    jl_error("julia: failed to allocate memory");
+                    jl_error("joolia: failed to allocate memory");
             }
             break;
         case opt_bind_to:
             jl_options.bindto = strdup(optarg);
             if (!jl_options.bindto)
-                jl_error("julia: failed to allocate memory");
+                jl_error("joolia: failed to allocate memory");
             break;
         case opt_handle_signals:
             if (!strcmp(optarg,"yes"))
@@ -1029,7 +1029,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.handle_signals = JL_OPTIONS_HANDLE_SIGNALS_OFF;
             else
-                jl_errorf("julia: invalid argument to --handle-signals (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --handle-signals (%s)", optarg);
             break;
         case opt_image_codegen:
             jl_options.image_codegen = 1;
@@ -1047,27 +1047,27 @@ restart_switch:
             if (optarg != NULL)
                 jl_options.heap_size_hint = parse_heap_size_option(optarg, "--heap-size-hint=<size>[<unit>]", 1);
             if (jl_options.heap_size_hint == 0)
-                jl_errorf("julia: invalid memory size specified in --heap-size-hint=<size>[<unit>]");
+                jl_errorf("joolia: invalid memory size specified in --heap-size-hint=<size>[<unit>]");
 
             break;
         case opt_hard_heap_limit:
             if (optarg != NULL)
                 jl_options.hard_heap_limit = parse_heap_size_option(optarg, "--hard-heap-limit=<size>[<unit>]", 0);
             if (jl_options.hard_heap_limit == 0)
-                jl_errorf("julia: invalid memory size specified in --hard-heap-limit=<size>[<unit>]");
+                jl_errorf("joolia: invalid memory size specified in --hard-heap-limit=<size>[<unit>]");
             break;
         case opt_heap_target_increment:
             if (optarg != NULL)
                 jl_options.heap_target_increment = parse_heap_size_option(optarg, "--heap-target-increment=<size>[<unit>]", 0);
             if (jl_options.heap_target_increment == 0)
-                jl_errorf("julia: invalid memory size specified in --heap-target-increment=<size>[<unit>]");
+                jl_errorf("joolia: invalid memory size specified in --heap-target-increment=<size>[<unit>]");
             break;
         case opt_gc_threads:
         {
             errno = 0;
             long nmarkthreads = strtol(optarg, &endptr, 10);
             if (errno != 0 || optarg == endptr || nmarkthreads < 1 || nmarkthreads >= INT16_MAX) {
-                jl_errorf("julia: --gcthreads=<n>[,<m>]; n must be an integer >= 1");
+                jl_errorf("joolia: --gcthreads=<n>[,<m>]; n must be an integer >= 1");
             }
             jl_options.nmarkthreads = (int16_t)nmarkthreads;
             if (*endptr == ',') {
@@ -1079,10 +1079,10 @@ restart_switch:
                 // count up to the number of mark (GC) threads.
                 if (errno != 0 || endptri == &endptr[1] || *endptri != 0 || nsweepthreads < 0 ||
                     nsweepthreads > nmarkthreads || nsweepthreads > INT8_MAX)
-                    jl_errorf("julia: --gcthreads=<n>,<m>; m must be an integer with 0 <= m <= n");
+                    jl_errorf("joolia: --gcthreads=<n>,<m>; m must be an integer with 0 <= m <= n");
 #else
                 if (errno != 0 || endptri == &endptr[1] || *endptri != 0 || nsweepthreads < 0 || nsweepthreads > 1)
-                    jl_errorf("julia: --gcthreads=<n>,<m>; m must be 0 or 1");
+                    jl_errorf("joolia: --gcthreads=<n>,<m>; m must be 0 or 1");
 #endif
                 jl_options.nsweepthreads = (int8_t)nsweepthreads;
             }
@@ -1094,14 +1094,14 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.permalloc_pkgimg = 0;
             else
-                jl_errorf("julia: invalid argument to --permalloc-pkgimg={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --permalloc-pkgimg={yes|no} (%s)", optarg);
             break;
         case opt_timeout_for_safepoint_straggler:
         {
             errno = 0;
             long timeout = strtol(optarg, &endptr, 10);
             if (errno != 0 || optarg == endptr || timeout < 1 || timeout > INT16_MAX)
-                jl_errorf("julia: --timeout-for-safepoint-straggler=<seconds>; seconds must be an integer between 1 and %d", INT16_MAX);
+                jl_errorf("joolia: --timeout-for-safepoint-straggler=<seconds>; seconds must be an integer between 1 and %d", INT16_MAX);
             jl_options.timeout_for_safepoint_straggler_s = (int16_t)timeout;
             break;
         }
@@ -1118,7 +1118,7 @@ restart_switch:
             else if (!strcmp(optarg,"unsafe-warn"))
                 jl_options.trim = JL_TRIM_UNSAFE_WARN;
             else
-                jl_errorf("julia: invalid argument to --trim={safe|no|unsafe|unsafe-warn} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --trim={safe|no|unsafe|unsafe-warn} (%s)", optarg);
             break;
         case opt_trace_eval:
             if (optarg == NULL || !strcmp(optarg,"loc"))
@@ -1128,7 +1128,7 @@ restart_switch:
             else if (!strcmp(optarg,"no"))
                 jl_options.trace_eval = 0;
             else
-                jl_errorf("julia: invalid argument to --trace-eval={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --trace-eval={yes|no} (%s)", optarg);
             break;
         case opt_task_metrics:
             if (!strcmp(optarg, "no"))
@@ -1136,7 +1136,7 @@ restart_switch:
             else if (!strcmp(optarg, "yes"))
                 jl_options.task_metrics = JL_OPTIONS_TASK_METRICS_ON;
             else
-                jl_errorf("julia: invalid argument to --task-metrics={yes|no} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --task-metrics={yes|no} (%s)", optarg);
             break;
         case opt_compress_sysimage:
             if (!strcmp(optarg,"yes"))
@@ -1152,10 +1152,10 @@ restart_switch:
             else if (!strcmp(optarg, "address"))
                 jl_options.target_sanitize_address = 1;
             else
-                jl_errorf("julia: invalid argument to --target-sanitize={memory|thread|address} (%s)", optarg);
+                jl_errorf("joolia: invalid argument to --target-sanitize={memory|thread|address} (%s)", optarg);
             break;
         default:
-            jl_errorf("julia: unhandled option -- %c\n"
+            jl_errorf("joolia: unhandled option -- %c\n"
                       "This is a bug, please report it.", c);
         }
     }
@@ -1163,7 +1163,7 @@ restart_switch:
     parsing_args_done:
     if (!jl_options.use_experimental_features) {
         if (jl_options.trim != JL_TRIM_NO)
-            jl_errorf("julia: --trim is an experimental feature, you must enable it with --experimental");
+            jl_errorf("joolia: --trim is an experimental feature, you must enable it with --experimental");
     }
     jl_options.code_coverage = codecov;
     jl_options.malloc_log = malloclog;

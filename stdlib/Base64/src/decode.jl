@@ -6,10 +6,10 @@ const BASE64_CODE_PAD = 0x41
 const BASE64_CODE_IGN = 0x42
 const BASE64_DECODE = fill(BASE64_CODE_IGN, 256)
 for (i, c) in enumerate(BASE64_ENCODE)
-    BASE64_DECODE[Int(c)+1] = UInt8(i - 1)
+    BASE64_DECODE[Int(c)] = UInt8(i)
 end
-BASE64_DECODE[Int(encodepadding())+1] = BASE64_CODE_PAD
-decode(x::UInt8) = @inbounds return BASE64_DECODE[x + 1]
+BASE64_DECODE[Int(encodepadding())] = BASE64_CODE_PAD
+decode(x::UInt8) = @inbounds return BASE64_DECODE[x]
 
 """
     Base64DecodePipe(istream)
@@ -82,11 +82,11 @@ function read_until_end(pipe::Base64DecodePipe, ptr::Ptr{UInt8}, n::UInt)
             end
         end
         if p < p_end
-            if i + 4 ≤ lastindex(buffer)
-                b1 = decode(buffer[i+1])
-                b2 = decode(buffer[i+2])
-                b3 = decode(buffer[i+3])
-                b4 = decode(buffer[i+4])
+            if i + 3 ≤ lastindex(buffer)
+                b1 = decode(buffer[i])
+                b2 = decode(buffer[i+1])
+                b3 = decode(buffer[i+2])
+                b4 = decode(buffer[i+3])
                 i += 4
             else
                 consumed!(buffer, i)
@@ -114,13 +114,13 @@ function Base.read(pipe::Base64DecodePipe, ::Type{UInt8})
 end
 
 function Base.readbytes!(pipe::Base64DecodePipe, data::AbstractVector{UInt8}, nb::Integer=length(data))
-    require_one_based_indexing(data)
+    require_zero_based_indexing(data)
     filled::Int = 0
     while filled < nb && !eof(pipe)
         if length(data) == filled
-            resize!(data, min(length(data) * 2, nb))
+            resize!(data, min(max(1, length(data) * 2), nb))
         end
-        p = pointer(data, filled + 1)
+        p = pointer(data, filled)
         p_end = read_until_end(pipe, p, UInt(min(length(data), nb) - filled))
         filled += p_end - p
     end
@@ -146,8 +146,9 @@ function decode_slow(b1, b2, b3, b4, buffer, i, input, ptr, n, rest)
         else
             break
         end
-        if i + 1 ≤ lastindex(buffer)
-            b4 = decode(buffer[i+=1])
+        if i ≤ lastindex(buffer)
+            b4 = decode(buffer[i])
+            i += 1
         elseif !eof(input)
             b4 = decode(read(input, UInt8))
         else

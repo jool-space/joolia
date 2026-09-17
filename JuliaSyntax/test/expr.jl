@@ -866,6 +866,85 @@ end
 
 @testset "SyntaxNode->Expr conversion" begin
     src = repeat('a', 1000) * '\n' * "@hi"
-    @test Expr(parsestmt(SyntaxNode, SubString(src, 1001:lastindex(src)))) ==
+    @test Expr(parsestmt(SyntaxNode, SubString(src, 1000:lastindex(src)))) ==
         Expr(:macrocall, Symbol("@hi"), LineNumberNode(2))
+end
+
+# Positional fields remain distinct; use the syntax version supported by flisp.
+@testset "zero-origin Expr bridge against flisp" begin
+    samples = String[
+        "",
+        "x = 1",
+        "a + b*c",
+        "x += y",
+        "x .+= y",
+        "f(a,b;k=3)",
+        "f.(a,b)",
+        "x.y",
+        "A[0,1]",
+        "T{A,B}",
+        "for x in xs, y in ys; f(x,y); end",
+        "while x; y(); end",
+        "try f() catch e; g(e) finally h() end",
+        "(x for x in xs if p(x))",
+        "f(x) do a,b; a+b; end",
+        "(x,y) -> x+y",
+        "function f(x; k=2); x+k; end",
+        "f(x) = x+1",
+        "macro m(x); x; end",
+        "module M; x=1; end",
+        "let x=1; x+2; end",
+        "struct S; x::Int; y::String; end",
+        "mutable struct S; x; end",
+        "a < b <= c",
+        "a .< b .<= c",
+        "(;a=1,b=2)",
+        "[1 2;3 4]",
+        "[1;;;2]",
+        "\"αβ\"",
+        "'α'",
+        "\"a\$(x)b\"",
+        "@m a b",
+        "import A: x, y",
+        "f(x::T) where {T} = x",
+        "T[a;b]",
+        "(a;b;c)",
+        "f(;a=1)",
+        "(;a=1;b=2)",
+        "(x for xs in xss for x in xs)",
+        "try f() finally g() end",
+        "try f() catch; g() end",
+        "if a; b; elseif c; d; else e; end",
+        "baremodule M; x=1; end",
+        "x'",
+        "A.B.@m x",
+        "\"\"",
+        "\"\"\"\n  α\n  β\n  \"\"\"",
+        "f(α, β; γ=δ)",
+    ]
+    for text in samples
+        got = JuliaSyntax.remove_linenums!(JuliaSyntax.parseall(Expr,text;filename="probe.jl",version=v"1.13"))
+        expected = JuliaSyntax.remove_linenums!(Base.Meta.parseall(text;filename="probe.jl",_parse=Base.fl_parse))
+        if got != expected
+            Core.println("Expr mismatch for ",repr(text),"\ngot ",repr(got),"\nexpected ",repr(expected))
+        end
+        @test got == expected
+    end
+end
+
+# Version metadata precedes the module flag without overwriting either field.
+@testset "zero-origin module version fields" begin
+    for (text, standard) in (("module M; x=1; end", true), ("baremodule M; x=1; end", false))
+        got = JuliaSyntax.remove_linenums!(JuliaSyntax.parsestmt(Expr, text; version=v"1.14"))
+        @test got == Expr(:module, v"1.14", standard, :M, Expr(:block, Expr(:(=), :x, 1)))
+    end
+end
+
+@testset "top-level macro at byte zero" begin
+    source = "@generated function generated_probe(x)\n    x\nend\nvalue = 1\n"
+    parsed = JuliaSyntax.parseall(Expr, source)
+    macro_nodes = [node for node in parsed.args if node isa Expr && node.head === :macrocall]
+    @test length(macro_nodes) == 1
+    @test length(macro_nodes[0].args) == 3
+    @test any(node isa Expr && node.head === :(=) for node in parsed.args)
 end

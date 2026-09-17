@@ -12,7 +12,7 @@ end
 
 function argtype_decl(env, n, @nospecialize(sig::DataType), i::Int, nargs, isva::Bool) # -> (argname, argtype)
     t = unwrapva(sig.parameters[min(i, end)])
-    if i == nargs && isva
+    if i == nargs - 1 && isva
         va = sig.parameters[end]
         if isvarargtype(va) && (!isdefined(va, :N) || !isa(va.N, Int))
             t = va
@@ -23,7 +23,7 @@ function argtype_decl(env, n, @nospecialize(sig::DataType), i::Int, nargs, isva:
         end
     end
     if isa(n,Expr)
-        n = n.args[1]  # handle n::T in arg list
+        n = n.args[0]  # handle n::T in arg list
     end
     n = strip_gensym(n)
     local s
@@ -49,7 +49,7 @@ end
 function method_argnames(m::Method)
     argnames = ccall(:jl_uncompress_argnames, Vector{Symbol}, (Any,), m.slot_syms)
     isempty(argnames) && return argnames
-    return argnames[1:m.nargs]
+    return argnames[0:m.nargs-1]
 end
 
 function arg_decl_parts(m::Method, html=false)
@@ -67,8 +67,8 @@ function arg_decl_parts(m::Method, html=false)
             show_env = ImmutableDict(show_env, :unionall_env => t)
         end
         decls = Tuple{String,String}[argtype_decl(show_env, argnames[i], sig, i, m.nargs, m.isva)
-                    for i = 1:m.nargs]
-        decls[1] = ("", sprint(show_signature_function, unwrapva(sig.parameters[1]), false, decls[1][1], html,
+                    for i = 0:m.nargs-1]
+        decls[0] = ("", sprint(show_signature_function, unwrapva(sig.parameters[0]), false, decls[0][0], html,
                                context = show_env))
     else
         decls = Tuple{String,String}[("", "") for _ = 1:length(sig.parameters::SimpleVector)]
@@ -107,7 +107,7 @@ function kwarg_decl(m::Method, kwtype = nothing; world::UInt=get_world_counter()
         if kwli !== nothing
             kwli = kwli::Method
             slotnames = ccall(:jl_uncompress_argnames, Vector{Symbol}, (Any,), kwli.slot_syms)
-            kws = filter(x -> !(x === empty_sym || '#' in string(x)), slotnames[(kwli.nargs + 1):end])
+            kws = filter(x -> !(x === empty_sym || '#' in string(x)), slotnames[kwli.nargs:end])
             # ensure the kwarg... is always printed last. The order of the arguments are not
             # necessarily the same as defined in the function
             i = findfirst(x -> endswith(string(x)::String, "..."), kws)
@@ -126,11 +126,11 @@ function show_method_params(io::IO, tv)
     if !isempty(tv)
         print(io, " where ")
         if length(tv) == 1
-            show(io, tv[1])
+            show(io, tv[0])
         else
             print(io, "{")
-            for i = 1:length(tv)
-                if i > 1
+            for i in eachindex(tv)
+                if i > firstindex(tv)
                     print(io, ", ")
                 end
                 x = tv[i]
@@ -226,7 +226,7 @@ function sym_to_string(sym)
     end
     s = String(sym)
     if endswith(s, "...")
-        return string(sprint(show_sym, Symbol(s[1:end-3])), "...")
+        return string(sprint(show_sym, Symbol(s[0:end-3])), "...")
     else
         return sprint(show_sym, sym)
     end
@@ -247,16 +247,16 @@ function show_method(io::IO, m::Method;
         file = "none"
         line = 0
     else
-        print(io, decls[1][2], "(")
+        print(io, decls[0][1], "(")
 
         # arguments
-        for (i,d) in enumerate(decls[2:end])
-            printstyled(io, d[1], color=:light_black)
-            if !isempty(d[2])
+        for (i,d) in enumerate(decls[1:end])
+            printstyled(io, d[0], color=:light_black)
+            if !isempty(d[1])
                 print(io, "::")
-                print_type_bicolor(io, d[2], color=:bold, inner_color=:normal)
+                print_type_bicolor(io, d[1], color=:bold, inner_color=:normal)
             end
-            i < length(decls)-1 && print(io, ", ")
+            i < length(decls)-2 && print(io, ", ")
         end
 
         kwargs = kwarg_decl(m)
@@ -328,7 +328,7 @@ function _modulecolor(method::Method)
     # method table is shared, we now need to distinguish "primary" methods by trying to
     # check if there is a primary `DataType` to identify it with. c.f. how `jl_method_def`
     # would derive this same information (for the name).
-    ft = argument_datatypename((unwrap_unionall(method.sig)::DataType).parameters[1])
+    ft = argument_datatypename((unwrap_unionall(method.sig)::DataType).parameters[0])
     if ft === nothing || parentmodule(method) === ft.module !== Core
         return nothing
     end
@@ -357,7 +357,7 @@ function show_method_table(io::IO, ms::MethodList, max::Int=-1, header::Bool=tru
             n += 1
             println(io)
 
-            print(io, " ", lpad("[$n]", digit_align_width + 2), " ")
+            print(io, " ", lpad("[$(n-1)]", digit_align_width + 2), " ")
 
             show_method(io, meth; modulecolor=_modulecolor(meth))
 
@@ -422,11 +422,11 @@ function url(m::Method)
                 LibGit2.with(LibGit2.GitRepoExt(d)) do repo
                     LibGit2.with(LibGit2.GitConfig(repo)) do cfg
                         u = LibGit2.get(cfg, "remote.origin.url", "")
-                        u = (match(LibGit2.GITHUB_REGEX,u)::AbstractMatch).captures[1]
+                        u = (match(LibGit2.GITHUB_REGEX,u)::AbstractMatch).captures[0]
                         commit = string(LibGit2.head_oid(repo))
                         root = LibGit2.path(repo)
                         if startswith(file, root) || startswith(realpath(file), root)
-                            "https://github.com/$u/tree/$commit/"*file[length(root)+1:end]*"#L$line"
+                            "https://github.com/$u/tree/$commit/"*file[ncodeunits(root):end]*"#L$line"
                         else
                             fileurl(file)
                         end
@@ -447,11 +447,11 @@ function show(io::IO, ::MIME"text/html", m::Method)
         print(io, m.name, "(...) in ", parentmodule(m))
         return
     end
-    print(io, decls[1][2], "(")
+    print(io, decls[0][1], "(")
     join(
         io,
         String[
-            isempty(d[2]) ? string(d[1]) : string(d[1], "::<b>", d[2] , "</b>") for d in decls[2:end]
+            isempty(d[1]) ? string(d[0]) : string(d[0], "::<b>", d[1] , "</b>") for d in decls[1:end]
         ],
         ", ",
         ", ",

@@ -63,10 +63,10 @@ end
     @test sprint(show, DateFormat("yyyzzxmmdd\\MHH:MM:SS\\P")) == "dateformat\"yyyzzxmmdd\\MHH:MM:SS\\P\""
     @test sprint(show, dateformat"yyyy-mm-dd\THH:MM:SS.s") == "dateformat\"yyyy-mm-dd\\THH:MM:SS.s\""
     @test sprint(show, dateformat"yyyy-mm-ddTHH:MM:SS.s") == "dateformat\"yyyy-mm-ddTHH:MM:SS.s\""
-    @test sprint(show, DateFormat("yyy").tokens[1]) == "DatePart(yyy)"
-    @test sprint(show, DateFormat("mmzzdd").tokens[2]) == "Delim(zz)"
-    @test sprint(show, DateFormat("ddxmm").tokens[2]) == "Delim(x)"
-    @test sprint(show, DateFormat("xxmmxx").tokens[2]) == "DatePart(mm)"
+    @test sprint(show, DateFormat("yyy").tokens[0]) == "DatePart(yyy)"
+    @test sprint(show, DateFormat("mmzzdd").tokens[1]) == "Delim(zz)"
+    @test sprint(show, DateFormat("ddxmm").tokens[1]) == "Delim(x)"
+    @test sprint(show, DateFormat("xxmmxx").tokens[1]) == "DatePart(mm)"
 end
 
 @testset "Common Parsing Patterns" begin
@@ -113,7 +113,7 @@ end
         @test false
     catch err
         @test isa(err, ArgumentError)
-        @test err.msg == "Unable to parse date time. Expected directive Delim(.) at char 16"
+        @test err.msg == "Unable to parse date time. Expected directive Delim(.) at char 15"
     end
 
     f = "yy:dd:mm"
@@ -318,7 +318,7 @@ end
     @test Dates.format(Dates.Date(2009, 12, 1), f) == "01Dec2009"
     f = "duy"
     globex = ["f", "g", "h", "j", "k", "m", "n", "q", "u", "v", "x", "z"]
-    locale = Dates.DateLocale(globex, map(uppercase, globex), globex[1:7], globex[1:7])
+    locale = Dates.DateLocale(globex, map(uppercase, globex), globex[0:6], globex[0:6])
     @test Dates.Date("1F4", f; locale=locale) + Dates.Year(2010) == Dates.Date(2014, 1, 1)
     @test Dates.format(Dates.Date(2014, 1, 1), f; locale=locale) == "1F4"
 
@@ -652,6 +652,46 @@ end
 @testset "Issue #50328: parsing negative years" begin
     @test Date("-2013-10-10") == Date(-2013, 10, 10)
     @test Date("-2013") == Date(-2013, 01, 01)
+end
+
+# Format tokens and collection positions start at zero; calendar values do not.
+@testset "zero-origin date parsing and formatting" begin
+    @test Date("2024-02-29") == Date(2024, 2, 29)
+    @test Date("December 31, 2024", DateFormat("U d, y")) == Date(2024, 12, 31)
+    @test Date("2024年12月31日", DateFormat("y年m月d日")) == Date(2024, 12, 31)
+    @test Date("x2024", DateFormat("xy")) == Date(2024)
+    @test Date("2024", DateFormat("y")) == Date(2024)
+    @test Dates.format(Date(2024, 2, 29), DateFormat("yyyy-mm-dd")) == "2024-02-29"
+    @test Dates.format(Date(2024, 12, 31), DateFormat("U d, yyyy")) == "December 31, 2024"
+    @test Dates.format(Date(2024, 12, 31), DateFormat("yyyy年m月d日")) == "2024年12月31日"
+    @test Dates.format(Date(2024), DateFormat("")) == ""
+    @test Dates.format(Date(1234), DateFormat("yyy")) == "234"
+    @test Dates.format(Date(123), DateFormat("yyy")) == "123"
+    @test Dates.format(Date(1234), DateFormat("y")) == "4"
+    @test string(Time(0, 0, 0, 0, 0, 1)) == "00:00:00.000000001"
+    @test sprint(show, Time(0); context=:module => Dates) == "Time(0)"
+    @test sprint(show, Time(1, 2, 3, 4, 5, 6); context=:module => Dates) == "Time(1, 2, 3, 4, 5, 6)"
+    @test Dates.tryparsenext_word("M", 0, 0, Dates.ENGLISH) == ("M", 1)
+    @test Dates.tryparsenext_word("é", 0, 0, Dates.ENGLISH) == ("é", 2)
+    @test Dates.tryparsenext_word("!", 0, 0, Dates.ENGLISH) === nothing
+    @test Dates.tryparsenext_word("", 0, -1, Dates.ENGLISH) === nothing
+    @test tryparse(Date, "x", DateFormat("y")) === nothing
+    @test tryparse(Date, "2024!", DateFormat("y")) === nothing
+    @test_throws ArgumentError Date("x", DateFormat("y"))
+    @test_throws ArgumentError Date("2024!", DateFormat("y"))
+    @test DateFormat("y").tokens[0] isa Dates.DatePart{'y'}
+    @test length(DateFormat("").tokens) == 0
+    r = Date(2024, 1, 1):Day(1):Date(2024, 1, 3)
+    @test r[0] == Date(2024, 1, 1)
+    @test r[2] == Date(2024, 1, 3)
+    @test Date(2024, 1, 1) in r
+    @test Date(2024, 1, 3) in r
+    @test !(Date(2024, 1, 4) in r)
+    @test collect(r) == [Date(2024, 1, 1), Date(2024, 1, 2), Date(2024, 1, 3)]
+    @test dayofyear(Date(2024, 12, 31)) == 366
+    @test week(Date(2021, 1, 1)) == 53
+    @test daysinmonth(Date(2024, 2, 1)) == 29
+    @test daysinmonth(Date(2024, 12, 1)) == 31
 end
 
 end

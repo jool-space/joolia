@@ -146,6 +146,13 @@ end
 @test_throws ArgumentError parse(UUID, "not a UUID")
 @test tryparse(UUID, "either is this") === nothing
 
+let u = UUID("00112233-4455-6677-8899-aabbccddeeff")
+    @test UUID((UInt64(0x0011223344556677), UInt64(0x8899aabbccddeeff))) == u
+    @test UUID((UInt32(0x00112233), UInt32(0x44556677), UInt32(0x8899aabb), UInt32(0xccddeeff))) == u
+    @test Base.binunpack(Base.binpack(PkgId(u, "Example"))) == PkgId(u, "Example")
+    @test Base.binunpack(Base.binpack(PkgId("Example"))) == PkgId("Example")
+end
+
 @testset "explicit_project_deps_get" begin
     mktempdir() do dir
         project_file = joinpath(dir, "Project.toml")
@@ -836,10 +843,11 @@ end
     end
 end
 
+# Joolia uses its own user depot while retaining explicit depot override semantics.
 @testset "expansion of JULIA_DEPOT_PATH" begin
     s = Sys.iswindows() ? ';' : ':'
     tmp = "/this/does/not/exist"
-    default = joinpath(homedir(), ".julia")
+    default = joinpath(homedir(), ".joolia")
     bundled = Base.append_bundled_depot_path!(String[])
     cases = Dict{Any,Vector{String}}(
         nothing => [default; bundled],
@@ -2360,5 +2368,48 @@ end
             @assert Base.maybe_fetch_cache(Base.PkgId("Fake"), $(repr(joinpath(pkgdir, "src", "CacheHookPkg.jl")))) === false
             @assert inner[] === false  # the nested call was refused by the guard
             """))
+    end
+end
+
+# Bootstrap loading helpers preserve zero-origin positions without changing cache encodings.
+@testset "zero-origin loading helpers" begin
+    for bounds in 0:2
+        cf = Base.CacheFlags(; check_bounds=bounds, inline=false, opt_level=1)
+        @test parse(Base.CacheFlags, sprint(show, cf)) == cf
+        default = Base.CacheFlags(; check_bounds=(bounds+1)%3, inline=false, opt_level=1)
+        @test Base.translate_cache_flags(cf, default) ==
+            [("--check-bounds=auto", "--check-bounds=yes", "--check-bounds=no")[bounds]]
+    end
+    @test Base.slug(UInt32(0), 5) == "AAAAA"
+    @test Base.slug(UInt32(61), 5) == "9AAAA"
+    @test Base.slug(UInt32(0), 0) == ""
+    targets = Base.current_image_targets()
+    @test !isempty(targets) && !isempty(targets[0].name)
+    io = IOBuffer()
+    write(io, Int32(0))
+    @test isempty(Base.parse_image_targets(take!(io)))
+    chi = Base.CacheHeaderIncludes((Base, "probe.jl", UInt64(12), UInt32(34), 5.0))
+    @test (chi.id, chi.filename, chi.fsize, chi.hash, chi.mtime, chi.modpath) ==
+        (Base.PkgId(Base), "probe.jl", UInt64(12), UInt32(34), 5.0, String[])
+    mod = Module(:ZeroOriginLoadingTarget)
+    @test Base.include_string(mod, "x = 3\ny = x + 2\n(x, y)", "probe.jl") == (3, 5)
+    @test Base.include_string(mod, "", "empty.jl") === nothing
+    @test Base.include_string(x -> x isa Int ? x+1 : x, mod, "4", "map.jl") == 5
+    err = try
+        Base.include_string(mod, "x = 3\nerror(\"probe\")", "bad.jl")
+    catch e
+        e
+    end
+    @test err isa LoadError && err.file == "bad.jl" && err.line == 2 && err.error isa ErrorException
+    pkg = Base.PkgId("ZeroOriginLoadingProbe")
+    lock(Base.require_lock)
+    try
+        @test Base.start_loading(pkg, UInt128(0), false) === nothing
+        @test_throws Base.ConcurrencyViolationError Base.canstart_loading(pkg, UInt128(0), false)
+        Base.end_loading(pkg, nothing)
+        @test !haskey(Base.package_locks, pkg)
+    finally
+        haskey(Base.package_locks, pkg) && Base.end_loading(pkg, nothing)
+        unlock(Base.require_lock)
     end
 end

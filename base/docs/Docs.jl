@@ -101,29 +101,29 @@ function signature!(tv::Vector{Any}, expr::Expr)
     is_macrocall = isexpr(expr, :macrocall)
     if is_macrocall || isexpr(expr, :call)
         sig = :(Union{Tuple{}})
-        first_arg = is_macrocall ? 3 : 2 # skip function arguments
+        first_arg = is_macrocall ? 2 : 1 # skip function arguments
         for arg in expr.args[first_arg:end]
             isexpr(arg, :parameters) && continue
             if isexpr(arg, :kw) # optional arg
-                push!(sig.args, :(Tuple{$((sig.args[end]::Expr).args[2:end]...)}))
+                push!(sig.args, :(Tuple{$((sig.args[end]::Expr).args[1:end]...)}))
             end
             push!((sig.args[end]::Expr).args, argtype(arg))
         end
-        if isexpr(expr.args[1], :curly) && isempty(tv)
-            append!(tv, mapany(tvar, (expr.args[1]::Expr).args[2:end]))
+        if isexpr(expr.args[0], :curly) && isempty(tv)
+            append!(tv, mapany(tvar, (expr.args[0]::Expr).args[1:end]))
         end
-        for i = length(tv):-1:1
-            push!(sig.args, :(Tuple{$((tv[i]::Expr).args[1])}))
+        for i = length(tv)-1:-1:0
+            push!(sig.args, :(Tuple{$((tv[i]::Expr).args[0])}))
         end
-        for i = length(tv):-1:1
+        for i = length(tv)-1:-1:0
             sig = Expr(:where, sig, tv[i])
         end
         return sig
     elseif isexpr(expr, :where)
-        append!(tv, mapany(tvar, expr.args[2:end]))
-        return signature!(tv, expr.args[1])
+        append!(tv, mapany(tvar, expr.args[1:end]))
+        return signature!(tv, expr.args[0])
     else
-        return signature!(tv, expr.args[1])
+        return signature!(tv, expr.args[0])
     end
 end
 signature!(tv::Vector{Any}, @nospecialize(other)) = :(Union{})
@@ -132,14 +132,14 @@ signature(@nospecialize other) = signature!([], other)
 
 function argtype(expr::Expr)
     isexpr(expr, :(::))  && return expr.args[end]
-    isexpr(expr, :(...)) && return :(Vararg{$(argtype(expr.args[1]))})
+    isexpr(expr, :(...)) && return :(Vararg{$(argtype(expr.args[0]))})
     if isexpr(expr, :meta) && length(expr.args) == 2
-        a1 = expr.args[1]
+        a1 = expr.args[0]
         if a1 === :nospecialize || a1 === :specialize
-            return argtype(expr.args[2])
+            return argtype(expr.args[1])
         end
     end
-    return argtype(expr.args[1])
+    return argtype(expr.args[0])
 end
 argtype(@nospecialize other) = :Any
 
@@ -300,29 +300,29 @@ function astname(x::Expr, ismacro::Bool)
     head = x.head
     if head === :.
         ismacro ? macroname(x) : x
-elseif head === :call && length(x.args) >= 1 && isexpr(x.args[1], :(::))
+elseif head === :call && length(x.args) >= 1 && isexpr(x.args[0], :(::))
         # for documenting (x::y)(args...), extract the name from y
         # otherwise, for documenting `x::y`, it will be extracted from x
-        astname((x.args[1]::Expr).args[end], ismacro)
+        astname((x.args[0]::Expr).args[end], ismacro)
     elseif head === :overlay
         # for documenting `Base.Experimental.@overlay mt f(args...)`, the callee is
         # `Expr(:overlay, mt, f)`: extract the name from f
         astname(x.args[end], ismacro)
     else
         n = if isexpr(x, :module)
-            isa(x.args[1], Bool) ? 2 : 3
+            isa(x.args[0], Bool) ? 1 : 2
         elseif isexpr(x, :struct)
-            2
+            1
         elseif isexpr(x, (:call, :macrocall, :function, :(=), :macro, :where, :curly,
                           :(::), :(<:), :(>:), :local, :global, :const, :atomic,
                           :copyast, :quote, :inert, :primitive, :abstract,
                           :escape, :var"hygienic-scope"))
             # similar to is_function_def, but without -> and with various assignments, quoted statements, and miscellaneous that might be encountered in struct definitions also
-            1
+            0
         else
             return x # nothing to see here--bindingexpr will convert this to an error if defining a doc
         end
-        length(x.args) < n && return x
+        length(x.args) <= n && return x
         astname(x.args[n], ismacro)
     end
 end
@@ -331,11 +331,11 @@ astname(s::Symbol, ismacro::Bool)    = ismacro ? macroname(s) : s
 astname(@nospecialize(other), ismacro::Bool) = other
 
 macroname(s::Symbol) = Symbol('@', s)
-macroname(x::Expr)   = Expr(x.head, x.args[1], macroname(x.args[end].value))
+macroname(x::Expr)   = Expr(x.head, x.args[0], macroname(x.args[end].value))
 
 isfield(@nospecialize x) = isexpr(x, :.) &&
-    (isa(x.args[1], Symbol) || isfield(x.args[1])) &&
-    (isa(x.args[2], QuoteNode) || isexpr(x.args[2], :quote))
+    (isa(x.args[0], Symbol) || isfield(x.args[0])) &&
+    (isa(x.args[1], QuoteNode) || isexpr(x.args[1], :quote))
 
 # @doc expression builders.
 # =========================
@@ -369,7 +369,7 @@ function metadata(__source__, __module__, expr, ismodule)
         P = Pair{Symbol,Any}
         fields = P[]
         last_docstr = nothing
-        for each in (expr.args[3]::Expr).args
+        for each in (expr.args[2]::Expr).args
             eachex = unescape(each)
             if isa(eachex, Symbol) || isexpr(eachex, :(::))
                 # a field declaration
@@ -380,7 +380,7 @@ function metadata(__source__, __module__, expr, ismodule)
             elseif isexpr(eachex, :function) || isexpr(eachex, :(=))
                 break
             elseif isa(eachex, String) || isexpr(eachex, :string) || isexpr(eachex, :call) ||
-                (isexpr(eachex, :macrocall) && eachex.args[1] === Symbol("@doc_str"))
+                (isexpr(eachex, :macrocall) && eachex.args[0] === Symbol("@doc_str"))
                 # forms that might be doc strings
                 last_docstr = each
             end
@@ -407,11 +407,11 @@ function objectdoc(__source__, __module__, str, def, expr, sig = :(Union{}))
         return Expr(:block, docex)
     else
         exdef = esc(def)
-        if isexpr(def, :global, 1) && def.args[1] isa Union{Symbol,GlobalRef}
+        if isexpr(def, :global, 1) && def.args[0] isa Union{Symbol,GlobalRef}
             # Special case: `global x` should return nothing to avoid syntax errors with assigning to a value
             val = nothing
         else
-            if isexpr(def, :(=), 2) && isexpr(def.args[1], :curly)
+            if isexpr(def, :(=), 2) && isexpr(def.args[0], :curly)
                 # workaround for lowering bug #60001
                 exdef = Expr(:block, exdef)
             end
@@ -434,8 +434,8 @@ function calldoc(__source__, __module__, str, def::Expr)
         docerror(def)
     end
 end
-callargs(ex::Expr) = isexpr(ex, :where) ? callargs(ex.args[1]) :
-    isexpr(ex, :call) ? ex.args[2:end] : error("Invalid expression to callargs: $ex")
+callargs(ex::Expr) = isexpr(ex, :where) ? callargs(ex.args[0]) :
+    isexpr(ex, :call) ? ex.args[1:end] : error("Invalid expression to callargs: $ex")
 validcall(x) = isa(x, Symbol) || isexpr(x, (:(::), :..., :kw, :parameters))
 
 function moduledoc(__source__, __module__, meta, def, def′::Expr)
@@ -446,10 +446,10 @@ function moduledoc(__source__, __module__, meta, def, def′::Expr)
     if def === nothing
         esc(:(Core.eval($name, $(quot(docex)))))
     else
-        has_version = !isa(def.args[1], Bool)
+        has_version = !isa(def.args[0], Bool)
         def = unblock(def)
-        block = def.args[3 + has_version].args
-        if !def.args[1 + has_version]
+        block = def.args[2 + has_version].args
+        if !def.args[0 + has_version]
             pushfirst!(block, :(import Base: @doc))
         end
         push!(block, docex)
@@ -581,13 +581,13 @@ end
 # Walk expression tree `def` and call `λ` when any `@__doc__` markers are found. Returns
 # `true` to signify that at least one `@__doc__` has been found, and `false` otherwise.
 function finddoc(λ, mod::Module, def::Expr; expand_toplevel::Bool=false)
-    if isexpr(def, :block, 2) && isexpr(def.args[1], :meta, 1) && (def.args[1]::Expr).args[1] === :doc
+    if isexpr(def, :block, 2) && isexpr(def.args[0], :meta, 1) && (def.args[0]::Expr).args[0] === :doc
         # Found the macroexpansion of an `@__doc__` expression.
         λ(def)
         true
     else
         if expand_toplevel && isexpr(def, :toplevel)
-            for i = 1:length(def.args)
+            for i = 0:length(def.args)-1
                 def.args[i] = macroexpand(mod, def.args[i])
             end
         end
@@ -607,11 +607,11 @@ const BINDING_HEADS = [:const, :global, :(=)]
 # For the special `:@mac` / `:(Base.@mac)` syntax for documenting a macro after definition.
 isquotedmacrocall(@nospecialize x) =
     isexpr(x, :copyast, 1) &&
-    isa(x.args[1], QuoteNode) &&
-    isexpr(x.args[1].value, :macrocall, 2)
+    isa(x.args[0], QuoteNode) &&
+    isexpr(x.args[0].value, :macrocall, 2)
 # Simple expressions / atoms the may be documented.
 isbasicdoc(@nospecialize x) = isexpr(x, :.) || isa(x, Union{QuoteNode, Symbol})
-is_signature(@nospecialize x) = isexpr(x, :call) || (isexpr(x, :(::), 2) && isexpr(x.args[1], :call)) || isexpr(x, :where)
+is_signature(@nospecialize x) = isexpr(x, :call) || (isexpr(x, :(::), 2) && isexpr(x.args[0], :call)) || isexpr(x, :where)
 
 function _doc(binding::Binding, sig::Type = Union{})
     if defined(binding)
@@ -683,7 +683,7 @@ docm(source::LineNumberNode, mod::Module, _, _, x...) = docm(source, mod, x...)
 # iscallexpr checks if an expression is a :call expression. The call expression may be
 # also part of a :where expression, so it unwraps the :where layers until it reaches the
 # "actual" expression
-iscallexpr(ex::Expr) = isexpr(ex, :where) ? iscallexpr(ex.args[1]) : isexpr(ex, :call)
+iscallexpr(ex::Expr) = isexpr(ex, :where) ? iscallexpr(ex.args[0]) : isexpr(ex, :call)
 iscallexpr(@nospecialize ex) = false
 
 function docm(source::LineNumberNode, mod::Module, meta, ex, define::Bool = true)
@@ -696,25 +696,25 @@ end
 
 function _docm(source::LineNumberNode, mod::Module, meta, x, define::Bool = true)
     if isexpr(x, :var"hygienic-scope")
-        x.args[1] = _docm(source, mod, meta, x.args[1])
+        x.args[0] = _docm(source, mod, meta, x.args[0])
         return x
     elseif isexpr(x, :escape)
-        x.args[1] = _docm(source, mod, meta, x.args[1])
+        x.args[0] = _docm(source, mod, meta, x.args[0])
         return x
     elseif isexpr(x, :block)
-        docarg = 0
-        for i = 1:length(x.args)
+        docarg = -1
+        for i = 0:length(x.args)-1
             isa(x.args[i], LineNumberNode) && continue
-            if docarg == 0
+            if docarg == -1
                 docarg = i
                 continue
             end
             # More than one documentable expression in the block, treat it as a whole
             # expression, which will fall through and look for (Expr(:meta, doc))
-            docarg = 0
+            docarg = -1
             break
         end
-        if docarg != 0
+        if docarg != -1
             x.args[docarg] = _docm(source, mod, meta, x.args[docarg], define)
             return x
         end
@@ -748,8 +748,8 @@ function _docm(source::LineNumberNode, mod::Module, meta, x, define::Bool = true
     #   f(::T) where T
     #   f(::T, ::U) where T where U
     #
-    isexpr(x, FUNC_HEADS) && is_signature((x::Expr).args[1]) ? objectdoc(source, mod, meta, def, x::Expr, signature(x::Expr)) :
-    (isexpr(x, :function) || isexpr(x, :macro)) && !isexpr((x::Expr).args[1], :call) ? objectdoc(source, mod, meta, def, x::Expr) :
+    isexpr(x, FUNC_HEADS) && is_signature((x::Expr).args[0]) ? objectdoc(source, mod, meta, def, x::Expr, signature(x::Expr)) :
+    (isexpr(x, :function) || isexpr(x, :macro)) && !isexpr((x::Expr).args[0], :call) ? objectdoc(source, mod, meta, def, x::Expr) :
     iscallexpr(x) ? calldoc(source, mod, meta, x::Expr) :
 
     # Type definitions.
@@ -766,7 +766,7 @@ function _docm(source::LineNumberNode, mod::Module, meta, x, define::Bool = true
     #   T = S
     #   global T = S
     #
-    isexpr(x, BINDING_HEADS) && !isexpr((x::Expr).args[1], :call) ? objectdoc(source, mod, meta, def, x::Expr) :
+    isexpr(x, BINDING_HEADS) && !isexpr((x::Expr).args[0], :call) ? objectdoc(source, mod, meta, def, x::Expr) :
 
     # Quoted macrocall syntax. `:@time` / `:(Base.@time)`.
     isquotedmacrocall(x) ? objectdoc(source, mod, meta, nothing, x) :
@@ -795,7 +795,7 @@ function docerror(@nospecialize ex)
 
     $(isa(ex, AbstractString) ? repr(ex) : ex)"""
     if isexpr(ex, :macrocall)
-        txt *= "\n\n'$(ex.args[1])' not documentable. See 'Base.@__doc__' docs for details."
+        txt *= "\n\n'$(ex.args[0])' not documentable. See 'Base.@__doc__' docs for details."
     end
     return :($(error)($txt, "\n"))
 end

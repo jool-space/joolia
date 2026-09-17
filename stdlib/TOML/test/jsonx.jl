@@ -11,8 +11,8 @@ Returns one of: Dict{String, Any}, Vector{Any}, String, Int64, Float64, Bool, or
 Numbers without decimal points or exponents are parsed as Int64, falling back to Float64 on overflow.
 """
 function parse(json_str::String)
-    pos = 1
-    len = ncodeunits(json_str)
+    pos = firstindex(json_str)
+    len = ncodeunits(json_str) - 1
     pos = skip_whitespace(json_str, pos, len)
     pos > len && throw(ArgumentError("Empty or whitespace-only JSON"))
     result, new_pos = parse_value(json_str, pos, len)
@@ -347,7 +347,7 @@ end
 function write_array(io::IO, arr::Union{AbstractVector, AbstractSet, Tuple})
     print(io, '[')
     for (i, item) in enumerate(arr)
-        i > 1 && print(io, ',')
+        i > 0 && print(io, ',')
         write_json(io, item)
     end
     print(io, ']')

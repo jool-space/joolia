@@ -269,3 +269,24 @@ end
     }
     """)["serde"] == Dict("version" => "1.0", "features" => ["derive"])
 end
+
+@testset "Zero-origin parser storage" begin
+    text = "name = \"α\"\nvalues = [\"zero\", \"one\"]\n[table]\nflag = true\n"
+    parsed = TOML.parse(text)
+    @test parsed["name"] == "α"
+    @test parsed["values"][0] == "zero"
+    @test parsed["values"][1] == "one"
+    @test parsed["table"]["flag"] === true
+
+    arrays = TOML.parse("[[products]]\nname = \"first\"\n[[products]]\nname = \"last\"\n")
+    @test arrays["products"][0]["name"] == "first"
+    @test arrays["products"][1]["name"] == "last"
+
+    @test TOML.parse("") == Dict{String,Any}()
+    malformed = TOML.tryparse("values = [\"x\" \"y\"]")
+    @test malformed isa TOML.Internals.ParserError
+    @test malformed.line == 1
+
+    printed = sprint(io -> TOML.print(io, parsed; sorted=true))
+    @test TOML.parse(printed) == parsed
+end

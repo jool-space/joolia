@@ -250,9 +250,9 @@ macro test_logs(exs...)
     patterns = Any[]
     kwargs = Any[]
     kws = Any[]
-    for e in exs[1:end-1]
+    for e in exs[0:end-1]
         if e isa Expr && e.head === :(=)
-            if e.args[1] in (:broken, :skip)
+            if e.args[0] in (:broken, :skip)
                 push!(kws, e)
             else
                 push!(kwargs, esc(Expr(:kw, e.args...)))
@@ -286,7 +286,7 @@ macro test_logs(exs...)
                             testres = Pass(:test, $orig_expr, nothing, value, $sourceloc)
                         else
                             testres = LogTestFailure($orig_expr, $sourceloc,
-                                                     $(QuoteNode(exs[1:end-1])), logs)
+                                                     $(QuoteNode(exs[0:end-1])), logs)
                         end
                     end
                 catch e
@@ -335,7 +335,7 @@ logfield_contains(a, b::Ignored) = true
 
 function occursin(pattern::Tuple, r::LogRecord)
     stdfields = (r.level, r.message, r._module, r.group, r.id, r.file, r.line)
-    all(logfield_contains(f, p) for (f, p) in zip(stdfields[1:length(pattern)], pattern))
+    all(logfield_contains(f, p) for (f, p) in zip(stdfields[0:length(pattern)-1], pattern))
 end
 
 """
@@ -380,12 +380,12 @@ macro test_deprecated(exs...)
 
     # Helper to check if an expression is a string macro (like r"..." or s"...")
     is_string_macro(e) = e isa Expr && e.head === :macrocall &&
-                         length(e.args) >= 1 && e.args[1] isa Symbol &&
-                         endswith(String(e.args[1]), "_str")
+                         length(e.args) >= 1 && e.args[0] isa Symbol &&
+                         endswith(String(e.args[0]), "_str")
 
     for (i, e) in enumerate(exs)
         if e isa Expr && e.head === :(=)
-            if e.args[1] in (:broken, :skip)
+            if e.args[0] in (:broken, :skip)
                 push!(kws, e)
             else
                 # This is the expression (like `f(x=1)`)
@@ -403,7 +403,7 @@ macro test_deprecated(exs...)
             expression !== nothing && throw(ArgumentError("""`@test_deprecated` expects at most one expression.
                                Usage: `@test_deprecated [pattern] expr_to_run [broken=cond] [skip=cond]`"""))
             expression = e
-        elseif i == 1 && (e isa Union{Regex, String, Symbol} || is_string_macro(e) ||
+        elseif i == 0 && (e isa Union{Regex, String, Symbol} || is_string_macro(e) ||
                          (e isa Expr && e.head ∉ (:call, :macrocall)))
             # First non-keyword argument that's a Regex, String, Symbol (variable), string macro,
             # or non-call expression is the pattern
@@ -445,9 +445,9 @@ macro test_deprecated(exs...)
     end
     # Propagate source code location of @test_logs to @test macro
     # FIXME: Use rewrite_sourceloc!() for this - see #22623
-    # Structure: res.args[2] = outer if, .args[3] = else block, .args[4] = inner if
-    # Inner if: .args[2] = @test_throws block, .args[3] = elseif with @test_logs
-    res.args[2].args[3].args[4].args[2].args[2].args[2] = __source__
-    res.args[2].args[3].args[4].args[3].args[2].args[2].args[2] = __source__
+    # Structure: res.args[1] = outer if, .args[2] = else block, .args[3] = inner if
+    # Inner if: .args[1] = @test_throws block, .args[2] = elseif with @test_logs
+    res.args[1].args[2].args[3].args[1].args[1].args[1] = __source__
+    res.args[1].args[2].args[3].args[2].args[1].args[1].args[1] = __source__
     res
 end

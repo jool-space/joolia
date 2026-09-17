@@ -130,7 +130,7 @@ function footnote_link(stream::IO, md::MD)
         if m === nothing
             return
         else
-            ref = m.captures[1]
+            ref = m.captures[0]
             return Footnote(ref, nothing)
         end
     end
@@ -160,7 +160,7 @@ function _is_link(s::AbstractString)
 
     m = match(r"^(.*)://(\S+?)(:\S*)?$", s)
     m ≡ nothing && return false
-    scheme = lowercase(m.captures[1])
+    scheme = lowercase(m.captures[0])
     return scheme in _allowable_schemes
 end
 
@@ -236,10 +236,10 @@ function entity(stream::IO)
     # decimal or hexadecimal entity?
     m = matchstart(stream, DEC_OR_HEX_REGEX)
     if m !== nothing
-        val = if m.captures[2] !== nothing
-            Base.parse(UInt, m.captures[2]; base=10)
+        val = if m.captures[1] !== nothing
+            Base.parse(UInt, m.captures[1]; base=10)
         else
-            Base.parse(UInt, m.captures[3]; base=16)
+            Base.parse(UInt, m.captures[2]; base=16)
         end
         c = (val != 0 && isvalid(Char, val)) ? Char(val) : Char(0xFFFD)
         #return c

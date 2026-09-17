@@ -439,8 +439,8 @@ function apply_type_or_typeapp(@nospecialize(tc), @nospecialize params...)
         # Build nested TypeApp chain: TypeApp(TypeApp(tc, p1), p2), ...
         n = nfields(params)
         result = tc
-        i = 1
-        while Intrinsics.sle_int(i, n)
+        i = 0
+        while Intrinsics.slt_int(i, n)
             result = TypeApp(result, getfield(params, i))
             i = Intrinsics.add_int(i, 1)
         end
@@ -448,13 +448,13 @@ function apply_type_or_typeapp(@nospecialize(tc), @nospecialize params...)
     end
     # Any param contains TypeApp => must defer
     n = nfields(params)
-    i = 1
-    while Intrinsics.sle_int(i, n)
+    i = 0
+    while Intrinsics.slt_int(i, n)
         if _contains_typeapp(getfield(params, i))
             # Build nested TypeApp chain for all params
             result = tc
-            j = 1
-            while Intrinsics.sle_int(j, n)
+            j = 0
+            while Intrinsics.slt_int(j, n)
                 result = TypeApp(result, getfield(params, j))
                 j = Intrinsics.add_int(j, 1)
             end
@@ -754,7 +754,7 @@ const undef = UndefInitializer()
 
 # type and dimensionality specified
 (self::Type{GenericMemory{kind,T,addrspace}})(::UndefInitializer, m::Int) where {T,addrspace,kind} = memorynew(self, m)
-(self::Type{GenericMemory{kind,T,addrspace}})(::UndefInitializer, d::NTuple{1,Int}) where {T,kind,addrspace} = self(undef, getfield(d,1))
+(self::Type{GenericMemory{kind,T,addrspace}})(::UndefInitializer, d::NTuple{1,Int}) where {T,kind,addrspace} = self(undef, getfield(d,0))
 # empty vector constructor
 (self::Type{GenericMemory{kind,T,addrspace}})() where {T,kind,addrspace} = self(undef, 0)
 
@@ -777,8 +777,8 @@ _checked_mul_dims() = 1, false
 _checked_mul_dims(m::Int) = m, Intrinsics.ule_int(typemax_Int, m) # equivalently: (m + 1) < 1
 function _checked_mul_dims(m::Int, n::Int)
     b = Intrinsics.checked_smul_int(m, n)
-    a = getfield(b, 1)
-    ovflw = getfield(b, 2)
+    a = getfield(b, 0)
+    ovflw = getfield(b, 1)
     ovflw = Intrinsics.or_int(ovflw, Intrinsics.ule_int(typemax_Int, m))
     ovflw = Intrinsics.or_int(ovflw, Intrinsics.ule_int(typemax_Int, n))
     return a, ovflw
@@ -786,17 +786,17 @@ end
 function _checked_mul_dims(m::Int, d::Int...)
     @_foldable_meta # the compiler needs to know this loop terminates
     a = m
-    i = 1
+    i = 0
     ovflw = false
     neg = Intrinsics.ule_int(typemax_Int, m)
     zero = false # if m==0 we won't have overflow since we go left to right
-    while Intrinsics.sle_int(i, nfields(d))
+    while Intrinsics.slt_int(i, nfields(d))
         di = getfield(d, i)
         b = Intrinsics.checked_smul_int(a, di)
         zero = Intrinsics.or_int(zero, di === 0)
-        ovflw = Intrinsics.or_int(ovflw, getfield(b, 2))
+        ovflw = Intrinsics.or_int(ovflw, getfield(b, 1))
         neg = Intrinsics.or_int(neg, Intrinsics.ule_int(typemax_Int, di))
-        a = getfield(b, 1)
+        a = getfield(b, 0)
         i = Intrinsics.add_int(i, 1)
    end
    return a, Intrinsics.or_int(neg, Intrinsics.and_int(ovflw, Intrinsics.not_int(zero)))
@@ -807,8 +807,8 @@ checked_dims() = 1
 checked_dims(m::Int) = m # defer this check to Memory constructor instead
 function checked_dims(d::Int...)
     b = _checked_mul_dims(d...)
-    getfield(b, 2) && throw(ArgumentError("invalid Array dimensions"))
-    return getfield(b, 1)
+    getfield(b, 1) && throw(ArgumentError("invalid Array dimensions"))
+    return getfield(b, 0)
 end
 
 # type and dimensionality specified, accepting dims as series of Ints
@@ -826,9 +826,9 @@ eval(Core, :(function (self::Type{Array{T, N}})(::UndefInitializer, d::Vararg{In
     return $(Expr(:new, :self, :(new_as_memoryref(fieldtype(self, :ref), checked_dims(d...))), :d))
 end))
 # type and dimensionality specified, accepting dims as tuples of Ints
-(self::Type{Array{T,1}})(::UndefInitializer, d::NTuple{1, Int}) where {T} = self(undef, getfield(d, 1))
-(self::Type{Array{T,2}})(::UndefInitializer, d::NTuple{2, Int}) where {T} = self(undef, getfield(d, 1), getfield(d, 2))
-(self::Type{Array{T,3}})(::UndefInitializer, d::NTuple{3, Int}) where {T} = self(undef, getfield(d, 1), getfield(d, 2), getfield(d, 3))
+(self::Type{Array{T,1}})(::UndefInitializer, d::NTuple{1, Int}) where {T} = self(undef, getfield(d, 0))
+(self::Type{Array{T,2}})(::UndefInitializer, d::NTuple{2, Int}) where {T} = self(undef, getfield(d, 0), getfield(d, 1))
+(self::Type{Array{T,3}})(::UndefInitializer, d::NTuple{3, Int}) where {T} = self(undef, getfield(d, 0), getfield(d, 1), getfield(d, 2))
 (self::Type{Array{T,N}})(::UndefInitializer, d::NTuple{N, Int}) where {T, N} = self(undef, d...)
 # type but not dimensionality specified
 Array{T}(::UndefInitializer, m::Int) where {T} = Array{T, 1}(undef, m)
@@ -862,7 +862,7 @@ function Symbol(s::String)
 end
 function Symbol(a::Array{UInt8, 1})
     @noinline
-    return _Symbol(bitcast(Ptr{UInt8}, a.ref.ptr_or_offset), getfield(a.size, 1), a.ref.mem)
+    return _Symbol(bitcast(Ptr{UInt8}, a.ref.ptr_or_offset), getfield(a.size, 0), a.ref.mem)
 end
 Symbol(s::Symbol) = s
 
@@ -870,42 +870,42 @@ Symbol(s::Symbol) = s
 # `import .M: a, b, c, ...`, little error checking)
 let
     fail() = throw(ArgumentError("unsupported import/using while bootstrapping"))
-    length(a::Array{T, 1}) where {T} = getfield(getfield(a, :size), 1)
+    length(a::Array{T, 1}) where {T} = getfield(getfield(a, :size), 0)
     function getindex(A::Array, i::Int)
-        Intrinsics.ult_int(Intrinsics.bitcast(UInt, Intrinsics.sub_int(i, 1)), Intrinsics.bitcast(UInt, length(A))) || fail()
+        Intrinsics.ult_int(Intrinsics.bitcast(UInt, i), Intrinsics.bitcast(UInt, length(A))) || fail()
         memoryrefget(memoryrefnew(getfield(A, :ref), i, false), :not_atomic, false)
     end
     x == y = Intrinsics.eq_int(x, y)
     x + y = Intrinsics.add_int(x, y)
-    x <= y = Intrinsics.sle_int(x, y)
+    x < y = Intrinsics.slt_int(x, y)
 
     global function _eval_import(explicit::Bool, to::Module, from::Union{Expr, Nothing}, paths::Expr...)
         from isa Expr || fail()
-        if length(from.args) == 2 && getindex(from.args, 1) === :.
-            from = getglobal(to, getindex(from.args, 2))
-        elseif length(from.args) == 1 && getindex(from.args, 1) === :Core
+        if length(from.args) == 2 && getindex(from.args, 0) === :.
+            from = getglobal(to, getindex(from.args, 1))
+        elseif length(from.args) == 1 && getindex(from.args, 0) === :Core
             from = Core
-        elseif length(from.args) == 1 && getindex(from.args, 1) === :Base
+        elseif length(from.args) == 1 && getindex(from.args, 0) === :Base
             from = Main.Base
         else
             fail()
         end
         from isa Module || fail()
-        i = 1
-        while i <= nfields(paths)
+        i = 0
+        while i < nfields(paths)
             a = getfield(paths, i).args
             length(a) == 1 || fail()
-            s = getindex(a, 1)
+            s = getindex(a, 0)
             Core._import(to, from, s, s, explicit)
             i += 1
         end
     end
 
     global function _eval_using(to::Module, path::Expr)
-        getindex(path.args, 1) === :. || fail()
-        from = getglobal(to, getindex(path.args, 2))
-        i = 3
-        while i <= length(path.args)
+        getindex(path.args, 0) === :. || fail()
+        from = getglobal(to, getindex(path.args, 1))
+        i = 2
+        while i < length(path.args)
             from = getfield(from, getindex(path.args, i))
             i += 1
         end
@@ -972,8 +972,8 @@ struct CoreSTDERR <: IO
 end
 const stdout = CoreSTDOUT()
 const stderr = CoreSTDERR()
-io_pointer(::CoreSTDOUT) = Intrinsics.pointerref(cglobal(:jl_uv_stdout, Ptr{Cvoid}), 1, 1)
-io_pointer(::CoreSTDERR) = Intrinsics.pointerref(cglobal(:jl_uv_stderr, Ptr{Cvoid}), 1, 1)
+io_pointer(::CoreSTDOUT) = Intrinsics.pointerref(cglobal(:jl_uv_stdout, Ptr{Cvoid}), 0, 1)
+io_pointer(::CoreSTDERR) = Intrinsics.pointerref(cglobal(:jl_uv_stderr, Ptr{Cvoid}), 0, 1)
 
 unsafe_write(io::IO, x::Ptr{UInt8}, nb::UInt) =
     (ccall(:jl_uv_puts, Cvoid, (Ptr{Cvoid}, Ptr{UInt8}, UInt), io_pointer(io), x, nb); nb)
@@ -1018,7 +1018,7 @@ NamedTuple() = NamedTuple{(),Tuple{}}(())
 eval(Core, :(NamedTuple{names}(args::Tuple) where {names} =
              $(Expr(:splatnew, :(NamedTuple{names,typeof(args)}), :args))))
 
-using .Intrinsics: sle_int, add_int
+using .Intrinsics: sle_int, slt_int, ult_int, add_int
 
 eval(Core, :((NT::Type{NamedTuple{names,T}})(args::T) where {names, T <: Tuple} =
              $(Expr(:splatnew, :NT, :args))))
@@ -1249,7 +1249,7 @@ _setparser!(parser) = setglobal!(Core, :_parse, parser)
 _setlowerer!(lowerer) = setglobal!(Core, :_lower, lowerer)
 
 # support for deprecated uses of builtin functions
-_apply(x...) = _apply_iterate(Main.Base.iterate, x...)
+_apply(x...) = _apply_iterate(isdefined(Main, :Base) ? Main.Base.iterate : iterate, x...)
 const _apply_pure = _apply
 const _call_latest = invokelatest
 const _call_in_world = invoke_in_world
@@ -1275,12 +1275,50 @@ function _hasmethod(@nospecialize(tt)) # this function has a special tfunc
     return Intrinsics.not_int(ccall(:jl_gf_invoke_lookup, Any, (Any, Any, UInt), tt, nothing, world) === nothing)
 end
 
-# for backward compat
-arrayref(inbounds::Bool, A::Array, i::Int...) = Main.Base.getindex(A, i...)
-const_arrayref(inbounds::Bool, A::Array, i::Int...) = Main.Base.getindex(A, i...)
-arrayset(inbounds::Bool, A::Array{T}, x::Any, i::Int...) where {T} = Main.Base.setindex!(A, x::T, i...)
+# Scalar array access is available during bootstrap, before Base defines getindex.
+# Indices and dimension numbers are zero-based; storage remains column-major.
+function _array_index(A::Array, indices::Tuple, inbounds::Bool)
+    ni = nfields(indices)
+    if ni === 1
+        i = getfield(indices, 0)
+        if Intrinsics.not_int(inbounds)
+            Intrinsics.ult_int(i, checked_dims(A.size...)) || throw(BoundsError(A, indices))
+        end
+        return i
+    end
+    offset = 0
+    stride = 1
+    d = 0
+    while Intrinsics.slt_int(d, ni)
+        i = getfield(indices, d)
+        n = arraysize(A, d)
+        if Intrinsics.not_int(inbounds)
+            Intrinsics.ult_int(i, n) || throw(BoundsError(A, indices))
+        end
+        offset = Intrinsics.add_int(offset, Intrinsics.mul_int(i, stride))
+        stride = Intrinsics.mul_int(stride, n)
+        d = Intrinsics.add_int(d, 1)
+    end
+    if Intrinsics.not_int(inbounds)
+        while Intrinsics.slt_int(d, nfields(A.size))
+            getfield(A.size, d) === 1 || throw(BoundsError(A, indices))
+            d = Intrinsics.add_int(d, 1)
+        end
+    end
+    return offset
+end
+function arrayref(inbounds::Bool, A::Array, i::Int...)
+    ref = memoryrefnew(A.ref, _array_index(A, i, inbounds), false)
+    return memoryrefget(ref, :not_atomic, Intrinsics.not_int(inbounds))
+end
+const_arrayref(inbounds::Bool, A::Array, i::Int...) = arrayref(inbounds, A, i...)
+function arrayset(inbounds::Bool, A::Array{T}, x::Any, i::Int...) where {T}
+    ref = memoryrefnew(A.ref, _array_index(A, i, inbounds), false)
+    memoryrefset!(ref, x::T, :not_atomic, Intrinsics.not_int(inbounds))
+    return A
+end
 arraysize(a::Array) = a.size
-arraysize(a::Array, i::Int) = sle_int(i, nfields(a.size)) ? getfield(a.size, i) : 1
+arraysize(a::Array, i::Int) = slt_int(i, nfields(a.size)) ? getfield(a.size, i) : 1
 const check_top_bit = check_sign_bit
 
 # For convenience

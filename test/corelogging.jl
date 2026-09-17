@@ -489,3 +489,39 @@ end
 for (k, v) in pairs(original_env)
     ENV[k] = v
 end
+
+# Structured log arguments and the C logging bridge must retain their first key/value pair.
+@testset "zero-origin logging arguments" begin
+    value = 17
+    logs, _ = collect_test_logs() do
+        @info "origin" value explicit=23
+        Base.CoreLogging.logmsg_shim(Info, "shim", @__MODULE__, :group, :id, @__FILE__, 0, Any[:zero, 0, :last, 2])
+    end
+    @test length(logs) == 2
+    @test logs[0].message == "origin"
+    @test logs[0].kwargs[:value] == 17
+    @test logs[0].kwargs[:explicit] == 23
+    @test logs[1].message == "shim"
+    @test logs[1].kwargs[:zero] == 0
+    @test logs[1].kwargs[:last] == 2
+    @test Base.CoreLogging.default_group("/tmp/origin.jl") === :origin
+end
+
+# Console rows, columns, and first/last message lines use zero-origin positions.
+@testset "zero-origin console formatting" begin
+    for (message, expected) in (("hello", "[ Info: hello\n"),
+                                ("first\nlast", "┌ Info: first\n└ last\n"))
+        io = IOBuffer()
+        logger = Base.CoreLogging.ConsoleLogger(io; meta_formatter=(_,_,_,_,_,_)->(:normal, "Info:", ""))
+        Base.CoreLogging.handle_message(logger, Base.CoreLogging.Info, message, Main, :test, :test, nothing, nothing)
+        @test String(take!(io)) == expected
+    end
+    io = IOBuffer()
+    logger = Base.CoreLogging.ConsoleLogger(io; meta_formatter=(_,_,_,_,_,_)->(:normal, "Info:", ""))
+    Base.CoreLogging.handle_message(logger, Base.CoreLogging.Info, "hello", Main, :test, :test, nothing, nothing; value=7)
+    @test String(take!(io)) == "┌ Info: hello\n└   value = 7\n"
+    io = IOBuffer()
+    logger = Base.CoreLogging.ConsoleLogger(io; meta_formatter=(_,_,_,_,_,_)->(:normal, "Info:", ""))
+    Base.CoreLogging.handle_message(logger, Base.CoreLogging.Info, "hello", Main, :test, :test, nothing, nothing; text="small")
+    @test String(take!(io)) == "┌ Info: hello\n└   text = \"small\"\n"
+end

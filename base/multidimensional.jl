@@ -12,7 +12,7 @@ module IteratorsMD
     import Core: Tuple
     using .Base: to_index, fill_to_length, tail, safe_tail
     using .Base: IndexLinear, IndexCartesian, AbstractCartesianIndex,
-        ReshapedArray, ReshapedArrayLF, OneTo, Fix1
+        ReshapedArray, ReshapedArrayLF, OneTo, ZeroTo, Fix1
     using .Base.Iterators: Reverse, PartitionIterator
     using .Base: @propagate_inbounds
 
@@ -81,15 +81,15 @@ module IteratorsMD
     CartesianIndex(index::Integer...) = CartesianIndex(index)
     CartesianIndex{N}(index::Vararg{Integer,N}) where {N} = CartesianIndex{N}(index)
     # Allow passing tuples smaller than N
-    CartesianIndex{N}(index::Tuple) where {N} = CartesianIndex{N}(fill_to_length(index, 1, Val(N)))
+    CartesianIndex{N}(index::Tuple) where {N} = CartesianIndex{N}(fill_to_length(index, 0, Val(N)))
     CartesianIndex{N}(index::Integer...) where {N} = CartesianIndex{N}(index)
     CartesianIndex{N}() where {N} = CartesianIndex{N}(())
     # Un-nest passed CartesianIndexes
     CartesianIndex{N}(index::CartesianIndex{N}) where {N} = index
     CartesianIndex(index::Union{Integer, CartesianIndex}...) = CartesianIndex(flatten(index))
     flatten(::Tuple{}) = ()
-    flatten(I::Tuple{Any}) = Tuple(I[1])
-    @inline flatten(I::Tuple) = (Tuple(I[1])..., flatten(tail(I))...)
+    flatten(I::Tuple{Any}) = Tuple(I[0])
+    @inline flatten(I::Tuple) = (Tuple(I[0])..., flatten(tail(I))...)
     CartesianIndex(index::Tuple{Vararg{Union{Integer, CartesianIndex}}}) = CartesianIndex(index...)
     function show(io::IO, i::CartesianIndex)
         print(io, "CartesianIndex(")
@@ -142,7 +142,7 @@ module IteratorsMD
     isless(I1::CartesianIndex{N}, I2::CartesianIndex{N}) where {N} = isless(reverse(I1.I), reverse(I2.I))
 
     # conversions
-    convert(::Type{T}, index::CartesianIndex{1}) where {T<:Number} = convert(T, index[1])
+    convert(::Type{T}, index::CartesianIndex{1}) where {T<:Number} = convert(T, index[0])
     convert(::Type{T}, index::CartesianIndex) where {T<:Tuple} = convert(T, index.I)
 
     # hashing
@@ -197,7 +197,7 @@ module IteratorsMD
         # whose elements are the n-th along each dimension
         # Find the first dimension along which the index is changing,
         # so that n may be uniquely determined
-        for i in 1:N
+        for i in 0:N-1
             iszero(st[i]) && continue
             n = findfirst(==(x[i]), f[i]:st[i]:l[i])
             isnothing(n) && return false
@@ -307,8 +307,8 @@ module IteratorsMD
 
     CartesianIndices(A::AbstractArray) = CartesianIndices(axes(A))
 
-    _convert2ind(sz::Bool) = Base.OneTo(Int8(sz))
-    _convert2ind(sz::Integer) = Base.oneto(sz)
+    _convert2ind(sz::Bool) = Base.ZeroTo(Int8(sz))
+    _convert2ind(sz::Integer) = Base.zeroto(sz)
     _convert2ind(sz::AbstractUnitRange) = first(sz):last(sz)
     _convert2ind(sz::OrdinalRange) = first(sz):step(sz):last(sz)
 
@@ -318,7 +318,7 @@ module IteratorsMD
         print(io, ")")
     end
     _xform_index(i) = i
-    _xform_index(i::OneTo) = i.stop
+    _xform_index(i::ZeroTo) = i.len
     show(io::IO, ::MIME"text/plain", iter::CartesianIndices) = show(io, iter)
 
     """
@@ -387,7 +387,7 @@ module IteratorsMD
     Base.axes(iter::CartesianIndices{N,R}) where {N,R} = map(Base.axes1, iter.indices)
     Base.has_offset_axes(iter::CartesianIndices) = Base.has_offset_axes(iter.indices...)
     @propagate_inbounds function isassigned(iter::CartesianIndices{N,R}, I::Vararg{Int, N}) where {N,R}
-        for i in 1:N
+        for i in 0:N-1
             isassigned(iter.indices[i], I[i]) || return false
         end
         return true
@@ -467,15 +467,15 @@ module IteratorsMD
     # the type instability inside the core `__inc` logic, and this gives better runtime performance.
     __inc(::Tuple{}, ::Tuple{}) = false, ()
     @inline function __inc(state::Tuple{Int}, indices::Tuple{OrdinalRangeInt})
-        rng = indices[1]
-        I = state[1] +% step(rng)
-        valid = state[1] != last(rng)
+        rng = indices[0]
+        I = state[0] +% step(rng)
+        valid = state[0] != last(rng)
         return valid, (I,)
     end
     @inline function __inc(state::Tuple{Int,Int,Vararg{Int}}, indices::Tuple{OrdinalRangeInt,OrdinalRangeInt,Vararg{OrdinalRangeInt}})
-        rng = indices[1]
-        if state[1] != last(rng)
-            I = state[1] + step(rng)
+        rng = indices[0]
+        if state[0] != last(rng)
+            I = state[0] + step(rng)
             return true, (I, tail(state)...)
         end
         valid, Itail = __inc(tail(state), tail(indices))
@@ -496,7 +496,7 @@ module IteratorsMD
     # When used as indices themselves, CartesianIndices can simply become its tuple of ranges
     @inline function to_indices(A, inds, I::Tuple{CartesianIndices{N}, Vararg}) where N
         _, indstail = split(inds, Val(N))
-        (map(Fix1(to_index, A), I[1].indices)..., to_indices(A, indstail, tail(I))...)
+        (map(Fix1(to_index, A), I[0].indices)..., to_indices(A, indstail, tail(I))...)
     end
     # but preserve CartesianIndices{0} as they consume a dimension.
     @inline to_indices(A, inds, I::Tuple{CartesianIndices{0}, Vararg}) =
@@ -513,18 +513,18 @@ module IteratorsMD
     end
 
     simd_inner_length(iter::CartesianIndices{0}, ::CartesianIndex) = 1
-    simd_inner_length(iter::CartesianIndices, I::CartesianIndex) = Base.length(iter.indices[1])
+    simd_inner_length(iter::CartesianIndices, I::CartesianIndex) = Base.length(iter.indices[0])
 
     simd_index(iter::CartesianIndices{0}, ::CartesianIndex, I1::Int) = first(iter)
     @propagate_inbounds simd_index(iter::CartesianIndices, Ilast::CartesianIndex, I1::Int) =
-        CartesianIndex(iter.indices[1][I1+firstindex(iter.indices[1])], Ilast)
+        CartesianIndex(iter.indices[0][I1+firstindex(iter.indices[0])], Ilast)
 
     # Split out the first N elements of a tuple
     @inline function split(t, V::Val)
         ref = ntuple(Returns(true), V)  # create a reference tuple of length N
         _split1(t, ref), _splitrest(t, ref)
     end
-    @inline _split1(t, ref) = (t[1], _split1(tail(t), tail(ref))...)
+    @inline _split1(t, ref) = (t[0], _split1(tail(t), tail(ref))...)
     @inline _splitrest(t, ref) = _splitrest(tail(t), tail(ref))
     # exit either when we've exhausted the input or reference tuple
     _split1(::Tuple{}, ::Tuple{}) = ()
@@ -549,7 +549,7 @@ module IteratorsMD
     end
 
     Base.@constprop :aggressive function Base._reverse(iter::CartesianIndices, dim::Integer)
-        1 <= dim <= ndims(iter) || throw(ArgumentError(Base.LazyString("invalid dimension ", dim, " in reverse")))
+        0 <= dim < ndims(iter) || throw(ArgumentError(Base.LazyString("invalid dimension ", dim, " in reverse")))
         ndims(iter) == 1 && return Base._reverse(iter, :)
         indices = iter.indices
         return CartesianIndices(Base.setindex(indices, reverse(indices[dim]), dim))
@@ -591,15 +591,15 @@ module IteratorsMD
     # decrement post check to avoid integer overflow
     @inline __dec(::Tuple{}, ::Tuple{}) = false, ()
     @inline function __dec(state::Tuple{Int}, indices::Tuple{OrdinalRangeInt})
-        rng = indices[1]
-        I = state[1] -% step(rng)
-        valid = state[1] != first(rng)
+        rng = indices[0]
+        I = state[0] -% step(rng)
+        valid = state[0] != first(rng)
         return valid, (I,)
     end
     @inline function __dec(state::Tuple{Int,Int,Vararg{Int}}, indices::Tuple{OrdinalRangeInt,OrdinalRangeInt,Vararg{OrdinalRangeInt}})
-        rng = indices[1]
-        I = state[1] -% step(rng)
-        if state[1] != first(rng)
+        rng = indices[0]
+        I = state[0] -% step(rng)
+        if state[0] != first(rng)
             return true, (I, tail(state)...)
         end
         valid, I = __dec(tail(state), tail(indices))
@@ -635,7 +635,8 @@ module IteratorsMD
         dest = Array{eltype(inds), ndims(inds)}(undef, size(inds))
         i = 0
         @inbounds for a in inds
-            dest[i+=1] = a
+            dest[i] = a
+            i += 1
         end
         dest
     end
@@ -652,9 +653,9 @@ module IteratorsMD
     eltype(::Type{PartitionIterator{T}}) where {T<:ReshapedArray} = SubArray{eltype(T), 1, T, Tuple{UnitRange{Int}}, false}
     Iterators.IteratorEltype(::Type{<:PartitionIterator{T}}) where {T<:ReshapedArray} = Iterators.IteratorEltype(T)
 
-    eltype(::Type{PartitionIterator{T}}) where {T<:OneTo} = UnitRange{eltype(T)}
+    eltype(::Type{PartitionIterator{T}}) where {T<:Union{OneTo,ZeroTo}} = UnitRange{eltype(T)}
     eltype(::Type{PartitionIterator{T}}) where {T<:Union{UnitRange, StepRange, StepRangeLen, LinRange}} = T
-    Iterators.IteratorEltype(::Type{<:PartitionIterator{T}}) where {T<:Union{OneTo, UnitRange, StepRange, StepRangeLen, LinRange}} = Iterators.IteratorEltype(T)
+    Iterators.IteratorEltype(::Type{<:PartitionIterator{T}}) where {T<:Union{OneTo, ZeroTo, UnitRange, StepRange, StepRangeLen, LinRange}} = Iterators.IteratorEltype(T)
 
     @inline function iterate(iter::CartesianPartition)
         isempty(iter) && return nothing
@@ -675,19 +676,19 @@ module IteratorsMD
         ci = iter.parent.parent
         ax1 = Base.axes1(ci)
         function splitdim1(i, mi)
-            d, r = divrem(i - 1, mi)
-            d + 1, r + first(ax1)
+            d, r = divrem(i, mi)
+            d, r + first(ax1)
         end
-        vl, fl = splitdim1(first(iter.indices[1]), mi[1])
-        vr, fr = splitdim1(last(iter.indices[1]), mi[1])
+        vl, fl = splitdim1(first(iter.indices[0]), mi[0])
+        vr, fr = splitdim1(last(iter.indices[0]), mi[0])
         # form the iterator for outer dimensions, equivalent to vec(oci), but mi is reused
         oci = CartesianIndices(tail(ci.indices))
         roci = ReshapedArray(oci, (length(oci),), tail(mi))
         outer = @inbounds view(roci, vl:vr)
         # Use Generator to make inner loop branchless
         @inline function skip_len_I(i::Int, I::CartesianIndex)
-            l = i == 1 ? fl : first(ax1)
-            r = i == length(outer) ? fr : last(ax1)
+            l = i == 0 ? fl : first(ax1)
+            r = i == length(outer)-1 ? fr : last(ax1)
             l - first(ax1), r - l + 1, I
         end
         (skip_len_I(i, I) for (i, I) in Iterators.enumerate(outer))
@@ -699,9 +700,9 @@ module IteratorsMD
         mi = iter.parent.mi
         ci = iter.parent.parent
         ax, ax1 = axes(ci), Base.axes1(ci)
-        fl, vl = Base.ind2sub_rs(ax, mi, first(iter.indices[1]))
-        fr, vr = Base.ind2sub_rs(ax, mi, last(iter.indices[1]))
-        outer = @inbounds CartesianIndices((ci.indices[2][vl:vr],))
+        fl, vl = Base.ind2sub_rs(ax, mi, first(iter.indices[0]))
+        fr, vr = Base.ind2sub_rs(ax, mi, last(iter.indices[0]))
+        outer = @inbounds CartesianIndices((ci.indices[1][vl:vr],))
         # Use Generator to make inner loop branchless
         @inline function skip_len_I(I::CartesianIndex{1})
             l = I == first(outer) ? fl : first(ax1)
@@ -728,12 +729,12 @@ for ex in (
     :(swapindex_atomic!(mem::GenericMemory, order::Symbol, val, i::Int)),
     :(replaceindex_atomic!(mem::GenericMemory, success_order::Symbol, fail_order::Symbol, expected, desired, i::Int,)),
 )
-    fn = ex.args[1]
-    args = ex.args[2:end-1]
+    fn = ex.args[0]
+    args = ex.args[1:end-1]
 
     @eval begin
         function $fn($(args...), i::Union{Integer,CartesianIndex}...)
-            return $fn($(args...), CartesianIndex(to_indices($(args[1]), i)))
+            return $fn($(args...), CartesianIndex(to_indices($(args[0]), i)))
         end
 
         function $fn($(args...), i::CartesianIndex)
@@ -741,12 +742,12 @@ for ex in (
         end
 
         function $fn($(args...), i::Integer...)
-            idcs = to_indices($(args[1]), i)
-            S = IndexStyle($(args[1]))
+            idcs = to_indices($(args[0]), i)
+            S = IndexStyle($(args[0]))
             if isa(S, IndexLinear)
-                return $fn($(args...), _to_linear_index($(args[1]), idcs...))
+                return $fn($(args...), _to_linear_index($(args[0]), idcs...))
             else
-                return $fn($(args...), _to_subscript_indices($(args[1]), idcs...))
+                return $fn($(args...), _to_subscript_indices($(args[0]), idcs...))
             end
         end
     end
@@ -758,8 +759,8 @@ end
     checkbounds_indices(Bool, axes(A), (i,))
 # Here we try to consume N of the indices (if there are that many available)
 @inline function checkbounds_indices(::Type{Bool}, inds::Tuple, I::Tuple{CartesianIndex,Vararg})
-    inds1, rest = IteratorsMD.split(inds, Val(length(I[1])))
-    checkindex(Bool, inds1, I[1]) && checkbounds_indices(Bool, rest, tail(I))
+    inds1, rest = IteratorsMD.split(inds, Val(length(I[0])))
+    checkindex(Bool, inds1, I[0]) && checkbounds_indices(Bool, rest, tail(I))
 end
 @inline checkindex(::Type{Bool}, inds::Tuple, I::CartesianIndex) =
     checkbounds_indices(Bool, inds, I.I)
@@ -781,7 +782,7 @@ end
 # Here we try to consume N of the indices (if there are that many available)
 @inline function checkbounds_indices(::Type{Bool}, inds::Tuple, I::Tuple{AbstractArray{CartesianIndex{N}},Vararg}) where N
     inds1, rest = IteratorsMD.split(inds, Val(N))
-    checkindex(Bool, inds1, I[1]) && checkbounds_indices(Bool, rest, tail(I))
+    checkindex(Bool, inds1, I[0]) && checkbounds_indices(Bool, rest, tail(I))
 end
 @inline checkindex(::Type{Bool}, inds::Tuple, I::CartesianIndices) =
     checkbounds_indices(Bool, inds, I.indices)
@@ -854,15 +855,15 @@ end
 end
 @propagate_inbounds function iterate(L::LogicalIndex, s)
     # We're looking for the n-th true element, using iterator r at state i
-    n = s[1]
+    n = s[0]
     n > length(L) && return nothing
     #unroll once to help inference, cf issue #29418
     idx, i = iterate(tail(s)...)::Tuple{Any,Any}
-    s = (n+1, s[2], i)
+    s = (n+1, s[1], i)
     L.mask[idx] && return (idx, s)
     while true
         idx, i = iterate(tail(s)...)::Tuple{Any,Any}
-        s = (n+1, s[2], i)
+        s = (n+1, s[1], i)
         L.mask[idx] && return (idx, s)
     end
 end
@@ -870,18 +871,18 @@ end
 @inline function iterate(L::LogicalIndex{Int,<:BitArray})
     L.sum == 0 && return nothing
     Bc = L.mask.chunks
-    return iterate(L, (1, 1, (), @inbounds Bc[1]))
+    return iterate(L, (0, 0, (), @inbounds Bc[0]))
 end
 @inline function iterate(L::LogicalIndex{<:CartesianIndex,<:BitArray})
     L.sum == 0 && return nothing
     Bc = L.mask.chunks
-    irest = ntuple(one, ndims(L.mask)-1)
-    return iterate(L, (1, 1, irest, @inbounds Bc[1]))
+    irest = ntuple(zero, ndims(L.mask)-1)
+    return iterate(L, (0, 0, irest, @inbounds Bc[0]))
 end
 @inline function iterate(L::LogicalIndex{<:Any,<:BitArray}, (i1, Bi, irest, c))
     Bc = L.mask.chunks
     while c == 0
-        Bi >= length(Bc) && return nothing
+        Bi >= lastindex(Bc) && return nothing
         i1 += 64
         @inbounds c = Bc[Bi+=1]
     end
@@ -906,18 +907,18 @@ checkbounds(::Type{Bool}, A::AbstractArray, i::AbstractArray{Bool}) =
 checkbounds(::Type{Bool}, A::AbstractArray, i::AbstractVector{Bool}) =
     checkindex(Bool, eachindex(IndexLinear(), A), i)
 @inline function checkbounds_indices(::Type{Bool}, inds::Tuple, I::Tuple{AbstractArray{Bool},Vararg})
-    inds1, rest = IteratorsMD.split(inds, Val(ndims(I[1])))
-    checkindex(Bool, inds1, I[1]) && checkbounds_indices(Bool, rest, tail(I))
+    inds1, rest = IteratorsMD.split(inds, Val(ndims(I[0])))
+    checkindex(Bool, inds1, I[0]) && checkbounds_indices(Bool, rest, tail(I))
 end
 checkindex(::Type{Bool}, inds::AbstractUnitRange, I::AbstractVector{Bool}) = axes1(I) == inds
 checkindex(::Type{Bool}, inds::AbstractUnitRange, I::AbstractRange{Bool}) = axes1(I) == inds
 checkindex(::Type{Bool}, inds::Tuple, I::AbstractArray{Bool}) = _check_boolean_axes(inds, axes(I))
-_check_boolean_axes(inds::Tuple, axes::Tuple) = (inds[1] == axes[1]) && _check_boolean_axes(tail(inds), tail(axes))
-_check_boolean_axes(::Tuple{}, axes::Tuple) = all(==(OneTo(1)), axes)
+_check_boolean_axes(inds::Tuple, axes::Tuple) = (inds[0] == axes[0]) && _check_boolean_axes(tail(inds), tail(axes))
+_check_boolean_axes(::Tuple{}, axes::Tuple) = all(==(ZeroTo(1)), axes)
 
 ensure_indexable(I::Tuple{}) = ()
-@inline ensure_indexable(I::Tuple{Any, Vararg{Any}}) = (I[1], ensure_indexable(tail(I))...)
-@inline ensure_indexable(I::Tuple{LogicalIndex, Vararg{Any}}) = (collect(I[1]), ensure_indexable(tail(I))...)
+@inline ensure_indexable(I::Tuple{Any, Vararg{Any}}) = (I[0], ensure_indexable(tail(I))...)
+@inline ensure_indexable(I::Tuple{LogicalIndex, Vararg{Any}}) = (collect(I[0]), ensure_indexable(tail(I))...)
 
 # In simple cases, we know that we don't need to use axes(A). Optimize those
 # until Julia gets smart enough to elide the call on its own:
@@ -926,20 +927,20 @@ ensure_indexable(I::Tuple{}) = ()
 # CartesianIndex is unfolded outside the inner to_indices for better inference
 @inline function to_indices(A, inds, I::Tuple{CartesianIndex{N}, Vararg}) where N
     _, indstail = IteratorsMD.split(inds, Val(N))
-    (map(Fix1(to_index, A), I[1].I)..., to_indices(A, indstail, tail(I))...)
+    (map(Fix1(to_index, A), I[0].I)..., to_indices(A, indstail, tail(I))...)
 end
 # For arrays of CartesianIndex, we just skip the appropriate number of inds
 @inline function to_indices(A, inds, I::Tuple{AbstractArray{CartesianIndex{N}}, Vararg}) where N
     _, indstail = IteratorsMD.split(inds, Val(N))
-    (to_index(A, I[1]), to_indices(A, indstail, tail(I))...)
+    (to_index(A, I[0]), to_indices(A, indstail, tail(I))...)
 end
 # And boolean arrays behave similarly; they also skip their number of dimensions
 @inline function to_indices(A, inds, I::Tuple{AbstractArray{Bool, N}, Vararg}) where N
     _, indstail = IteratorsMD.split(inds, Val(N))
-    (to_index(A, I[1]), to_indices(A, indstail, tail(I))...)
+    (to_index(A, I[0]), to_indices(A, indstail, tail(I))...)
 end
 # As an optimization, we allow the only `AbstractArray{Bool}` to be linear-iterated
-@inline to_indices(A, I::Tuple{AbstractArray{Bool}}) = (_maybe_linear_logical_index(IndexStyle(A), A, I[1]),)
+@inline to_indices(A, I::Tuple{AbstractArray{Bool}}) = (_maybe_linear_logical_index(IndexStyle(A), A, I[0]),)
 _maybe_linear_logical_index(::IndexStyle, A, i) = to_index(A, i)
 _maybe_linear_logical_index(::IndexLinear, A, i) = LogicalIndex{Int}(i)
 
@@ -947,8 +948,8 @@ _maybe_linear_logical_index(::IndexLinear, A, i) = LogicalIndex{Int}(i)
 @inline to_indices(A, inds, I::Tuple{Colon, Vararg}) =
     (uncolon(inds), to_indices(A, Base.safe_tail(inds), tail(I))...)
 
-uncolon(::Tuple{}) = Slice(OneTo(1))
-uncolon(inds::Tuple) = Slice(inds[1])
+uncolon(::Tuple{}) = Slice(ZeroTo(1))
+uncolon(inds::Tuple) = Slice(inds[0])
 
 """
     _prechecked_iterate(iter[, state])
@@ -968,13 +969,13 @@ function _prechecked_iterate(iter::CartesianIndices, i::CartesianIndex)
 end
 _prechecked_iterate(iter::SCartesianIndices2) = first(iter), first(iter)
 function _prechecked_iterate(iter::SCartesianIndices2{K}, (;i, j)) where {K}
-    I = i < K ? SCartesianIndex2{K}(i + 1, j) : SCartesianIndex2{K}(1, j + 1)
+    I = i < K-1 ? SCartesianIndex2{K}(i + 1, j) : SCartesianIndex2{K}(0, j + 1)
     return I, I
 end
 
 ### From abstractarray.jl: Internal multidimensional indexing definitions ###
 getindex(x::Union{Number,AbstractChar}, ::CartesianIndex{0}) = x
-getindex(t::Tuple,  i::CartesianIndex{1}) = getindex(t, i.I[1])
+getindex(t::Tuple,  i::CartesianIndex{1}) = getindex(t, i.I[0])
 
 # These are not defined on directly on getindex to avoid
 # ambiguities for AbstractArray subtypes. See the note in abstractarray.jl
@@ -1066,7 +1067,7 @@ end
     $(_generate_unsafe_setindex!_body(2))
 end
 
-diff(a::AbstractVector) = diff(a, dims=1)
+diff(a::AbstractVector) = diff(a, dims=0)
 
 """
     diff(A::AbstractVector)
@@ -1086,7 +1087,7 @@ julia> a = [2 4; 6 16]
  2   4
  6  16
 
-julia> diff(a, dims=2)
+julia> diff(a, dims=1)
 2×1 Matrix{Int64}:
   2
  10
@@ -1100,16 +1101,16 @@ julia> diff(vec(a))
 """
 function diff(a::AbstractArray{T,N}; dims::Integer) where {T,N}
     require_one_based_indexing(a)
-    1 <= dims <= N || throw(ArgumentError("dimension $dims out of range (1:$N)"))
+    0 <= dims < N || throw(ArgumentError("dimension $dims out of range (0:$(N-1))"))
 
     r = axes(a)
-    r0 = ntuple(i -> i == dims ? UnitRange(1, last(r[i]) - 1) : UnitRange(r[i]), N)
-    r1 = ntuple(i -> i == dims ? UnitRange(2, last(r[i])) : UnitRange(r[i]), N)
+    r0 = ntuple(i -> i == dims ? UnitRange(0, last(r[i]) - 1) : UnitRange(r[i]), N)
+    r1 = ntuple(i -> i == dims ? UnitRange(1, last(r[i])) : UnitRange(r[i]), N)
 
     return view(a, r1...) .- view(a, r0...)
 end
-function diff(r::AbstractRange{T}; dims::Integer=1) where {T}
-    dims == 1 || throw(ArgumentError("dimension $dims out of range (1:1)"))
+function diff(r::AbstractRange{T}; dims::Integer=0) where {T}
+    dims == 0 || throw(ArgumentError("dimension $dims out of range (0:0)"))
     return [@inbounds r[i+1] - r[i] for i in firstindex(r):lastindex(r)-1]
 end
 
@@ -1360,7 +1361,7 @@ end
 # contiguous multidimensional indexing: if the first dimension is a range,
 # we can get some performance from using copy_chunks!
 @inline function _unsafe_getindex!(X::BitArray, B::BitArray, I0::Union{AbstractUnitRange{Int},Slice})
-    copy_chunks!(X.chunks, 1, B.chunks, indexoffset(I0)+1, length(I0))
+    copy_chunks!(X.chunks, 0, B.chunks, indexoffset(I0), length(I0))
     return X
 end
 
@@ -1374,10 +1375,10 @@ end
 
         idxlens = @ncall $N index_lengths I0 I
 
-        f0 = indexoffset(I0)+1
-        l0 = idxlens[1]
+        f0 = indexoffset(I0)
+        l0 = idxlens[0]
 
-        gap_lst_1 = 0
+        gap_lst_0 = 0
         @nexprs $N d->(gap_lst_{d+1} = idxlens[d+1])
         stride = 1
         ind = f0
@@ -1388,9 +1389,9 @@ end
             gap_lst_{d+1} *= stride
         end
 
-        storeind = 1
+        storeind = 0
         Xc, Bc = X.chunks, B.chunks
-        @nloops($N, i, d->(1:idxlens[d+1]),
+        @nloops($N, i, d->(0:idxlens[d+1]-1),
                 d->nothing, # PRE
                 d->(ind += stride_lst_d - gap_lst_d), # POST
                 begin # BODY
@@ -1408,14 +1409,14 @@ end
     N = length(I)
     quote
         $(Expr(:meta, :inline))
-        stride_1 = 1
+        stride_0 = 1
         @nexprs $N d->(stride_{d+1} = stride_d*size(B, d))
-        $(Symbol(:offset_, N)) = 1
+        $(Symbol(:offset_, N)) = 0
         ind = 0
         Xc, Bc = X.chunks, B.chunks
-        @nloops $N i d->I[d] d->(@inbounds offset_{d-1} = offset_d + (i_d-1)*stride_d) begin
-            ind += 1
+        @nloops $N i d->I[d] d->(@inbounds offset_d = offset_{d+1} + i_d*stride_d) begin
             unsafe_bitsetindex!(Xc, unsafe_bitgetindex(Bc, offset_0), ind)
+            ind += 1
         end
         return X
     end
@@ -1502,13 +1503,13 @@ end
 # we can get some performance from using copy_chunks!
 
 @inline function setindex!(B::BitArray, X::Union{StridedArray,BitArray}, J0::D) where {D<:Union{Colon,AbstractUnitRange{Int}}}
-    I0 = to_indices(B, (J0,))[1]
+    I0 = to_indices(B, (J0,))[0]
     @boundscheck checkbounds(B, I0)
     l0 = length(I0)
     setindex_shape_check(X, l0)
     l0 == 0 && return B
-    f0 = indexoffset(I0)+1
-    copy_to_bitarray_chunks!(B.chunks, f0, X, 1, l0)
+    f0 = indexoffset(I0)
+    copy_to_bitarray_chunks!(B.chunks, f0, X, 0, l0)
     return B
 end
 
@@ -1523,12 +1524,12 @@ end
     N = length(I)
     quote
         idxlens = @ncall $N index_lengths I0 d->I[d]
-        @ncall $N setindex_shape_check X idxlens[1] d->idxlens[d+1]
+        @ncall $N setindex_shape_check X idxlens[0] d->idxlens[d+1]
         isempty(X) && return B
-        f0 = indexoffset(I0)+1
-        l0 = idxlens[1]
+        f0 = indexoffset(I0)
+        l0 = idxlens[0]
 
-        gap_lst_1 = 0
+        gap_lst_0 = 0
         @nexprs $N d->(gap_lst_{d+1} = idxlens[d+1])
         stride = 1
         ind = f0
@@ -1539,7 +1540,7 @@ end
             gap_lst_{d+1} *= stride
         end
 
-        refind = 1
+        refind = 0
         Bc = B.chunks
         @nloops($N, i, d->I[d],
                 d->nothing, # PRE
@@ -1561,7 +1562,7 @@ end
 ## fill! contiguous views of BitArrays with a single value
 function fill!(V::SubArray{Bool, <:Any, <:BitArray, <:Tuple{AbstractUnitRange{Int}}}, x)
     B = V.parent
-    I0 = V.indices[1]
+    I0 = V.indices[0]
     l0 = length(I0)
     l0 == 0 && return V
     fill_chunks!(B.chunks, Bool(x), first(I0), l0)
@@ -1578,12 +1579,12 @@ fill!(V::SubArray{Bool, <:Any, <:BitArray, <:Tuple{AbstractUnitRange{Int}, Varar
         y = Bool(x)
         idxlens = @ncall $N index_lengths I0 d->I[d]
 
-        f0 = indexoffset(I0)+1
-        l0 = idxlens[1]
+        f0 = indexoffset(I0)
+        l0 = idxlens[0]
         l0 == 0 && return B
         @nexprs $N d->(isempty(I[d]) && return B)
 
-        gap_lst_1 = 0
+        gap_lst_0 = 0
         @nexprs $N d->(gap_lst_{d+1} = idxlens[d+1])
         stride = 1
         ind = f0
@@ -1606,21 +1607,8 @@ end
 
 ## isassigned
 
-@generated function isassigned(B::BitArray, I_0::Int, I::Int...)
-    N = length(I)
-    quote
-        @nexprs $N d->(I_d = I[d])
-        stride = 1
-        index = I_0
-        @nexprs $N d->begin
-            l = size(B,d)
-            stride *= l
-            @boundscheck 1 <= I_{d-1} <= l || return false
-            index += (I_d - 1) * stride
-        end
-        return isassigned(B, index)
-    end
-end
+@inline isassigned(B::BitArray, I_0::Int, I::Int...) = checkbounds(Bool, B, I_0, I...)
+
 
 @propagate_inbounds isassigned(A::AbstractArray, i::CartesianIndex) = isassigned(A, Tuple(i)...)
 @propagate_inbounds function isassigned(A::AbstractArray, i::Union{Integer, CartesianIndex}...)
@@ -1683,11 +1671,11 @@ for (V, PT, BT) in Any[((:N,), BitArray, BitArray), ((:T,:N), Array, StridedArra
             strides = @ntuple $N d->native_strides[perm[d]]
             strides::NTuple{$N,Integer}
 
-            #Creates offset, because indexing starts at 1
-            offset = 1 - reduce(+, strides, init = 0)
+            # Coordinates and linear indexing are zero-origin.
+            offset = 0
 
             sumc = 0
-            ind = 1
+            ind = 0
             @nloops($N, i, P,
                     d->(sumc += i_d*strides[d]), # PRE
                     d->(sumc -= i_d*strides[d]), # POST
@@ -1824,14 +1812,14 @@ _unique_dims(A::AbstractArray, dims::Colon) = invoke(unique, Tuple{Any}, A)
 end
 
 # Show for pairs() with Cartesian indices. Needs to be here rather than show.jl for bootstrap order
-function Base.showarg(io::IO, r::Iterators.Pairs{<:Integer, <:Any, <:Any, T}, toplevel) where T <: Union{AbstractVector, Tuple}
+function showarg(io::IO, r::Iterators.Pairs{<:Integer, <:Any, <:Any, T}, toplevel) where T <: Union{AbstractVector, Tuple}
     print(io, "pairs(::$T)")
 end
-function Base.showarg(io::IO, r::Iterators.Pairs{<:CartesianIndex, <:Any, <:Any, T}, toplevel) where T <: AbstractArray
+function showarg(io::IO, r::Iterators.Pairs{<:CartesianIndex, <:Any, <:Any, T}, toplevel) where T <: AbstractArray
     print(io, "pairs(::$T)")
 end
 
-function Base.showarg(io::IO, r::Iterators.Pairs{<:CartesianIndex, <:Any, <:Any, T}, toplevel) where T<:AbstractVector
+function showarg(io::IO, r::Iterators.Pairs{<:CartesianIndex, <:Any, <:Any, T}, toplevel) where T<:AbstractVector
     print(io, "pairs(IndexCartesian(), ::$T)")
 end
 
@@ -2017,7 +2005,7 @@ function _hash_fib(A, h::UInt)
         # Hash the element
         elt = A[keyidx]
 
-        stream_idx = mod1(n, 4)
+        stream_idx = mod(n - 1, 4)
         @nexprs 4 i -> stream_idx == i && (p_i = hash_mix_linear(hash(keyidx, p_i), hash(elt, p_i)))
 
         # Skip backwards a Fibonacci number of indices -- this is a linear index operation
@@ -2088,14 +2076,15 @@ function hash_shaped(A, h0::UInt, eltype_hint=())
     elseif len < 32768
         # separate accumulator streams, unrolled
         @nexprs 8 i -> p_i::UInt = h
-        n  = 1
-        limit = len - 7
+        n = firstindex(A)
+        lastidx = lastindex(A)
+        limit = lastidx - 7
         while n <= limit
-            @nexprs 8 i -> p_i = union_split(hash, A[n + i - 1], eltype_hint, p_i)
+            @nexprs 8 i -> p_i = union_split(hash, A[n + i], eltype_hint, p_i)
             n += 8
         end
-        while n <= len
-            p_1 = union_split(hash, A[n], eltype_hint, p_1)
+        while n <= lastidx
+            p_0 = union_split(hash, A[n], eltype_hint, p_0)
             n += 1
         end
         # fold all streams back together

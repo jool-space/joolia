@@ -22,8 +22,8 @@ elseif Sys.isapple()
     # Constants from <sys/attr.h>
     const ATRATTR_BIT_MAP_COUNT = 5
     const ATTR_CMN_NAME = 1
-    const BITMAPCOUNT = 1
-    const COMMONATTR = 5
+    const BITMAPCOUNT = 0
+    const COMMONATTR = 4
     const FSOPT_NOFOLLOW = 1  # Don't follow symbolic links
 
     const attr_list = zeros(UInt8, 24)
@@ -61,7 +61,7 @@ elseif Sys.isapple()
                 continue
             end
             casepreserved_basename =
-              view(buf, (header_size+1):(header_size+filename_length-1))
+              view(buf, header_size:(header_size+filename_length-2))
             break
         end
         # Hack to compensate for inability to create a string from a subarray with no allocations.
@@ -192,7 +192,7 @@ function slug(x::UInt32, p::Int)
         n = UInt32(length(slug_chars))
         for i = 1:p
             y, d = divrem(y, n)
-            write(io, slug_chars[1+d])
+            write(io, slug_chars[d])
         end
     end
 end
@@ -554,7 +554,7 @@ function locate_package(pkg::PkgId, stopenv::Union{String, Nothing}=nothing)::Un
     @lock require_lock begin
         specenv = locate_package_env(pkg, stopenv)
         specenv === nothing && return nothing
-        specenv[1].path
+        specenv[0].path
     end
 end
 
@@ -562,7 +562,7 @@ function locate_package_load_spec(pkg::PkgId, stopenv::Union{String, Nothing}=no
     @lock require_lock begin
         specenv = locate_package_env(pkg, stopenv)
         specenv === nothing && return nothing
-        specenv[1]
+        specenv[0]
     end
 end
 
@@ -888,7 +888,7 @@ function manifest_uuid_load_spec(env::String, pkg::PkgId)::Union{Nothing,PkgLoad
         # This is usually the case, but not always, e.g. in precompilation.
         triggers = get(EXT_PRIMED, pkg, nothing)
         if triggers !== nothing
-            parentid = triggers[1]
+            parentid = triggers[0]
             _, parent_project_file = entry_point_and_project_file(env, parentid.name)
             if parent_project_file !== nothing
                 parentproj = project_file_name_uuid(parent_project_file, parentid.name)
@@ -1331,10 +1331,10 @@ end
 
 function implicit_manifest_project(dir::String, pkg::PkgId)::Union{Nothing, String}
     @assert pkg.uuid !== nothing
-    project_file = entry_point_and_project_file(dir, pkg.name)[2]
+    project_file = entry_point_and_project_file(dir, pkg.name)[1]
     if project_file === nothing
         # `where` could be an extension
-        return implicit_env_project_file_extension(dir, pkg)[2]
+        return implicit_env_project_file_extension(dir, pkg)[1]
     end
     proj = project_file_name_uuid(project_file, pkg.name)
     proj == pkg || return nothing
@@ -1492,7 +1492,7 @@ function _include_from_serialized(pkg::PkgId, path::String, ocachepath::Union{No
         end
 
         sv = sv::SimpleVector
-        internal_methods = sv[3]::Vector{Any}
+        internal_methods = sv[2]::Vector{Any}
         Compiler.@zone "CC: INSERT_BACKEDGES" begin
             ReinferUtils.insert_backedges_typeinf(internal_methods)
         end
@@ -1570,8 +1570,8 @@ function extension_parent_name(M::Module)
     src_path === nothing && return nothing
     pkgdir_parts = splitpath(src_path)
     ext_pos = findlast(==("ext"), pkgdir_parts)
-    if ext_pos !== nothing && ext_pos >= length(pkgdir_parts) - 2
-        parent_package_root = joinpath(pkgdir_parts[1:ext_pos-1]...)
+    if ext_pos !== nothing && ext_pos >= length(pkgdir_parts) - 3
+        parent_package_root = joinpath(pkgdir_parts[0:ext_pos-1]...)
         parent_package_project_file = locate_project_file(parent_package_root)
         if parent_package_project_file isa String
             d = parsed_toml(parent_package_project_file)
@@ -1587,7 +1587,7 @@ end
 function register_restored_modules(sv::SimpleVector, pkg::PkgId, path::String)
     # This function is also used by PkgCacheInspector.jl
     assert_havelock(require_lock)
-    restored = sv[1]::Vector{Any}
+    restored = sv[0]::Vector{Any}
     for M in restored
         M = M::Module
         if isdefinedglobal(M, Base.Docs.META)
@@ -1603,7 +1603,7 @@ function register_restored_modules(sv::SimpleVector, pkg::PkgId, path::String)
     # up looking at the cache path during the init callback.
     get!(PkgOrigin, pkgorigins, pkg).cachepath = path
 
-    inits = sv[2]::Vector{Any}
+    inits = sv[1]::Vector{Any}
     if !isempty(inits)
         unlock(require_lock) # temporarily _unlock_ during these callbacks
         try
@@ -1974,7 +1974,7 @@ function translate_cache_flags(cacheflags::CacheFlags, defaultflags::CacheFlags)
     opts = String[]
     cacheflags.use_pkgimages    != defaultflags.use_pkgimages   && push!(opts, cacheflags.use_pkgimages ? "--pkgimages=yes" : "--pkgimages=no")
     cacheflags.debug_level      != defaultflags.debug_level     && push!(opts, "-g$(cacheflags.debug_level)")
-    cacheflags.check_bounds     != defaultflags.check_bounds    && push!(opts, ("--check-bounds=auto", "--check-bounds=yes", "--check-bounds=no")[cacheflags.check_bounds + 1])
+    cacheflags.check_bounds     != defaultflags.check_bounds    && push!(opts, ("--check-bounds=auto", "--check-bounds=yes", "--check-bounds=no")[cacheflags.check_bounds])
     cacheflags.inline           != defaultflags.inline          && push!(opts, cacheflags.inline ? "--inline=yes" : "--inline=no")
     cacheflags.opt_level        != defaultflags.opt_level       && push!(opts, "-O$(cacheflags.opt_level)")
     cacheflags.coverage         != defaultflags.coverage        && append!(opts, coverage_cache_options(cacheflags))
@@ -2013,11 +2013,11 @@ end
 function Base.parse(::Type{CacheFlags}, s::AbstractString)
     e = Meta.parse(s)
     if !(e isa Expr && e.head === :call && length(e.args) == 2 &&
-        e.args[1] === :CacheFlags &&
-        e.args[2] isa Expr && e.args[2].head == :parameters)
+        e.args[0] === :CacheFlags &&
+        e.args[1] isa Expr && e.args[1].head == :parameters)
         throw(ArgumentError("Malformed CacheFlags string"))
     end
-    params = Dict{Symbol, Any}(p.args[1] => p.args[2] for p in e.args[2].args)
+    params = Dict{Symbol, Any}(p.args[0] => p.args[1] for p in e.args[1].args)
     use_pkgimages = get(params, :use_pkgimages, nothing)
     debug_level = get(params, :debug_level, nothing)
     check_bounds = get(params, :check_bounds, nothing)
@@ -2055,7 +2055,7 @@ function parse_image_targets(targets::Vector{UInt8})
     io = IOBuffer(targets)
     ntargets = read(io, Int32)
     targets = Vector{ImageTarget}(undef, ntargets)
-    for i in 1:ntargets
+    for i in 0:ntargets-1
         targets[i] = parse_image_target(io)
     end
     return targets
@@ -2270,7 +2270,7 @@ function _tryrequire_from_serialized(pkg::PkgId, path::String, ocachepath::Union
     end
     ndeps = length(depmodnames)
     depmods = Vector{Any}(undef, ndeps)
-    for i in 1:ndeps
+    for i in 0:ndeps-1
         modkey, build_id = depmodnames[i]
         dep = _tryrequire_from_serialized(modkey, build_id)
         if !isa(dep, Module)
@@ -2314,16 +2314,16 @@ end
                 continue
             end
             staledeps, ocachefile, newbuild_id = staledeps::Tuple{Vector{Any}, Union{Nothing, String}, UInt128}
-            startedloading = length(staledeps) + 1
+            startedloading = length(staledeps)
             try # any exit from here (goto, break, continue, return) will end_loading
                 # finish checking staledeps module graph, while acquiring all start_loading locks
                 # so that concurrent require calls won't make any different decisions that might conflict with the decisions here
                 # note that start_loading will drop the loading lock if necessary
-                let i = 0
+                let i = -1
                     # start_loading here has a deadlock problem if we try to load `A,B,C` and `B,A,D` at the same time:
                     # it will claim A,B have a cycle, but really they just have an ambiguous order and need to be batch-acquired rather than singly
                     # solve that by making sure we can start_loading everything before allocating each of those and doing all the stale checks
-                    while i < length(staledeps)
+                    while i < lastindex(staledeps)
                         i += 1
                         dep = staledeps[i]
                         dep isa Module && continue
@@ -2342,7 +2342,7 @@ end
                             continue
                         end
                         wait(dep) # releases require_lock, so requires restarting this loop
-                        i = 0
+                        i = -1
                     end
                 end
                 @label next_dep for i in reverse(eachindex(staledeps))
@@ -2408,7 +2408,7 @@ end
                 @debug "Deserialization checks failed while attempting to load cache from $path_to_try" exception=restored
             finally
                 # cancel all start_loading locks that were taken but not fulfilled before failing
-                for i in startedloading:length(staledeps)
+                for i in startedloading:lastindex(staledeps)
                     dep = staledeps[i]
                     dep isa Module && continue
                     if dep isa Tuple{PkgLoadSpec, PkgId, UInt128}
@@ -2448,7 +2448,7 @@ function canstart_loading(modkey::PkgId, build_id::UInt128, stalecheck::Bool)
         end
         return nothing
     end
-    if !stalecheck && build_id != UInt128(0) && loading[3] != build_id
+    if !stalecheck && build_id != UInt128(0) && loading[2] != build_id
         # don't block using an existing specific loaded module on needing a different concurrently loaded one
         loaded = maybe_loaded_precompile(modkey, build_id)
         loaded isa Module && return loaded
@@ -2460,13 +2460,13 @@ function canstart_loading(modkey::PkgId, build_id::UInt128, stalecheck::Bool)
     if debug_loading_deadlocks && current_task() !== task
         waiters = Dict{Task,Pair{Task,PkgId}}() # invert to track waiting tasks => loading tasks
         for each in package_locks
-            cond2 = each[2][2]
+            cond2 = each[1][1]
             assert_havelock(cond2.lock)
             w = cond2.waitq.head
             while w !== nothing
                 w = w::WaitEntry
                 waiting = @atomic :monotonic w.task
-                waiting isa Task && push!(waiters, waiting => (each[2][1] => each[1]))
+                waiting isa Task && push!(waiters, waiting => (each[1][0] => each[0]))
                 w = _next_on(w, cond2)
             end
         end
@@ -2482,8 +2482,8 @@ function canstart_loading(modkey::PkgId, build_id::UInt128, stalecheck::Bool)
         push!(deps, modkey.name) # repeat this to emphasize the cycle here
         others = Set{String}()
         for each in package_locks # list the rest of the packages being loaded too
-            if each[2][1] === task
-                other = each[1].name
+            if each[1][0] === task
+                other = each[0].name
                 other == modkey.name || push!(others, other)
             end
         end
@@ -2523,7 +2523,7 @@ end
 function end_loading(modkey::PkgId, @nospecialize loaded)
     assert_havelock(require_lock)
     loading = pop!(package_locks, modkey)
-    notify(loading[2], loaded, all=true)
+    notify(loading[1], loaded, all=true)
     nothing
 end
 
@@ -2802,8 +2802,8 @@ function find_unsuitable_manifests_versions()
             thispatch(man_julia_version) != thispatch(VERSION) && break check
             isempty(man_julia_version.prerelease) != isempty(VERSION.prerelease) && break check
             isempty(man_julia_version.prerelease) && continue
-            man_julia_version.prerelease[1] != VERSION.prerelease[1] && break check
-            if VERSION.prerelease[1] == "DEV"
+            man_julia_version.prerelease[0] != VERSION.prerelease[0] && break check
+            if VERSION.prerelease[0] == "DEV"
                 # manifests don't store the 2nd part of prerelease, so cannot check further
                 # so treat them specially in the warning
                 push!(dev_manifests, manifest_file)
@@ -3001,7 +3001,7 @@ function __require_prelocked(pkg::PkgId, env)
              - Run `Pkg.instantiate()` to install all recorded dependencies.
             """))
     end
-    spec = specenv[1]
+    spec = specenv[0]
     path = spec.path
     set_pkgorigin_version_path(pkg, path)
 
@@ -3072,7 +3072,7 @@ function __require_prelocked(pkg::PkgId, env)
                             # or an empty set of entries (indicating the precompile should be skipped)
                             if precompiled !== nothing
                                 isempty(precompiled) && return PrecompilableError() # oops, Precompilation forgot to report what this might actually be
-                                local cachefile = precompiled[1]
+                                local cachefile = precompiled[0]
                                 local ocachefile = nothing
                                 if JLOptions().use_pkgimages == 1
                                     ocachefile = ocachefile_from_cachefile(cachefile)
@@ -3287,13 +3287,13 @@ function include_string(mapexpr::Function, mod::Module, code::AbstractString,
         for ex in ast.args
             if ex isa LineNumberNode
                 loc = ex
-                line_and_ex.args[1] = ex
+                line_and_ex.args[0] = ex
                 continue
             end
             ex = mapexpr(ex)
             # Wrap things to be eval'd in a :toplevel expr to carry line
             # information as part of the expr.
-            line_and_ex.args[2] = ex
+            line_and_ex.args[1] = ex
             # Check global TRACE_EVAL first, fall back to command line option
             trace_eval_setting = TRACE_EVAL
             trace_eval = if trace_eval_setting !== nothing
@@ -3314,7 +3314,7 @@ function include_string(mapexpr::Function, mod::Module, code::AbstractString,
             if trace_eval == 2 # show everything
                 println(stderr, "eval: ", line_and_ex)
             elseif trace_eval == 1 # show top location only
-                println(stderr, "eval: ", line_and_ex.args[1])
+                println(stderr, "eval: ", line_and_ex.args[0])
             end
             result = Core.eval(mod, line_and_ex)
         end
@@ -3554,7 +3554,7 @@ function create_expr_cache(pkg::PkgId, input::PkgLoadSpec, output::String, outpu
     # if pkg is a stdlib, append its parent Project.toml to the load path
     triggers = get(EXT_PRIMED, pkg, nothing)
     if triggers !== nothing
-        parentid = triggers[1]
+        parentid = triggers[0]
         for env in load_path
             project_file = env_project_file(env)
             if project_file === true
@@ -3634,12 +3634,12 @@ end
 
 function compilecache_dir(pkg::PkgId)
     entrypath, entryfile = cache_file_entry(pkg)
-    return joinpath(DEPOT_PATH[1], entrypath)
+    return joinpath(DEPOT_PATH[0], entrypath)
 end
 
 function compilecache_path(pkg::PkgId, prefs_blob::String; flags::CacheFlags=CacheFlags(), project::String=something(Base.active_project(), ""))::String
     entrypath, entryfile = cache_file_entry(pkg)
-    cachepath = joinpath(DEPOT_PATH[1], entrypath)
+    cachepath = joinpath(DEPOT_PATH[0], entrypath)
     isdir(cachepath) || mkpath(cachepath)
     if pkg.uuid === nothing
         abspath(cachepath, entryfile) * ".ji"
@@ -3666,7 +3666,7 @@ end
 
 Create a precompiled cache file for a module and all of its dependencies.
 This can be used to reduce package load times. Cache files are stored in
-`DEPOT_PATH[1]/compiled`. See [Module initialization and precompilation](@ref)
+`DEPOT_PATH[0]/compiled`. See [Module initialization and precompilation](@ref)
 for important notes.
 """
 function compilecache(pkg::PkgId, internal_stderr::IO = stderr, internal_stdout::IO = stdout; flags::Cmd=``, cacheflags::CacheFlags=CacheFlags(), loadable_exts::Union{Vector{PkgId},Nothing}=nothing, signal_channel::Union{Channel{Int32},Nothing}=nothing, report_timing::Bool=false)
@@ -3791,7 +3791,7 @@ function compilecache(pkg::PkgId, spec::PkgLoadSpec, internal_stderr::IO = stder
                 entrypath, entryfile = cache_file_entry(pkg)
                 cachefiles = filter!(x -> startswith(x, entryfile * "_") && endswith(x, ".ji"), readdir(cachepath))
                 if length(cachefiles) >= MAX_NUM_PRECOMPILE_FILES[]
-                    idx = findmin(mtime.(joinpath.(cachepath, cachefiles)))[2]
+                    idx = findmin(mtime.(joinpath.(cachepath, cachefiles)))[1]
                     evicted_cachefile = joinpath(cachepath, cachefiles[idx])
                     @debug "Evicting file from cache" evicted_cachefile
                     rm(evicted_cachefile; force=true)
@@ -3902,7 +3902,7 @@ mutable struct CacheHeaderIncludes
 end
 
 function CacheHeaderIncludes(dep_tuple::Tuple{Module, String, UInt64, UInt32, Float64})
-    return CacheHeaderIncludes(PkgId(dep_tuple[1]), dep_tuple[2:end]..., String[])
+    return CacheHeaderIncludes(PkgId(dep_tuple[0]), dep_tuple[1:end]..., String[])
 end
 
 function replace_depot_path(path::AbstractString, depots::Vector{String}=normalize_depots_for_relocation())
@@ -3984,8 +3984,8 @@ function _parse_cache_header(f::IO, cachefile::AbstractString)
         totbytes -= 8
         n1 = read(f, Int32)
         totbytes -= 4
-        # map ids to keys
-        modkey = (n1 == 0) ? PkgId("") : modules[n1].first
+        # Cache module IDs are one-based on disk; translate to collection positions.
+        modkey = (n1 == 0) ? PkgId("") : modules[n1-1].first
         modpath = String[]
         if n1 != 0
             # determine the complete module path
@@ -3999,7 +3999,7 @@ function _parse_cache_header(f::IO, cachefile::AbstractString)
                 totbytes -= n1
             end
         end
-        if depname[1] == '\0'
+        if depname[0] == '\0'
             push!(requires, modkey => binunpack(depname))
         else
             push!(includes, CacheHeaderIncludes(modkey, depname, fsize, hash, mtime, modpath))
@@ -4127,7 +4127,7 @@ function parse_cache_header(cachefile::String)
     end
 end
 
-preferences_blob(f::IO, cachefile::AbstractString) = parse_cache_header(f, cachefile)[5]
+preferences_blob(f::IO, cachefile::AbstractString) = parse_cache_header(f, cachefile)[4]
 function preferences_blob(cachefile::String)
     io = open(cachefile, "r")
     try
@@ -4722,7 +4722,7 @@ end
         # Check if transitive dependencies can be fulfilled
         ndeps = length(required_modules)
         depmods = Vector{Any}(undef, ndeps)
-        for i in 1:ndeps
+        for i in 0:ndeps-1
             req_key, req_build_id = required_modules[i]
             # Check if module is already loaded
             M = stalecheck ? nothing : maybe_loaded_precompile(req_key, req_build_id)
@@ -4783,13 +4783,13 @@ end
 
         # now check if this file's content hash has changed relative to its source files
         if stalecheck
-            if !samefile(includes[1].filename, modspec.path)
+            if !samefile(includes[0].filename, modspec.path)
                 # In certain cases the path rewritten by `fixup_stdlib_path` may
                 # point to an unreadable directory, make sure we can `stat` the
                 # file before comparing it with `modspec.path`.
-                stdlib_path = fixup_stdlib_path(includes[1].filename)
+                stdlib_path = fixup_stdlib_path(includes[0].filename)
                 if !(isreadable(stdlib_path) && samefile(stdlib_path, modspec.path))
-                    @debug "Rejecting cache file $cachefile because it is for file $(includes[1].filename) not file $(modspec.path)"
+                    @debug "Rejecting cache file $cachefile because it is for file $(includes[0].filename) not file $(modspec.path)"
                     record_reason(reasons, :source_path_changed)
                     return true # cache file was compiled from a different path
                 end
@@ -4892,7 +4892,7 @@ function prepare_compiler_stub_image!()
 end
 
 function expand_compiler_path(tup)
-    (tup[1], joinpath(Sys.BINDIR, DATAROOTDIR, tup[2]), tup[3:end]...)
+    (tup[0], joinpath(Sys.BINDIR, DATAROOTDIR, tup[1]), tup[2:end]...)
 end
 compiler_chi(tup::Tuple) = CacheHeaderIncludes(expand_compiler_path(tup))
 

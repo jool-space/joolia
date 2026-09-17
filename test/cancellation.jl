@@ -15,6 +15,80 @@ function cancellable_spawn(f)
     return t, src
 end
 
+@testset "WaitEntry slots are zero-origin" begin
+    # WaitEntry slot positions are collection positions. Native wait-entry
+    # storage is already zero-offset, while -1 is the missing-slot sentinel.
+    a = Ref(1)
+    b = Ref(2)
+    c = Ref(3)
+    d = Ref(4)
+
+    w1 = Base.WaitEntry1(nothing)
+    s1 = Base.slots(w1)
+    @test size(s1) == (1,)
+    @test axes(s1) == (Base.ZeroTo(1),)
+    @test firstindex(s1) == 0 && lastindex(s1) == 0
+    @test Base._find_slot(w1, a) == -1
+    @test Base._acquire_slot!(w1, a) == 0
+    @test s1[0].owner === a && Base._slot_owner(w1, 0) === a
+    @test Base._find_slot(w1, a) == 0
+    @test_throws BoundsError s1[-1]
+    @test_throws BoundsError s1[1]
+    @test_throws ConcurrencyViolationError Base._acquire_slot!(w1, b)
+    Base._release_slot!(w1, 0)
+    @test Base._find_slot(w1, a) == -1 && Base._free_slot(w1) == 0
+
+    w2 = Base.WaitEntry2(nothing)
+    s2 = Base.slots(w2)
+    @test axes(s2) == (Base.ZeroTo(2),)
+    @test firstindex(s2) == 0 && lastindex(s2) == 1
+    @test Base._acquire_slot!(w2, a) == 0
+    @test Base._acquire_slot!(w2, b) == 1
+    @test s2[0].owner === a && s2[1].owner === b
+    @test Base._find_slot(w2, a) == 0 && Base._find_slot(w2, b) == 1
+    @test_throws BoundsError s2[-1]
+    @test_throws BoundsError s2[2]
+    @test_throws ConcurrencyViolationError Base._acquire_slot!(w2, c)
+    Base._release_slot!(w2, 0)
+    @test Base._acquire_slot!(w2, c) == 0
+    Base._release_slot!(w2, 0)
+    Base._release_slot!(w2, 1)
+    @test Base._find_slot(w2, c) == -1 && Base._free_slot(w2) == 0
+
+    wn = Base.WaitEntryN(nothing, 3)
+    sn = Base.slots(wn)
+    @test size(sn) == (3,)
+    @test axes(sn) == (Base.ZeroTo(3),)
+    @test firstindex(sn) == 0 && lastindex(sn) == 2
+    @test Base._acquire_slot!(wn, a) == 0
+    @test Base._acquire_slot!(wn, b) == 1
+    @test Base._acquire_slot!(wn, c) == 2
+    @test sn[0].owner === a && sn[2].owner === c
+    @test Base._find_slot(wn, a) == 0 && Base._find_slot(wn, c) == 2
+    @test Base._find_slot(wn, d) == -1
+    @test_throws BoundsError sn[-1]
+    @test_throws BoundsError sn[3]
+    @test_throws ConcurrencyViolationError Base._acquire_slot!(wn, d)
+    Base._release_slot!(wn, 2)
+    @test Base._free_slot(wn) == 2
+    @test Base._acquire_slot!(wn, d) == 2
+    @test sn[2].owner === d
+    for i in 0:2
+        Base._release_slot!(wn, i)
+    end
+    @test all(slot -> slot.owner === nothing, sn)
+    @test Base._free_slot(wn) == 0
+
+    # The zero-slot case must keep the search range empty: `0:n-1` is
+    # intentionally empty when n is zero, rather than descending.
+    w0 = Base.WaitEntryN(nothing, 0)
+    s0 = Base.slots(w0)
+    @test size(s0) == (0,) && axes(s0) == (Base.ZeroTo(0),)
+    @test Base._find_slot(w0, a) == -1 && Base._free_slot(w0) == -1
+    @test_throws BoundsError s0[0]
+    @test_throws ConcurrencyViolationError Base._acquire_slot!(w0, a)
+end
+
 @testset "cancellation token graph semantics" begin
     # cancel! marks all descendants, level-triggered
     root = CancellationTokenSource()
@@ -652,8 +726,8 @@ sleep_cmd(secs::Real) = `$(Base.julia_cmd()) --startup-file=no -e "sleep($secs)"
 const BIG_WRITE = 8_000_000
 
 # whether `t` is parked (its wait registration is enqueued on some waitee)
-is_parked(t::Task) = (w = @atomic :acquire t.waiting_on; w isa Base.WaitEntry && Base._slot_owner(w, 1) !== nothing)
-parked_on(t::Task, @nospecialize(x)) = (w = @atomic :acquire t.waiting_on; x isa Task && (x = x.donenotify); w isa Base.WaitEntry && Base._find_slot(w, x) != 0)
+is_parked(t::Task) = (w = @atomic :acquire t.waiting_on; w isa Base.WaitEntry && Base._slot_owner(w, 0) !== nothing)
+parked_on(t::Task, @nospecialize(x)) = (w = @atomic :acquire t.waiting_on; x isa Task && (x = x.donenotify); w isa Base.WaitEntry && Base._find_slot(w, x) >= 0)
 
 # The entries currently on `src`'s waiter list (test-only: assumes no
 # concurrent walk while traversing)
@@ -682,13 +756,13 @@ end
     entries = registry_entries(src)
     @test length(entries) == 1
     w1 = entries[1]
-    @test Base._find_slot(w1, src) != 0
+    @test Base._find_slot(w1, src) >= 0
     @test w1 === t.cached_cancel_entry
     put!(c, 1)
     take!(done)
     # a normal wake does no registry work: the registration stays in place
     @test registry_entries(src) == [w1]
-    @test Base._find_slot(w1, src) != 0
+    @test Base._find_slot(w1, src) >= 0
     # and the second park re-arms the same registered entry
     @test timedwait(() -> is_parked(t), 10.0) == :ok
     @test registry_entries(src) == [w1]
@@ -717,10 +791,10 @@ end
     @test wc isa Base.WaitEntry && (@atomic t.waiting_on) === wc
     put!(c, 1)
     @test timedwait(() -> (x = @atomic t.waiting_on;
-                           x isa Base.WaitEntry && Base._slot_owner(x, 1) !== nothing), 10.0) == :ok
+                           x isa Base.WaitEntry && Base._slot_owner(x, 0) !== nothing), 10.0) == :ok
     @test (@atomic t.waiting_on) === t.cached_wait_entry # the plain entry
     @test (@atomic t.waiting_on) !== wc
-    @test Base._find_slot(wc, src) != 0      # still registered (sticky)
+    @test Base._find_slot(wc, src) >= 0      # still registered (sticky)
     cancel!(src)
     spin()
     @test !istaskdone(t)                     # the shielded wait is untouched
@@ -834,17 +908,17 @@ end
     end
     @test timedwait(() -> is_parked(t), 10.0) == :ok
     w = t.cached_cancel_entry
-    @test w isa Base.WaitEntry && Base._find_slot(w, src1) != 0
+    @test w isa Base.WaitEntry && Base._find_slot(w, src1) >= 0
     @test registry_entries(src1) == [w]
     put!(c, 1)
     take!(step)
     @test timedwait(() -> (x = @atomic t.waiting_on;
-                           x isa Base.WaitEntry && Base._slot_owner(x, 1) !== nothing &&
-                           Base._find_slot(x, src2) != 0), 10.0) == :ok
+                           x isa Base.WaitEntry && Base._slot_owner(x, 0) !== nothing &&
+                           Base._find_slot(x, src2) >= 0), 10.0) == :ok
     # parking under the new source physically unregistered the cached entry
     # from the old one and rebound it
     @test t.cached_cancel_entry === w
-    @test Base._find_slot(w, src2) != 0
+    @test Base._find_slot(w, src2) >= 0
     @test isempty(registry_entries(src1))
     @test registry_entries(src2) == [w]
     put!(c, 2)
@@ -912,7 +986,7 @@ end
     @test timedwait(() -> (x = @atomic wa.waiting_on; x isa Base.WaitEntryN), 10.0) == :ok
     w = (@atomic wa.waiting_on)::Base.WaitEntryN
     @test Base._nslots(w) == 4
-    @test count(i -> Base._slot_owner(w, i) isa Base.ThreadSynchronizer, 1:4) == 3
+    @test count(i -> Base._slot_owner(w, i) isa Base.ThreadSynchronizer, 0:3) == 3
     @test registry_entries(src) == [w]
     # first completion wins; the entry is withdrawn from every waitq and
     # retired
@@ -920,7 +994,7 @@ end
     done, remaining = fetch(wa)
     @test length(done) == 1 && length(remaining) == 2
     @test (@atomic :monotonic w.task) === nothing
-    @test count(i -> Base._slot_owner(w, i) isa Base.ThreadSynchronizer, 1:4) == 0
+    @test count(i -> Base._slot_owner(w, i) isa Base.ThreadSynchronizer, 0:3) == 0
     # the retired source registration is collected by the next walk
     cancel!(src)
     @test isempty(registry_entries(src))
@@ -944,7 +1018,7 @@ end
     @test istaskfailed(wa2) && wa2.result isa CancellationRequest
     for t in ts2
         @test !istaskdone(t)
-        @test Base._find_slot(w2, t.donenotify) == 0
+        @test Base._find_slot(w2, t.donenotify) == -1
     end
     for _ in ts2
         put!(c2, 0)
@@ -963,7 +1037,7 @@ end
         @test timedwait(10.0) do
             (@atomic wa3.waiting_on) === w3 &&
                 count(i -> Base._slot_owner(w3, i) isa Base.ThreadSynchronizer,
-                      1:Base._nslots(w3)) == 3 - n
+                      0:Base._nslots(w3)-1) == 3 - n
         end == :ok
         @test registry_entries(src3) == [w3]
     end
@@ -971,7 +1045,7 @@ end
     done3, remaining3 = fetch(wa3)
     @test length(done3) == 3 && isempty(remaining3)
     @test (@atomic wa3.waiting_on) === nothing
-    @test count(i -> Base._slot_owner(w3, i) isa Base.ThreadSynchronizer, 1:Base._nslots(w3)) == 0
+    @test count(i -> Base._slot_owner(w3, i) isa Base.ThreadSynchronizer, 0:Base._nslots(w3)-1) == 0
     @test (@atomic :monotonic w3.task) === nothing
     cancel!(src3)
     @test isempty(registry_entries(src3))
@@ -1619,7 +1693,7 @@ end
     d = deepcopy(w)
     @test d isa Core.WaitEntryN && d !== w
     @test Base._nslots(d) == 4
-    @test all(i -> Base._slot_owner(d, i) === nothing, 1:4)
+    @test all(i -> Base._slot_owner(d, i) === nothing, 0:3)
     GC.gc(true)
     # the task reference is kept (Task deepcopy is the identity); reached
     # through a containing object like any graph edge

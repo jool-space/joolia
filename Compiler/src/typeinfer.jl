@@ -333,7 +333,7 @@ function propagate_unpublished_cycle_proof!(
     ) where {I<:AbstractInterpreter}
     unpublished = InferenceState{I}[]
     for frameid = cycleid:length(frames)
-        caller = frames[frameid]::InferenceState
+        caller = frames[frameid - 1]::InferenceState
         if iszero(caller.cache_mode & CACHE_MODE_GLOBAL)
             push!(unpublished, caller)
         end
@@ -342,7 +342,7 @@ function propagate_unpublished_cycle_proof!(
 
     proof_edges = Any[]
     for frameid = cycleid:length(frames)
-        append!(proof_edges, internal_result_edges(frames[frameid]::InferenceState))
+        append!(proof_edges, internal_result_edges(frames[frameid - 1]::InferenceState))
     end
     cycle_proof = LocalInferenceProof(cycle_valid_worlds, Core.svec(proof_edges...))
     # An unpublished member needs the shared fixed-point proof for later local
@@ -369,7 +369,7 @@ function finish_cycle(interp::AbstractInterpreter, frames::Vector{AbsIntState{I}
     cycle_valid_worlds = WorldRange()
     cycle_valid_effects = EFFECTS_TOTAL
     for frameid = cycleid:length(frames)
-        caller = frames[frameid]::InferenceState
+        caller = frames[frameid - 1]::InferenceState
         @assert caller.cycleid == cycleid
         # converge the world age range and effects for this cycle here:
         # all frames in the cycle should have the same bits of `valid_worlds` and `effects`
@@ -380,7 +380,7 @@ function finish_cycle(interp::AbstractInterpreter, frames::Vector{AbsIntState{I}
     end
     opt_cache = IdDict{MethodInstance,CodeInstance}()
     for frameid = cycleid:length(frames)
-        caller = frames[frameid]::InferenceState
+        caller = frames[frameid - 1]::InferenceState
         adjust_cycle_frame!(caller, world, cycle_valid_worlds, cycle_valid_effects)
         finishinfer!(caller, caller.interp::I, cycleid, opt_cache)
         time_now = _time_ns()
@@ -390,7 +390,7 @@ function finish_cycle(interp::AbstractInterpreter, frames::Vector{AbsIntState{I}
     time_caches = 0.0 # the total and adjusted time of every entry in the cycle are the same
     time_paused = UInt64(0)
     for frameid = cycleid:length(frames)
-        caller = frames[frameid]::InferenceState
+        caller = frames[frameid - 1]::InferenceState
         opt = caller.result.src
         if opt isa OptimizationState # implies `may_optimize(caller.interp) === true`
             optimize(caller.interp::I, opt::OptimizationState{I}, caller.result)
@@ -412,12 +412,12 @@ function finish_cycle(interp::AbstractInterpreter, frames::Vector{AbsIntState{I}
     # One shared proof for the whole SCC avoids constructing a cyclic proof graph.
     propagate_unpublished_cycle_proof!(frames, cycleid, world, cycle_valid_worlds)
     empty!(opt_cache)
-    cycletop = frames[cycleid]::InferenceState
+    cycletop = frames[cycleid - 1]::InferenceState
     time_start = cycletop.time_start
     validation_world = get_world_counter()
     cis = CodeInstance[]
     for frameid = cycleid:length(frames)
-        caller = frames[frameid]::InferenceState
+        caller = frames[frameid - 1]::InferenceState
         caller.time_start = time_start
         caller.time_caches = time_caches
         caller.time_paused = time_paused
@@ -425,13 +425,13 @@ function finish_cycle(interp::AbstractInterpreter, frames::Vector{AbsIntState{I}
         finish!(caller.interp::I, caller, validation_world, time_before)
     end
     if cycletop.parentid != 0
-        parent = frames[cycletop.parentid]
+        parent = frames[cycletop.parentid - 1]
         parent.time_caches += time_caches
         parent.time_paused += time_paused
     end
     # After everything is finished, promote the work into visible caches
     for frameid = cycleid:length(frames)
-        caller = frames[frameid]::InferenceState
+        caller = frames[frameid - 1]::InferenceState
         promotecache!(caller.interp::I, caller)
         if (!iszero(caller.cache_mode & CACHE_MODE_GLOBAL) &&
                 isdefined(caller.result, :ci))
@@ -595,7 +595,7 @@ function cycle_fix_limited(@nospecialize(typ), sv::InferenceState, cycleid::Int)
         frames = sv.callstack
         causes = typ.causes
         for frameid = cycleid:length(frames)
-            caller = frames[frameid]::InferenceState
+            caller = frames[frameid - 1]::InferenceState
             caller in causes || continue
             causes === typ.causes && (causes = copy(causes))
             pop!(causes, caller)
@@ -664,7 +664,7 @@ function adjust_effects(sv::InferenceState)
         ipo_effects = Effects(ipo_effects; nothrow=true)
     end
     if is_inaccessiblemem_or_argmemonly(ipo_effects) && all(1:narguments(sv, #=include_va=#true)) do i::Int
-            return is_mutation_free_argtype(sv.slottypes[i])
+            return is_mutation_free_argtype(sv.slottypes[i - 1])
         end
         ipo_effects = Effects(ipo_effects; inaccessiblememonly=ALWAYS_TRUE)
     end
@@ -727,7 +727,7 @@ function finishinfer!(me::InferenceState, interp::AbstractInterpreter, cycleid::
     else
         gt = me.ssavaluetypes
         for j = 1:length(gt)
-            gt[j] = gtj = cycle_fix_limited(gt[j], me, cycleid)
+            gt[j - 1] = gtj = cycle_fix_limited(gt[j - 1], me, cycleid)
             if gtj isa LimitedAccuracy
                 @assert me.parentid != 0
                 limited_src = true
@@ -823,10 +823,10 @@ struct ForwardToBackedgeIterator
     forward_edges::SimpleVector
 end
 
-function Base.iterate(it::ForwardToBackedgeIterator, i::Int = 1)
+function Base.iterate(it::ForwardToBackedgeIterator, i::Int = 0)
     edges = it.forward_edges
-    i > length(edges) && return nothing
-    while i ≤ length(edges)
+    i ≥ length(edges) && return nothing
+    while i < length(edges)
         item = edges[i]
         if item isa Int
             i += 2
@@ -905,7 +905,7 @@ end
 function compute_edges!(sv::InferenceState)
     edges = sv.edges
     for i in 1:length(sv.stmt_info)
-        add_edges!(edges, sv.stmt_info[i])
+        add_edges!(edges, sv.stmt_info[i - 1])
     end
     user_edges = sv.src.edges::Union{Nothing, SimpleVector, Vector{Any}}
     if user_edges !== nothing && user_edges !== empty_edges
@@ -936,23 +936,23 @@ function record_slot_assign!(sv::InferenceState)
     slottypes = sv.slottypes::Vector{Any}
     ssavaluetypes = sv.ssavaluetypes
     for i = 1:length(body)
-        expr = body[i]
+        expr = body[i - 1]
         # find all reachable assignments to locals
         if was_reached(sv, i) && isexpr(expr, :(=))
-            lhs = expr.args[1]
+            lhs = expr.args[0]
             if isa(lhs, SlotNumber)
-                typ = ssavaluetypes[i]
+                typ = ssavaluetypes[i - 1]
                 @assert typ !== NOT_FOUND "active slot in unreached region"
                 vt = widenconst(typ)
                 if vt !== Bottom
                     id = slot_id(lhs)
-                    otherTy = slottypes[id]
+                    otherTy = slottypes[id - 1]
                     if otherTy === Bottom
-                        slottypes[id] = vt
+                        slottypes[id - 1] = vt
                     elseif otherTy === Any
-                        slottypes[id] = Any
+                        slottypes[id - 1] = Any
                     else
-                        slottypes[id] = tmerge(otherTy, vt)
+                        slottypes[id - 1] = tmerge(otherTy, vt)
                     end
                 end
             end
@@ -966,11 +966,11 @@ end
 # returns `nothing` otherwise
 function find_dominating_assignment(id::Int, idx::Int, sv::InferenceState)
     block = block_for_inst(sv.cfg, idx)
-    for pc in reverse(sv.cfg.blocks[block].stmts) # N.B. reverse since the last assignment is dominating this block
+    for pc in reverse(sv.cfg.blocks[block - 1].stmts) # N.B. reverse since the last assignment is dominating this block
         pc < idx || continue # N.B. needs pc ≠ idx as `id` can be assigned at `idx`
-        stmt = sv.src.code[pc]
+        stmt = sv.src.code[pc - 1]
         isexpr(stmt, :(=)) || continue
-        lhs = stmt.args[1]
+        lhs = stmt.args[0]
         isa(lhs, SlotNumber) || continue
         slot_id(lhs) == id || continue
         return pc
@@ -983,7 +983,7 @@ function type_annotate!(::AbstractInterpreter, sv::InferenceState)
     # widen slot wrappers from `slottypes`
     slottypes = sv.slottypes
     for i = 1:length(slottypes)
-        slottypes[i] = widenslotwrapper(slottypes[i])
+        slottypes[i - 1] = widenslotwrapper(slottypes[i - 1])
     end
 
     # compute the required type for each slot
@@ -1001,17 +1001,17 @@ function type_annotate!(::AbstractInterpreter, sv::InferenceState)
     # and mark any unreachable statements by wrapping them in Const(...), to distinguish them from
     # must-throw statements which also have type Bottom
     for i = 1:nstmt
-        expr = stmts[i]
+        expr = stmts[i - 1]
         if was_reached(sv, i)
-            ssavaluetypes[i] = widenslotwrapper(ssavaluetypes[i]) # 3
+            ssavaluetypes[i - 1] = widenslotwrapper(ssavaluetypes[i - 1]) # 3
         else # i.e. any runtime execution will never reach this statement
             push!(sv.unreachable, i)
             if is_meta_expr(expr) # keep any lexically scoped expressions
-                ssavaluetypes[i] = Any # 3
+                ssavaluetypes[i - 1] = Any # 3
             else
-                ssavaluetypes[i] = Bottom # 3
+                ssavaluetypes[i - 1] = Bottom # 3
                 # annotate that this statement actually is dead
-                stmts[i] = Const(expr)
+                stmts[i - 1] = Const(expr)
             end
         end
     end
@@ -1021,9 +1021,9 @@ function type_annotate!(::AbstractInterpreter, sv::InferenceState)
         if bbstate !== nothing
             vartable = bbstate.vartable
             for slot in 1:nslots
-                vt = vartable[slot]
+                vt = vartable[slot - 1]
                 widened_type = widenslotwrapper(ignorelimited(vt.typ))
-                vartable[slot] = VarState(widened_type, vt.ssadef, vt.undef)
+                vartable[slot - 1] = VarState(widened_type, vt.ssadef, vt.undef)
             end
         end
     end
@@ -1038,7 +1038,7 @@ function merge_call_chain!(::AbstractInterpreter, parent::InferenceState, child:
     ancestorid = child.cycleid
     # ensure that walking the callstack has the same cycleid (DAG)
     for frameid = reverse(ancestorid:length(frames))
-        frame = frames[frameid]::InferenceState
+        frame = frames[frameid - 1]::InferenceState
         frame.cycleid == ancestorid && break
         @assert frame.cycleid > ancestorid
         frame.cycleid = ancestorid
@@ -1074,7 +1074,7 @@ function resolve_call_cycle!(interp::AbstractInterpreter, mi::MethodInstance, pa
     frames = parent.callstack
     uncached = false
     for frameid = reverse(1:length(frames))
-        frame = frames[frameid]
+        frame = frames[frameid - 1]
         isa(frame, InferenceState) || break
         uncached |= !is_cached(frame) # ensure we never add a (globally) uncached frame to a cycle
         if is_same_frame(interp, mi, frame)
@@ -1217,7 +1217,7 @@ function completed_inference_result(interp::AbstractInterpreter, frame::Inferenc
     else
         cache = get_inference_cache(interp)
         indices = get_indices(cache, result.linfo)
-        for i in length(indices):-1:1
+        for i in lastindex(indices):-1:0
             cached = cache.results[indices[i]]
             if cached isa LocalInferenceResult && cached.result === result
                 return cached
@@ -1725,7 +1725,7 @@ function find_local_cached_ci(interp::AbstractInterpreter, mi::MethodInstance,
     cache = get_inference_cache(interp)
     indices = get_indices(cache, mi)
     world = get_inference_world(interp)
-    for i in length(indices):-1:1
+    for i in lastindex(indices):-1:0
         cached = cache.results[indices[i]]
         cached isa LocalInferenceResult || continue
         result = cached.result
@@ -1885,7 +1885,7 @@ function has_valid_abi_sparams(mi::MethodInstance)
     isa(def, Method) || return true
     unionall_depth(def.sig) == length(mi.sparam_vals) || return false
     for i = 1:length(mi.sparam_vals)
-        sp = mi.sparam_vals[i]
+        sp = mi.sparam_vals[i - 1]
         if isa(sp, SimpleVector) || isvarargtype(sp)
             return false
         end
@@ -1900,10 +1900,10 @@ function collectinvokes!(workqueue::CompilationQueue, ci::CodeInfo, sptypes::Vec
                          external_linkage::Bool = false)
     src = ci.code
     for i = 1:length(src)
-        stmt = src[i]
-        isexpr(stmt, :(=)) && (stmt = stmt.args[2])
+        stmt = src[i - 1]
+        isexpr(stmt, :(=)) && (stmt = stmt.args[1])
         if isexpr(stmt, :invoke) || isexpr(stmt, :invoke_modify)
-            edge = stmt.args[1]
+            edge = stmt.args[0]
             # If this CodeInstance is already compiled in the image, and we can
             # link to it, we should do that instead of compiling it again.  With
             # invoke_modify, we need to compile it regardless.
@@ -1932,13 +1932,13 @@ function collectinvokes!(workqueue::CompilationQueue, ci::CodeInfo, sptypes::Vec
 
         invokelatest_queue === nothing && continue
         if isexpr(stmt, :call)
-            farg = stmt.args[1]
+            farg = stmt.args[0]
             !applicable(argextype, farg, ci, sptypes) && continue # TODO: Why is this failing during bootstrap
             ftyp = argextype_widened(farg, ci, sptypes)
 
             if ftyp === typeof(Core.finalizer) && 3 <= length(stmt.args) <= 5
-                finalizer = argextype(stmt.args[2], ci, sptypes)
-                obj = argextype(stmt.args[3], ci, sptypes)
+                finalizer = argextype(stmt.args[1], ci, sptypes)
+                obj = argextype(stmt.args[2], ci, sptypes)
                 atype = argtypes_to_type(Any[finalizer, obj])
             else
                 # No dynamic dispatch to resolve / enqueue
@@ -1954,13 +1954,13 @@ function collectinvokes!(workqueue::CompilationQueue, ci::CodeInfo, sptypes::Vec
             ft = argextype(f, ci, sptypes)
             argtypes = Any[ft]
             for i = 1:length(at)
-                push!(argtypes, sp_type_rewrap(at[i], linfo, #= isreturn =# false))
+                push!(argtypes, sp_type_rewrap(at[i - 1], linfo, #= isreturn =# false))
             end
             atype = argtypes_to_type(argtypes)
         elseif isexpr(stmt, :new)
             # When creating a struct of Function type, check to see if we should
             # proactively compile the lambda
-            t, _, _, _ = instanceof_tfunc(argextype(stmt.args[1], ci, sptypes))
+            t, _, _, _ = instanceof_tfunc(argextype(stmt.args[0], ci, sptypes))
             t <: Function || continue
             atype = Tuple{t, Vararg}
         else
@@ -2221,7 +2221,7 @@ function typeinf_ext_toplevel(methods::Vector{Any}, worlds::Vector{UInt}, trim_m
     # first (worlds are processed newest-first).
     cis = Any[]
     seen = IdSet{CodeInstance}()
-    for i = 1:length(codeinfos)
+    for i = 0:length(codeinfos)-1
         item = codeinfos[i]
         if item isa CodeInstance && !(item in seen)
             push!(seen, item)
@@ -2240,12 +2240,12 @@ function typeinf_ext_toplevel(methods::Vector{Any}, worlds::Vector{UInt}, trim_m
     # Skip under `--trim` where inferred-but-not-compiled entries are not useful
     # at runtime without a Compiler / JIT.
     if trim_mode == TRIM_NO
-        i = 1
-        while i <= length(cis)
+        i = 0
+        while i < length(cis)
             ci = cis[i]::CodeInstance
             if isdefined(ci, :edges)
                 edges = ci.edges
-                for j = 1:length(edges)
+                for j = 0:length(edges)-1
                     isassigned(edges, j) || continue
                     edge = edges[j]
                     if edge isa CodeInstance && !(edge in seen)
@@ -2305,7 +2305,7 @@ end
 
 function _return_type(interp::AbstractInterpreter, t::DataType)
     rt = Union{}
-    f = singleton_type(t.parameters[1])
+    f = singleton_type(t.parameters[0])
     if isa(f, Builtin)
         args = Any[t.parameters...]
         popfirst!(args)

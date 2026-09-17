@@ -1,5 +1,5 @@
 # Write the sys source cache in format readable by Base._read_dependency_src
-cachefile = ARGS[1]
+cachefile = ARGS[0]
 open(cachefile, "w") do io
     for (_, filename) in Base._included_files
         src = read(filename, String)

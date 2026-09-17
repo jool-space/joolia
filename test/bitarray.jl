@@ -46,6 +46,86 @@ let t0 = time_ns()
     end
 end
 
+# Packed slicing preserves zero-origin positions across chunk and dimension boundaries.
+@testset "zero-origin packed slicing" begin
+    for n in (0, 1, 2, 63, 64, 65, 127, 128, 129, 256)
+        v = falses(n)
+        for i in eachindex(v)
+            v[i] = (i % 5 == 0 || i % 7 == 1)
+        end
+        for lo in unique((0, min(n, 1), min(n, 63), min(n, 64), n))
+            for hi in unique((lo-1, n-1))
+                w = v[lo:hi]
+                @test length(w) == hi-lo+1
+                @test all(w[i] == v[lo+i] for i in eachindex(w))
+                @test Test._check_bitarray_consistency(w)
+            end
+        end
+        @test collect(v[:]) == collect(v)
+        @test_throws BoundsError v[-1:0]
+        @test_throws BoundsError v[0:n]
+    end
+    for dims in ((65, 3), (9, 4, 3))
+        b = falses(dims)
+        a = Array{Bool}(undef, dims)
+        for i in eachindex(b)
+            b[i] = a[i] = (i % 5 == 0 || i % 7 == 1)
+        end
+        selectors = length(dims) == 2 ?
+            ((:, :), (1:64, 1:2), (0:0, 0), (3:2, :), ([64, 0, 2], [2, 0]), (0:2:64, 2)) :
+            ((:, :, :), (1:7, 1:3, 0:1), (0:0, 0, 2), (2:1, :, :), ([8, 0, 2], [3, 0], [2, 1]), (0:2:8, 2, :))
+        for I in selectors
+            result = b[I...]
+            expected = a[I...]
+            @test size(result) == size(expected)
+            @test all(result[i] == expected[i] for i in eachindex(expected))
+            @test Test._check_bitarray_consistency(result)
+        end
+    end
+end
+
+# Packed assignments and view fills preserve untouched bits and use zero-origin offsets.
+@testset "zero-origin packed assignment" begin
+    for n in (0, 1, 63, 64, 65, 129), lo in unique((0, min(n,1), min(n,63), n)), packed in (false,true)
+        b = trues(n)
+        a = fill(true,n)
+        vals = [isodd(i) for i in lo:n-1]
+        x = packed ? BitVector(vals) : vals
+        b[lo:n-1] = x
+        a[lo:n-1] = vals
+        @test all(b[i] == a[i] for i in eachindex(a))
+        @test Test._check_bitarray_consistency(b)
+        b[:] = packed ? BitVector(a) : a
+        @test all(b[i] == a[i] for i in eachindex(a))
+    end
+    for dims in ((65,3), (9,4,3)), packed in (false,true)
+        b = falses(dims)
+        a = fill(false,dims)
+        selectors = length(dims) == 2 ?
+            ((:, :), (1:64, 1:2), (0:0, 0), (3:2, :)) :
+            ((:, :, :), (1:7, 1:3, 0:1), (0:0, 0, 2), (2:1, :, :))
+        for I in selectors
+            vals = a[I...]
+            for i in eachindex(vals)
+                vals[i] = isodd(i)
+            end
+            b[I...] = packed ? BitArray(vals) : vals
+            a[I...] = vals
+            @test all(b[i] == a[i] for i in eachindex(a))
+            @test Test._check_bitarray_consistency(b)
+        end
+        ranges = length(dims) == 2 ? (1:63, 1:2) : (1:7, 1:3, 0:1)
+        fill!(view(b,ranges...),true)
+        fill!(view(a,ranges...),true)
+        @test all(b[i] == a[i] for i in eachindex(a))
+        @test Test._check_bitarray_consistency(b)
+    end
+    b = falses(65)
+    b[1:64] = [isodd(i) ? 1 : 0 for i in 1:64]
+    @test all(b[i] == isodd(i) for i in eachindex(b))
+    @test_throws InexactError setindex!(b, fill(2,64), 1:64)
+end
+
 @testset "empty bitvector" begin
     @test BitVector() == BitVector(undef, 0)
 end
@@ -1888,4 +1968,24 @@ end
 let b = trues(10)
     copyto!(b, view([0,0,0], :))
     @test b == [0,0,0,1,1,1,1,1,1,1]
+end
+
+# Packed arrays are assigned exactly at valid coordinates, including display's trailing dimension.
+@testset "zero-origin packed assignment queries and display" begin
+    for dims in ((), (0,), (2,), (2, 3), (2, 0, 3), (2, 3, 4))
+        packed = falses(dims)
+        dense = fill(false, dims)
+        for n in 1:length(dims)+2
+            ranges = ntuple(d -> -1:size(packed, d), n)
+            for indices in Iterators.product(ranges...)
+                @test isassigned(packed, indices...) == isassigned(dense, indices...)
+            end
+        end
+    end
+    vector_text = sprint(show, MIME"text/plain"(), BitVector([true, false]))
+    @test occursin("2-element BitVector:", vector_text)
+    @test strip.(split(vector_text, '\n')[1:end]) == ["1", "0"]
+    matrix_text = sprint(show, MIME"text/plain"(), BitArray([true false; false true]))
+    @test !occursin("#undef", matrix_text)
+    @test count(==("1"), split(matrix_text)) == 2
 end

@@ -34,7 +34,7 @@ end
 
 _version() = unsafe_string(unsafe_load(cglobal((:__gmp_version, libgmp), Ptr{Cchar})))
 version() = VersionNumber(_version())
-major_version() = _version()[1]
+major_version() = _version()[0]
 bits_per_limb() = Int(unsafe_load(cglobal((:__gmp_bits_per_limb, libgmp), Cint)))
 
 const VERSION = version()
@@ -309,7 +309,7 @@ function tryparse_internal(::Type{BigInt}, s::AbstractString, startpos::Int, end
         raise && throw(ArgumentError("invalid base: base must be 2 ≤ base ≤ 62, got $base"))
         return nothing
     end
-    if i == 0
+    if i == -1
         raise && throw(ArgumentError("premature end of integer: $(repr(bstr))"))
         return nothing
     end
@@ -350,8 +350,8 @@ function BigInt(x::Integer)
     size = 0
     limbnbits = sizeof(Limb) << 3
     while nd > 0
-        size += 1
         unsafe_store!(z.d, ux % Limb, size)
+        size += 1
         ux >>= limbnbits
         nd -= limbnbits
     end
@@ -368,7 +368,7 @@ rem(x::BigInt, ::Type{T}) where T<:Union{SLimbMax,ULimbMax} =
 function rem(x::BigInt, ::Type{T}) where T<:Union{Base.BitUnsigned,Base.BitSigned}
     u = zero(T)
     for l = 1:min(abs(x.size), cld(sizeof(T), sizeof(Limb)))
-        u += (unsafe_load(x.d, l) % T) << ((sizeof(Limb)<<3)*(l-1))
+        u += (unsafe_load(x.d, l - 1) % T) << ((sizeof(Limb)<<3)*(l-1))
     end
     flipsign(u, x.size)
 end
@@ -426,17 +426,17 @@ function Float64(x::BigInt, ::RoundingMode{:Nearest})
     elseif xsize == 1
         z = Float64(unsafe_load(x.d))
     elseif Limb == UInt32 && xsize == 2
-        z = Float64((unsafe_load(x.d, 2) % UInt64) << BITS_PER_LIMB + unsafe_load(x.d))
+        z = Float64((unsafe_load(x.d, 1) % UInt64) << BITS_PER_LIMB + unsafe_load(x.d))
     else
-        y1 = unsafe_load(x.d, xsize) % UInt64
+        y1 = unsafe_load(x.d, xsize - 1) % UInt64
         n = top_set_bit(y1)
         # load first 54(1 + 52 bits of fraction + 1 for rounding)
         y = y1 >> (n - (precision(Float64)+1))
         if Limb == UInt64
-            y += n > precision(Float64) ? 0 : (unsafe_load(x.d, xsize-1) >> (10+n))
+            y += n > precision(Float64) ? 0 : (unsafe_load(x.d, xsize - 2) >> (10+n))
         else
-            y += (unsafe_load(x.d, xsize-1) % UInt64) >> (n-22)
-            y += n > (precision(Float64) - 32) ? 0 : (unsafe_load(x.d, xsize-2) >> (10+n))
+            y += (unsafe_load(x.d, xsize - 2) % UInt64) >> (n-22)
+            y += n > (precision(Float64) - 32) ? 0 : (unsafe_load(x.d, xsize - 3) >> (10+n))
         end
         y = (y + 1) >> 1 # round, ties up
         y &= ~UInt64(trailing_zeros(x) == (n-54 + (xsize-1)*BITS_PER_LIMB)) # fix last bit to round to even
@@ -455,11 +455,11 @@ function Float32(x::BigInt, ::RoundingMode{:Nearest})
     elseif xsize == 1
         z = Float32(unsafe_load(x.d))
     else
-        y1 = unsafe_load(x.d, xsize)
+        y1 = unsafe_load(x.d, xsize - 1)
         n = BITS_PER_LIMB - leading_zeros(y1)
         # load first 25(1 + 23 bits of fraction + 1 for rounding)
         y = (y1 >> (n - (precision(Float32)+1))) % UInt32
-        y += (n > precision(Float32) ? 0 : unsafe_load(x.d, xsize-1) >> (BITS_PER_LIMB - (25-n))) % UInt32
+        y += (n > precision(Float32) ? 0 : unsafe_load(x.d, xsize - 2) >> (BITS_PER_LIMB - (25-n))) % UInt32
         y = (y + one(UInt32)) >> 1 # round, ties up
         y &= ~UInt32(trailing_zeros(x) == (n-25 + (xsize-1)*BITS_PER_LIMB)) # fix last bit to round to even
         d = ((n+125) % UInt32) << 23
@@ -627,7 +627,7 @@ Number of ones in the binary representation of abs(x).
 count_ones_abs(x::BigInt) = iszero(x) ? 0 : MPZ.mpn_popcount(x)
 
 # all uses of _bit_magnitude MUST ensure at callsite that `x` is strictly positive, otherwise it is UB
-_bit_magnitude(x::BigInt) = x.size * sizeof(Limb) << 3 - leading_zeros(GC.@preserve x unsafe_load(x.d, x.size))
+_bit_magnitude(x::BigInt) = x.size * sizeof(Limb) << 3 - leading_zeros(GC.@preserve x unsafe_load(x.d, x.size - 1))
 
 function exponent(x::BigInt)
     iszero(x) && throw(DomainError(x, "cannot be zero"))
@@ -805,7 +805,7 @@ function digits!(a::AbstractVector{T}, n::BigInt; base::Integer = 10) where {T<:
         if base ≤ 62
             # fast path using mpz_get_str via string(n; base)
             s = codeunits(string(n; base))
-            i, j = firstindex(a)-1, length(s)+1
+            i, j = firstindex(a)-1, length(s)
             lasti = min(lastindex(a), firstindex(a) + length(s)-1 - isnegative(n))
             while i < lasti
                 # base ≤ 36: 0-9, plus a-z for 10-35
@@ -903,15 +903,16 @@ if Limb === UInt64 === UInt
     function Base.getindex(view::UnsafeLimbView, i::Int)
         @boundscheck checkbounds(view, i)
         GC.@preserve view begin
-            limb_index = div(view.start_byte + i - 2, 8) + 1
-            byte_in_limb = (view.start_byte + i - 2) % 8
+            bytepos = view.start_byte + i
+            limb_index = div(bytepos, 8)
+            byte_in_limb = bytepos % 8
             limb = unsafe_load(view.bigint.d, limb_index)
             return UInt8((limb >> (8 * byte_in_limb)) & 0xff)
         end
     end
 
-    function Base.iterate(view::UnsafeLimbView, state::Int = 1)
-        state > view.num_bytes && return nothing
+    function Base.iterate(view::UnsafeLimbView, state::Int = 0)
+        state >= view.num_bytes && return nothing
         return @inbounds(view[state]), state + 1
     end
 
@@ -925,11 +926,11 @@ if Limb === UInt64 === UInt
         h ⊻= (s < 0)
 
         us = abs(s)
-        leading_zero_bytes = div(leading_zeros(unsafe_load(n.d, us)), 8)
+        leading_zero_bytes = div(leading_zeros(unsafe_load(n.d, us - 1)), 8)
         num_bytes = 8 * us - leading_zero_bytes
 
         # Use UnsafeLimbView for safe iterator-based access
-        limb_view = UnsafeLimbView(n, 1, num_bytes)
+        limb_view = UnsafeLimbView(n, 0, num_bytes)
         return hash_bytes(limb_view, h, HASH_SECRET)
     end
 
@@ -946,7 +947,7 @@ if Limb === UInt64 === UInt
             end
             pow = trailing_zeros(x)
             nd = Base.ndigits0z(x, 2)
-            idx = (pow >>> 6) + 1
+            idx = pow >>> 6
             shift = (pow & 63) % UInt
             upshift = BITS_PER_LIMB - shift
             asz = abs(sz)
@@ -954,7 +955,7 @@ if Limb === UInt64 === UInt
                 limb = unsafe_load(ptr, idx)
             else
                 limb1 = unsafe_load(ptr, idx)
-                limb2 = idx < asz ? unsafe_load(ptr, idx+1) : UInt(0)
+                limb2 = idx + 1 < asz ? unsafe_load(ptr, idx + 1) : UInt(0)
                 limb = limb2 << upshift | limb1 >> shift
             end
             if nd <= 1024 && nd - pow <= 53
@@ -963,12 +964,12 @@ if Limb === UInt64 === UInt
             h = hash_integer(pow, h)
 
             h ⊻= (sz < 0)
-            leading_zero_bytes = div(leading_zeros(unsafe_load(x.d, asz)), 8)
+            leading_zero_bytes = div(leading_zeros(unsafe_load(x.d, asz - 1)), 8)
             trailing_zero_bytes = div(pow, 8)
             num_bytes = 8 * asz - (leading_zero_bytes + trailing_zero_bytes)
 
             # Use UnsafeLimbView for safe iterator-based access
-            limb_view = UnsafeLimbView(x, trailing_zero_bytes + 1, num_bytes)
+            limb_view = UnsafeLimbView(x, trailing_zero_bytes, num_bytes)
             return hash_bytes(limb_view, h, HASH_SECRET)
         end
     end

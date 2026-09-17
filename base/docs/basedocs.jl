@@ -2582,7 +2582,7 @@ tuple
     getfield(value, name::Symbol, [order::Symbol], [boundscheck::Bool=true])
     getfield(value, i::Int, [order::Symbol], [boundscheck::Bool=true])
 
-Extract a field from a composite `value` by name or position.
+Extract a field from a composite `value` by name or zero-based position.
 
 Optionally, an ordering can be defined for the operation.
 If the field was declared `@atomic`, the specification is strongly recommended to be
@@ -2605,7 +2605,7 @@ julia> getfield(a, :num)
 julia> a.num
 1
 
-julia> getfield(a, 1)
+julia> getfield(a, 0)
 1
 ```
 """
@@ -2615,7 +2615,7 @@ getfield
     setfield!(value, name::Symbol, x, [order::Symbol])
     setfield!(value, i::Int, x, [order::Symbol])
 
-Assign `x` to a named field in `value` of composite type. The `value` must be
+Assign `x` to a field in `value` of composite type, selected by name or zero-based position. The `value` must be
 mutable and `x` must be a subtype of `fieldtype(typeof(value), name)`.
 Additionally, an ordering can be specified for this operation. If the field was
 declared `@atomic`, this specification is mandatory. Otherwise, if not declared
@@ -3092,7 +3092,7 @@ memoryref(::GenericMemory)
     memoryref(::GenericMemory, index::Integer)
     memoryref(::GenericMemoryRef, index::Integer)
 
-Construct a `GenericMemoryRef` from a memory object and an offset index (1-based) which
+Construct a `GenericMemoryRef` from a memory object and a zero-based element offset which
 can also be negative. This always returns an inbounds object, and will throw an
 error if that is not possible (because the index would result in a shift
 out-of-bounds of the underlying memory).

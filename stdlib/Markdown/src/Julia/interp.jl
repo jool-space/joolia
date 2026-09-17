@@ -2,8 +2,8 @@
 
 function _parse(stream::IO; greedy::Bool = true, raise::Bool = true)
     pos = position(stream)
-    ex, Δ = Meta.parse(read(stream, String), 1, greedy = greedy, raise = raise)
-    seek(stream, pos + Δ - 1)
+    ex, Δ = Meta.parse(read(stream, String), 0, greedy = greedy, raise = raise)
+    seek(stream, pos + Δ)
     return ex
 end
 

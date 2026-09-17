@@ -113,7 +113,7 @@ function show(io::IO, opt::JLOptions)
         elseif isa(v, Ptr{Ptr{UInt8}})
             v = unsafe_load_commands(v)
         end
-        print(io, f, " = ", repr(v), i < nfields ? ", " : "")
+        print(io, f, " = ", repr(v), i < nfields - 1 ? ", " : "")
     end
     print(io, ")")
 end
@@ -121,7 +121,7 @@ end
 function unsafe_load_commands(v::Ptr{Ptr{UInt8}})
     cmds = Pair{Char, String}[]
     v == C_NULL && return cmds
-    i = 1
+    i = 0
     while true
         s = unsafe_load(v, i)
         s == C_NULL && break

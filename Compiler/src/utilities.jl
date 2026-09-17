@@ -26,7 +26,7 @@ function contains_is(itr, @nospecialize(x))
     return false
 end
 
-anymap(f::Function, a::Vector{Any}) = Any[ f(a[i]) for i in 1:length(a) ]
+anymap(f::Function, a::Vector{Any}) = Any[ f(a[i]) for i in eachindex(a) ]
 
 ############
 # inlining #
@@ -51,7 +51,7 @@ function count_const_size(@nospecialize(x), count_self::Bool = true)
         # speculatively computed. If the struct can get mutated later, we
         # cannot assess how much data we might end up rooting. However, if
         # the struct is mutable only for identity, the query still works.
-        for i = 1:nfields(x)
+        for i = 0:nfields(x)-1
             if !isconst(typeof(x), i)
                 return MAX_INLINE_CONST_SIZE + 1
             end
@@ -62,7 +62,7 @@ function count_const_size(@nospecialize(x), count_self::Bool = true)
     sz = count_self ? sizeof(dt) : 0
     sz > MAX_INLINE_CONST_SIZE && return MAX_INLINE_CONST_SIZE + 1
     dtfd = DataTypeFieldDesc(dt)
-    for i = 1:Int(datatype_nfields(dt))
+    for i = 0:Int(datatype_nfields(dt))-1
         isdefined(x, i) || continue
         f = getfield(x, i)
         if !dtfd[i].isptr && datatype_pointerfree(typeof(f))
@@ -271,7 +271,7 @@ function foreach_anyssa(@specialize(f), @nospecialize(stmt))
 end
 
 # Uses of each SSA value, in compressed-sparse-row form: the uses of ssa `i` are
-# `data[offsets[i]:offsets[i+1]-1]`. Entries are use occurrences, not distinct
+# `data[offsets[i-1]:offsets[i]-1]`. Entries are use occurrences, not distinct
 # statement indices, so a statement using the same value twice lists its line
 # twice; harmless for the consumers (`isempty` and idempotent block re-enqueue).
 struct SSAUses
@@ -288,7 +288,7 @@ end
 
 @inline function getindex(uses::SSAUses, i::Int)
     offsets = uses.offsets
-    return SSAUseList(uses.data, offsets[i], offsets[i+1] - 1)
+    return SSAUseList(uses.data, offsets[i-1], offsets[i] - 1)
 end
 
 @inline isempty(l::SSAUseList) = l.stop < l.start
@@ -302,22 +302,22 @@ function find_ssavalue_uses(body::Vector{Any}, nvals::Int)
     # count uses per value
     counts = zeros(Int, nvals)
     foreach_ssavalue_use(body) do id::Int, _line::Int
-        counts[id] += 1
+        counts[id-1] += 1
     end
     # prefix-sum the counts into row pointers
     offsets = Vector{Int}(undef, nvals + 1)
-    tot = 1
-    for i = 1:nvals
+    tot = 0
+    for i = 0:nvals-1
         offsets[i] = tot
         tot += counts[i]
     end
-    offsets[nvals + 1] = tot
+    offsets[nvals] = tot
     # scatter line numbers into `data`, reusing `counts` as write cursors
-    data = Vector{Int}(undef, tot - 1)
+    data = Vector{Int}(undef, tot)
     fill!(counts, 0)
     foreach_ssavalue_use(body) do id::Int, line::Int
-        data[offsets[id] + counts[id]] = line
-        counts[id] += 1
+        data[offsets[id-1] + counts[id-1]] = line
+        counts[id-1] += 1
     end
     return SSAUses(offsets, data)
 end
@@ -325,7 +325,7 @@ end
 # Call `f(ssa_id, line)` for each SSA value used as an operand in `body`.
 function foreach_ssavalue_use(@specialize(f), body::Vector{Any})
     for line in 1:length(body)
-        e = body[line]
+        e = body[line-1]
         if isa(e, ReturnNode)
             isdefined(e, :val) || continue
             e = e.val
@@ -361,7 +361,7 @@ end
 
 function foreach_ssavalue_use(@specialize(f), e::PhiNode, line::Int)
     values = e.values
-    for i = 1:length(values)
+    for i in eachindex(values)
         isassigned(values, i) || continue
         val = values[i]
         if isa(val, SSAValue)

@@ -14,19 +14,19 @@ export StylingPass, StylingContext, SyntaxHighlightPass, RegionHighlightPass,
 
 # Context information passed to all styling passes
 struct StylingContext
-    cursor_pos::Int     # -1 when cursor is not shown (e.g. after hitting enter)
+    cursor_pos::Int     # zero-based byte insertion offset; -1 when hidden
     region_start::Int
     region_stop::Int
 end
 
-StylingContext(cursor_pos::Int) = StylingContext(cursor_pos, 0, 0)
+StylingContext(cursor_pos::Int) = StylingContext(cursor_pos, 0, -1)
 
 abstract type StylingPass end
 
 function merge_annotations(annotated_strings::Vector{<:AnnotatedString})
     isempty(annotated_strings) && return AnnotatedString("")
 
-    result = AnnotatedString(annotated_strings[1])
+    result = AnnotatedString(annotated_strings[0])
 
     for source in annotated_strings
         for ann in annotations(source)
@@ -71,9 +71,9 @@ struct RegionHighlightPass <: StylingPass end
 function (::RegionHighlightPass)(input::String, ::Any, context::StylingContext)
     result = AnnotatedString(input)
 
-    if context.region_start > 0 && context.region_stop >= context.region_start
+    if context.region_start >= 0 && context.region_stop >= context.region_start
         # Add inverse face to the region
-        # Region positions are 1-based byte positions
+        # Region positions are inclusive zero-based byte positions
         region_range = context.region_start:context.region_stop
         annotate!(result, region_range, :face, Face(inverse=true))
     end
@@ -140,7 +140,7 @@ function find_enclosing_parens(content::String, ast, cursor_pos::Int)
                 if open_ptype == ptype && open_pos <= cursor_pos <= nextind(content, pos)
                     # Cursor is inside this paren pair - keep only innermost per type
                     # Only update if this is the first pair or if it's smaller (more inner) than existing
-                    if !haskey(innermost_pairs, ptype) || (pos - open_pos) < (innermost_pairs[ptype][2] - innermost_pairs[ptype][1])
+                    if !haskey(innermost_pairs, ptype) || (pos - open_pos) < (innermost_pairs[ptype][1] - innermost_pairs[ptype][0])
                         innermost_pairs[ptype] = (open_pos, pos)
                     end
                 end

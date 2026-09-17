@@ -53,9 +53,9 @@ function CFGReachability(cfg::CFG, domtree::DomTree)
     return reachability
 end
 
-bb_unreachable(reach::CFGReachability, bb::Int) = reach.scc[bb] == 0
+bb_unreachable(reach::CFGReachability, bb::Int) = reach.scc[bb-1] == 0
 
-bb_in_irreducible_loop(reach::CFGReachability, bb::Int) = reach.irreducible[bb]
+bb_in_irreducible_loop(reach::CFGReachability, bb::Int) = reach.irreducible[bb-1]
 
 # Returns `true` if a node is 'rooted' as reachable, i.e. it has an incoming
 # edge from a resolved SCC other than its own (or it is BasicBlock #1).
@@ -65,10 +65,10 @@ bb_in_irreducible_loop(reach::CFGReachability, bb::Int) = reach.irreducible[bb]
 function _bb_externally_reachable(reach::CFGReachability, cfg::CFG, bb::Int; filter)
     (; scc) = reach
     bb == 1 && return true
-    for pred in cfg.blocks[bb].preds
-        scc[pred] <= 0 && continue
+    for pred in cfg.blocks[bb-1].preds
+        scc[pred-1] <= 0 && continue
         !filter(pred, bb) && continue
-        @assert scc[pred] != scc[bb]
+        @assert scc[pred-1] != scc[bb-1]
         return true
     end
     return false
@@ -92,7 +92,7 @@ function tarjan!(reach::CFGReachability, cfg::CFG; root::Int=1,
     filter = (from::Int,to::Int)->true,
 )
     (; scc, irreducible) = reach
-    scc[root] != 0 && return scc
+    scc[root-1] != 0 && return scc
     live = _bb_externally_reachable(reach, cfg, root; filter)
 
     # the original algorithm has a separate stack and worklist (unrelated to `reach._worklist`)
@@ -106,8 +106,8 @@ function tarjan!(reach::CFGReachability, cfg::CFG; root::Int=1,
         1,    # minpreorder
         live, # live
     ))
-    scc[root] = -1
-    cursor = length(stack)
+    scc[root-1] = -1
+    cursor = length(stack)-1
 
     # worklist length before any new unreachable nodes are added
     worklist_len = length(reach._worklist)
@@ -117,35 +117,35 @@ function tarjan!(reach::CFGReachability, cfg::CFG; root::Int=1,
     while true
         (; v, child, minpreorder, live) = item = stack[cursor]
 
-        bb = cfg.blocks[v]
+        bb = cfg.blocks[v-1]
         if child <= length(bb.succs) # queue next child
             stack[cursor] = item = SCCStackItem(item; child=child+1)
-            succ = bb.succs[child]
+            succ = bb.succs[child-1]
 
             # ignore any edges that don't pass the filter
             !filter(convert(Int, v), succ) && continue
 
-            if scc[succ] < 0
+            if scc[succ-1] < 0
                 # next child is already in DFS tree
-                child_preorder = stack[-scc[succ]].preorder
+                child_preorder = stack[-scc[succ-1]-1].preorder
 
                 # only need to update `minpreorder` for `v`
                 stack[cursor] = item = SCCStackItem(item;
                                                     minpreorder=min(minpreorder, child_preorder))
-            elseif scc[succ] == 0
+            elseif scc[succ-1] == 0
                 # next child is a new element in DFS tree
                 preorder_id += 1
                 live = live || _bb_externally_reachable(reach, cfg, succ; filter)
                 push!(stack, SCCStackItem(
-                    succ,        # v
+                     succ,        # v
                     1,           # child
-                    cursor,      # parent (index in stack)
+                    cursor + 1,  # parent (index in stack)
                     preorder_id, # preorder
                     preorder_id, # minpreorder
                     live,        # live
                 ))
-                scc[succ] = -length(stack)
-                cursor = length(stack)
+                scc[succ-1] = -length(stack)
+                cursor = length(stack)-1
             else end # next child is a resolved SCC (do nothing)
         else # v's children are processed, finalize v
             if item.minpreorder == item.preorder
@@ -153,29 +153,29 @@ function tarjan!(reach::CFGReachability, cfg::CFG; root::Int=1,
                 while true
                     item = pop!(stack)
                     if live
-                        scc[item.v] = v
+                        scc[item.v-1] = v
                         scan_subgraph!(reach, cfg, convert(Int, item.v),
-                            #= filter =# (pred,x)->(filter(pred, x) && scc[x] > typemax(Int)÷2),
-                            #= action =# (x)->(scc[x] -= typemax(Int)÷2;),
+                            #= filter =# (pred,x)->(filter(pred, x) && scc[x-1] > typemax(Int)÷2),
+                            #= action =# (x)->(scc[x-1] -= typemax(Int)÷2;),
                         )
                     else # this offset marks a node as 'maybe-dead'
-                        scc[item.v] = v + typemax(Int)÷2
+                        scc[item.v-1] = v + typemax(Int)÷2
                         push!(reach._worklist, item.v)
                     end
-                    irreducible[item.v] = !has_one_element
+                    irreducible[item.v-1] = !has_one_element
                     (item.v == v) && break
                 end
                 item.parent == 0 && break # all done
             elseif live
-                stack[item.parent] = SCCStackItem(stack[item.parent]; live=true)
+                stack[item.parent-1] = SCCStackItem(stack[item.parent-1]; live=true)
             end
 
             # update `minpreorder` for parent
-            parent = stack[item.parent]
+            parent = stack[item.parent-1]
             minpreorder = min(parent.minpreorder, item.minpreorder)
-            stack[item.parent] = SCCStackItem(parent; minpreorder)
+            stack[item.parent-1] = SCCStackItem(parent; minpreorder)
 
-            cursor = item.parent
+            cursor = item.parent - 1
         end
     end
 
@@ -183,12 +183,12 @@ function tarjan!(reach::CFGReachability, cfg::CFG; root::Int=1,
 
     # filter the worklist, leaving any nodes not proven to be reachable from BB #1
     n_popped = 0
-    for i = (worklist_len + 1):length(worklist)
+    for i = worklist_len:length(worklist)-1
         @assert worklist[i] != 1
-        @assert scc[worklist[i]] > 0
-        if scc[worklist[i]] > typemax(Int)÷2
+        @assert scc[worklist[i]-1] > 0
+        if scc[worklist[i]-1] > typemax(Int)÷2
             # node is unreachable, enqueue it
-            scc[worklist[i]] = 0
+            scc[worklist[i]-1] = 0
             worklist[i - n_popped] = worklist[i]
         else
             n_popped += 1
@@ -212,7 +212,7 @@ function scan_subgraph!(reach::CFGReachability, cfg::CFG, root::Int, filter, act
     push!(worklist, root)
     while length(worklist) > start_len
         v = pop!(worklist)
-        for succ in cfg.blocks[v].succs
+        for succ in cfg.blocks[v-1].succs
             !filter(v, succ) && continue
             action(succ)
             push!(worklist, succ)
@@ -222,7 +222,7 @@ end
 
 function enqueue_if_unreachable!(reach::CFGReachability, cfg::CFG, bb::Int)
     (; domtree, scc) = reach
-    @assert scc[bb] != 0
+    @assert scc[bb-1] != 0
 
     bb == 1 && return false
     if bb_in_irreducible_loop(reach, bb)
@@ -233,11 +233,11 @@ function enqueue_if_unreachable!(reach::CFGReachability, cfg::CFG, bb::Int)
         # (very important optimization, since it means reducible CFGs will have no SCCs)
         filter = (from::Int, to::Int)->!dominates(domtree, to, from)
 
-        scc′ = scc[bb]
-        scc[bb] = 0
+        scc′ = scc[bb-1]
+        scc[bb-1] = 0
         scan_subgraph!(reach, cfg, bb, # set this SCC to 0
-            #= filter =# (pred,x)->(filter(pred, x) && scc[x] == scc′),
-            #= action =# (x)->(scc[x] = 0;),
+            #= filter =# (pred,x)->(filter(pred, x) && scc[x-1] == scc′),
+            #= action =# (x)->(scc[x-1] = 0;),
         )
 
         # re-compute the SCC's for this portion of the CFG, adding any freshly
@@ -246,20 +246,20 @@ function enqueue_if_unreachable!(reach::CFGReachability, cfg::CFG, bb::Int)
     else
         # target is a reducible CFG node
         # this node lives iff it still has an incoming forward edge
-        for pred in cfg.blocks[bb].preds
+        for pred in cfg.blocks[bb-1].preds
             # virtual edge does not count - if the enter is dead, that edge is
             # not taken.
             pred == 0 && continue
             !dominates(domtree, bb, pred) && return false # forward-edge
         end
-        scc[bb] = 0
+        scc[bb-1] = 0
         push!(reach._worklist, bb)
         return true
     end
 end
 
 function kill_cfg_edge!(cfg::CFG, from::Int, to::Int)
-    preds, succs = cfg.blocks[to].preds, cfg.blocks[from].succs
+    preds, succs = cfg.blocks[to-1].preds, cfg.blocks[from-1].succs
     deleteat!(preds, findfirst(x::Int->x==from, preds)::Int)
     deleteat!(succs, findfirst(x::Int->x==to, succs)::Int)
     return nothing
@@ -276,8 +276,8 @@ Calls:
 """
 function kill_edge!(reach::CFGReachability, cfg::CFG, from::Int, to::Int,
                     edge_callback=nothing, block_callback=nothing)
-    (reach.scc[from] == 0) && return # source is already unreachable
-    @assert reach.scc[to] != 0
+    (reach.scc[from-1] == 0) && return # source is already unreachable
+    @assert reach.scc[to-1] != 0
 
     # delete (from → to) edge
     kill_cfg_edge!(cfg, from, to)
@@ -291,23 +291,23 @@ function kill_edge!(reach::CFGReachability, cfg::CFG, from::Int, to::Int,
         node = convert(Int, pop!(reach._worklist))
 
         # already marked unreachable, just need to notify
-        @assert reach.scc[node] == 0 && node != 1
+        @assert reach.scc[node-1] == 0 && node != 1
         if block_callback !== nothing
             block_callback(node)
         end
 
-        for succ in cfg.blocks[node].succs
+        for succ in cfg.blocks[node-1].succs
             # delete (node → succ) edge
-            preds = cfg.blocks[succ].preds
+            preds = cfg.blocks[succ-1].preds
             deleteat!(preds, findfirst(x::Int->x==node, preds)::Int)
 
             # check for newly unreachable target
-            reach.scc[succ] == 0 && continue
+            reach.scc[succ-1] == 0 && continue
             enqueued = enqueue_if_unreachable!(reach, cfg, succ)
             if !enqueued && edge_callback !== nothing
                 edge_callback(node, succ)
             end
         end
-        empty!(cfg.blocks[node].succs)
+        empty!(cfg.blocks[node-1].succs)
     end
 end

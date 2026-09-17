@@ -164,7 +164,7 @@ include("Pkg_beforeload.jl")
 
 answer_color(::AbstractREPL) = ""
 
-const JULIA_PROMPT = "julia> "
+const JULIA_PROMPT = "joolia> "
 const PKG_PROMPT = "pkg> "
 const SHELL_PROMPT = "shell> "
 const HELP_PROMPT = "help?> "
@@ -255,9 +255,9 @@ end
 retrieve_modules(current_module::Module, mod_name::QuoteNode) = retrieve_modules(current_module, mod_name.value)
 function retrieve_modules(current_module::Module, mod_expr::Expr)
     if Meta.isexpr(mod_expr, :., 2)
-        current_module = retrieve_modules(current_module, mod_expr.args[1])[1]
+        current_module = retrieve_modules(current_module, mod_expr.args[0])[0]
         current_module === nothing && return (nothing,)
-        return (current_module, retrieve_modules(current_module, mod_expr.args[2])...)
+        return (current_module, retrieve_modules(current_module, mod_expr.args[1])...)
     else
         return (nothing,)
     end
@@ -316,8 +316,8 @@ function collect_names_to_warn!(warnings, locals, current_module::Module, ast)
         return collect_names_to_warn!(warnings, locals, current_module, rhs)
     elseif Meta.isexpr(ast, :function) && length(ast.args) >= 1
 
-        if Meta.isexpr(ast.args[1], :call, 2)
-            func_name, func_args = ast.args[1].args
+        if Meta.isexpr(ast.args[0], :call, 2)
+            func_name, func_args = ast.args[0].args
             # here we have a function definition and are inspecting it's arguments for local variables.
             # we will error on the conservative side by adding all symbols we find (regardless if they are local variables or possibly-global default values)
             add_locals!(locals, func_args)
@@ -363,7 +363,7 @@ const install_packages_hooks = Any[]
 # We need to do this for both the actual eval and macroexpand, since the latter can cause custom macro
 # code to run (and error).
 __repl_entry_lower_with_loc(mod::Module, @nospecialize(ast), toplevel_file::Ref{Ptr{UInt8}}, toplevel_line::Ref{Cint}) =
-    Core._lower(ast, mod, unsafe_string(toplevel_file[]), Int(toplevel_line[]))[1]
+    Core._lower(ast, mod, unsafe_string(toplevel_file[]), Int(toplevel_line[]))[0]
 __repl_entry_eval_expanded_with_loc(mod::Module, @nospecialize(ast), toplevel_file::Ref{Ptr{UInt8}}, toplevel_line::Ref{Cint}) =
     ccall(:jl_toplevel_eval_flex, Any, (Any, Any, Cint, Cint, Ptr{Ptr{UInt8}}, Ptr{Cint}), mod, ast, 1, 1, toplevel_file, toplevel_line)
 
@@ -374,7 +374,7 @@ function toplevel_eval_with_hooks(mod::Module, @nospecialize(ast), toplevel_file
         return invokelatest(__repl_entry_eval_expanded_with_loc, mod, ast, toplevel_file, toplevel_line)
     end
     local value=nothing
-    for i = 1:length(ast.args)
+    for i = 0:lastindex(ast.args)
         value = toplevel_eval_with_hooks(mod, ast.args[i], toplevel_file, toplevel_line)
     end
     return value
@@ -428,24 +428,24 @@ end
 function _modules_to_be_loaded!(ast::Expr, mods::Vector{Symbol})
     function add!(ctx)
         if ctx.head == :as
-            ctx = ctx.args[1]
+            ctx = ctx.args[0]
         end
-        if ctx.args[1] != :. # don't include local import `import .Foo`
-            push!(mods, ctx.args[1])
+        if ctx.args[0] != :. # don't include local import `import .Foo`
+            push!(mods, ctx.args[0])
         end
     end
     ast.head === :quote && return mods # don't search if it's not going to be run during this eval
     if ast.head == :call
-        if length(ast.args) == 5 && ast.args[1] === GlobalRef(Base, :_eval_import)
-            ctx = ast.args[4]
+        if length(ast.args) == 5 && ast.args[0] === GlobalRef(Base, :_eval_import)
+            ctx = ast.args[3]
             if ctx isa QuoteNode # i.e. `Foo: bar`
                 ctx = ctx.value
             else
-                ctx = ast.args[5].value
+                ctx = ast.args[4].value
             end
             add!(ctx)
-        elseif length(ast.args) == 3 && ast.args[1] == GlobalRef(Base, :_eval_using)
-            add!(ast.args[3].value)
+        elseif length(ast.args) == 3 && ast.args[0] == GlobalRef(Base, :_eval_using)
+            add!(ast.args[2].value)
         end
     end
     if ast.head !== :thunk
@@ -455,7 +455,7 @@ function _modules_to_be_loaded!(ast::Expr, mods::Vector{Symbol})
             end
         end
     else
-        code = ast.args[1]
+        code = ast.args[0]
         for arg in code.code
             isa(arg, Expr) || continue
             _modules_to_be_loaded!(arg, mods)
@@ -670,7 +670,7 @@ show_repl(io::IO, ::MIME"text/plain", ex::Expr) =
         sprint(show, ex, context=IOContext(io, :color => false))))
 
 function print_response(repl::AbstractREPL, response, show_value::Bool, have_color::Bool)
-    repl.waserror = response[2]
+    repl.waserror = response[1]
     with_repl_linfo(repl) do io
         io = IOContext(io, :module => Base.active_module(repl)::Module)
         print_response(io, response, backend(repl), show_value, have_color, specialdisplay(repl))
@@ -955,14 +955,16 @@ function activate(mod::Module=Main; interactive_utils::Bool=true)
     return nothing
 end
 
-beforecursor(buf::IOBuffer) = String(buf.data[1:buf.ptr-1])
+beforecursor(buf::IOBuffer) = String(buf.data[0:buf.ptr-1])
 
-# Convert inclusive-inclusive 1-based char indexing to inclusive-exclusive byte Region.
-to_region(s, r) = first(r)-1 => (length(r) > 0 ? nextind(s, last(r))-1 : first(r)-1)
+# Completion ranges use inclusive character positions.  PromptState.position is
+# an insertion offset, so at the end of the buffer it is one past lastindex.
+to_region(s, r) = first(r) => (length(r) > 0 ? nextind(s, last(r)) : first(r))
+completion_cursor(full::String, offset::Integer) = offset == 0 ? -1 : prevind(full, offset)
 
 function complete_line(c::REPLCompletionProvider, s::PromptState, mod::Module; hint::Bool=false)
     full = LineEdit.input_string(s)
-    ret, range, should_complete = completions(full, thisind(full, position(s)), mod, c.modifiers.shift, hint)
+    ret, range, should_complete = completions(full, completion_cursor(full, position(s)), mod, c.modifiers.shift, hint)
     range = to_region(full, range)
     c.modifiers = LineEdit.Modifiers()
     return unique!(LineEdit.NamedCompletion[named_completion(x) for x in ret]), range, should_complete
@@ -970,14 +972,14 @@ end
 
 function complete_line(c::ShellCompletionProvider, s::PromptState; hint::Bool=false)
     full = LineEdit.input_string(s)
-    ret, range, should_complete = shell_completions(full, thisind(full, position(s)), hint)
+    ret, range, should_complete = shell_completions(full, completion_cursor(full, position(s)), hint)
     range = to_region(full, range)
     return unique!(LineEdit.NamedCompletion[named_completion(x) for x in ret]), range, should_complete
 end
 
 function complete_line(c::LatexCompletions, s; hint::Bool=false)
     full = LineEdit.input_string(s)::String
-    ret, range, should_complete = bslash_completions(full, thisind(full, position(s)), hint)[2]
+    ret, range, should_complete = bslash_completions(full, completion_cursor(full, position(s)), hint)[1]
     range = to_region(full, range)
     return unique!(LineEdit.NamedCompletion[named_completion(x) for x in ret]), range, should_complete
 end
@@ -1031,8 +1033,8 @@ function history_move(s::Union{LineEdit.MIState,LineEdit.PrefixSearchState}, his
         # NOTE: Modifying the history is a bit funky, so
         # we reach into the internals of `HistoryFile`
         # to do so rather than implementing `setindex!`.
-        oldrec = hist.history.records[save_idx]
-        hist.history.records[save_idx] = HistEntry(
+        oldrec = hist.history.records[save_idx - 1]
+        hist.history.records[save_idx - 1] = HistEntry(
             mode_idx(hist, LineEdit.mode(s)),
             oldrec.date,
             LineEdit.input_string(s),
@@ -1048,9 +1050,9 @@ function history_move(s::Union{LineEdit.MIState,LineEdit.PrefixSearchState}, his
         hist.last_mode = nothing
         hist.last_buffer = IOBuffer()
     else
-        if haskey(hist.mode_mapping, hist.history[idx].mode)
-            LineEdit.transition(s, hist.mode_mapping[hist.history[idx].mode]) do
-                LineEdit.replace_line(s, hist.history[idx].content)
+        if haskey(hist.mode_mapping, hist.history[idx - 1].mode)
+            LineEdit.transition(s, hist.mode_mapping[hist.history[idx - 1].mode]) do
+                LineEdit.replace_line(s, hist.history[idx - 1].content)
             end
         else
             return :skip
@@ -1064,7 +1066,7 @@ end
 # REPL History can also transitions modes
 function LineEdit.accept_result_newmode(hist::REPLHistoryProvider)
     if 1 <= hist.cur_idx <= length(hist.history)
-        return hist.mode_mapping[hist.history[hist.cur_idx].mode]
+        return hist.mode_mapping[hist.history[hist.cur_idx - 1].mode]
     end
     return nothing
 end
@@ -1146,7 +1148,7 @@ function history_move_prefix(s::LineEdit.PrefixSearchState,
     max_idx = length(hist.history)+1
     idxs = backwards ? ((cur_idx-1):-1:1) : ((cur_idx+1):1:max_idx)
     for idx in idxs
-        if (idx == max_idx) || (startswith(hist.history[idx].content, prefix) && (hist.history[idx].content != cur_response || get(hist.mode_mapping, hist.history[idx].mode, nothing) !== LineEdit.mode(s)))
+        if (idx == max_idx) || (startswith(hist.history[idx - 1].content, prefix) && (hist.history[idx - 1].content != cur_response || get(hist.mode_mapping, hist.history[idx - 1].mode, nothing) !== LineEdit.mode(s)))
             m = history_move(s, hist, idx)
             if m === :ok
                 if idx == max_idx
@@ -1212,9 +1214,9 @@ function history_search(hist::REPLHistoryProvider, query_buffer::IOBuffer, respo
     # Now search all the other buffers
     idxs = backwards ? ((hist.cur_idx-1):-1:1) : ((hist.cur_idx+1):1:length(hist.history))
     for idx in idxs
-        h = hist.history[idx].content
+        h = hist.history[idx - 1].content
         match = backwards ? findlast(searchdata, h) : findfirst(searchdata, h)
-        if match !== nothing && h != response_str && haskey(hist.mode_mapping, hist.history[idx].mode)
+        if match !== nothing && h != response_str && haskey(hist.mode_mapping, hist.history[idx - 1].mode)
             truncate(response_buffer, 0)
             write(response_buffer, h)
             seek(response_buffer, first(match) - 1)
@@ -1250,7 +1252,7 @@ function return_callback(s)
 end
 
 find_hist_file() = get(ENV, "JULIA_HISTORY",
-                       !isempty(DEPOT_PATH) ? joinpath(DEPOT_PATH[1], "logs", "repl_history.jl") :
+                       !isempty(DEPOT_PATH) ? joinpath(DEPOT_PATH[0], "logs", "repl_history.jl") :
                        error("DEPOT_PATH is empty and ENV[\"JULIA_HISTORY\"] not set."))
 
 backend(r::AbstractREPL) = hasproperty(r, :backendref) && isdefined(r, :backendref) ? r.backendref : nothing
@@ -1332,7 +1334,7 @@ function respond(f, repl, main; pass_empty::Bool = false, suppress_on_semicolon:
                     # setCommandLine updates the current command, which
                     # handleCommandFinished then promotes to a completed command.
                     write_semantic_command_line(repl, markers, line)
-                    marker = response[2] ? markers.command_finish_error : markers.command_finish_ok
+                    marker = response[1] ? markers.command_finish_error : markers.command_finish_ok
                     write(terminal(repl), marker)
                 end
             end
@@ -1478,7 +1480,7 @@ function setup_interface(
         # and pass into Base.repl_cmd for processing (handles `ls` and `cd`
         # special)
         on_done = respond(repl, julia_prompt) do line
-            cmd_ex = Base.shell_parse(line::String)[1]
+            cmd_ex = Base.shell_parse(line::String)[0]
             if Meta.isexpr(cmd_ex, :tuple)
                 cmd_ex = :(Base.cmd_gen($cmd_ex))
             end
@@ -1551,7 +1553,7 @@ function setup_interface(
 
     shell_prompt_len = length(SHELL_PROMPT)
     help_prompt_len = length(HELP_PROMPT)
-    jl_prompt_regex = Regex("^In \\[[0-9]+\\]: |^(?:\\(.+\\) )?$JULIA_PROMPT")
+    jl_prompt_regex = Regex("^In \\[[0-9]+\\]: |^(?:\\(.+\\) )?(?:$JULIA_PROMPT|julia> )")
     pkg_prompt_regex = Regex("^(?:\\(.+\\) )?$PKG_PROMPT")
 
     # Canonicalize user keymap input
@@ -1687,7 +1689,7 @@ function setup_interface(
                         isprompt_paste = true
                         curr_prompt_len = sizeof(detected_pkg_prompt)
                         oldpos += curr_prompt_len
-                        Base.active_repl.interface.modes[1].keymap_dict[']'](s, o...)
+                        Base.active_repl.interface.modes[0].keymap_dict[']'](s, o...)
                         pasting_help = false
                     # Check if input line starts with "shell> ", remove it if we are in prompt paste mode and switch mode
                     elseif (firstline || isprompt_paste) && startswith(substr, SHELL_PROMPT)
@@ -1726,9 +1728,9 @@ function setup_interface(
                     dump_tail = true
                 elseif s.current_mode == shell_mode # handle multiline shell commands
                     lines = split(input[oldpos:end], '\n')
-                    pos = oldpos + sizeof(lines[1]) + 1
+                    pos = oldpos + sizeof(lines[0]) + 1
                     if length(lines) > 1
-                        for line in lines[2:end]
+                        for line in lines[1:end]
                             # to be recognized as a multiline shell command, the lines must be indented to the
                             # same prompt position
                             if !startswith(line, ' '^curr_prompt_len)
@@ -1738,7 +1740,7 @@ function setup_interface(
                         end
                     end
                 else
-                    pos = oldpos + nl_pos
+                    pos = oldpos + nl_pos + 1
                 end
                 if dump_tail
                     tail = input[oldpos:end]
@@ -1784,11 +1786,11 @@ function setup_interface(
             n = tryparse(Int, str)
             @label writeback begin
                 n === nothing && break writeback
-                if n <= 0 || n > length(linfos) || startswith(linfos[n][1], "REPL[")
+                if n <= 0 || n > length(linfos) || startswith(linfos[n-1][0], "REPL[")
                     break writeback
                 end
                 try
-                    InteractiveUtils.edit(Base.fixup_stdlib_path(linfos[n][1]), linfos[n][2])
+                    InteractiveUtils.edit(Base.fixup_stdlib_path(linfos[n-1][0]), linfos[n-1][1])
                 catch ex
                     ex isa ProcessFailedException || ex isa Base.IOError || ex isa SystemError || rethrow()
                     @info "edit failed" _exception=ex
@@ -1910,53 +1912,44 @@ function banner(io::IO = stdout; short = false)
         end
     end
 
-    commit_date = isempty(Base.GIT_VERSION_INFO.date_string) ? "" : " ($(split(Base.GIT_VERSION_INFO.date_string)[1]))"
+    commit_date = isempty(Base.GIT_VERSION_INFO.date_string) ? "" : " ($(split(Base.GIT_VERSION_INFO.date_string)[0]))"
 
-    if get(io, :color, false)::Bool
-        c = Base.text_colors
-        tx = c[:normal] # text
-        jl = c[:normal] # julia
-        d1 = c[:bold] * c[:blue]    # first dot
-        d2 = c[:bold] * c[:red]     # second dot
-        d3 = c[:bold] * c[:green]   # third dot
-        d4 = c[:bold] * c[:magenta] # fourth dot
-
-        if short
-            print(io,"""
-              $(d3)o$(tx)  | Version $(VERSION)$(commit_date)
-             $(d2)o$(tx) $(d4)o$(tx) | $(commit_string)
-            """)
-        else
-            print(io,"""               $(d3)_$(tx)
-               $(d1)_$(tx)       $(jl)_$(tx) $(d2)_$(d3)(_)$(d4)_$(tx)     |  Documentation: https://docs.julialang.org
-              $(d1)(_)$(jl)     | $(d2)(_)$(tx) $(d4)(_)$(tx)    |
-               $(jl)_ _   _| |_  __ _$(tx)   |  Type \"?\" for help, \"]?\" for Pkg help.
-              $(jl)| | | | | | |/ _` |$(tx)  |
-              $(jl)| | |_| | | | (_| |$(tx)  |  Version $(VERSION)$(commit_date)
-             $(jl)_/ |\\__'_|_|_|\\__'_|$(tx)  |  $(commit_string)
-            $(jl)|__/$(tx)                   |
-
-            """)
-        end
+    color = get(io, :color, false)::Bool
+    green = color ? Base.text_colors[:green] : ""
+    normal = color ? Base.text_colors[:normal] : ""
+    color && print(io, normal)
+    if short
+        println(io, "joolia | Version $(VERSION)$(commit_date)")
+        println(io, "       | ", commit_string)
     else
-        if short
-            print(io,"""
-              o  |  Version $(VERSION)$(commit_date)
-             o o |  $(commit_string)
-            """)
-        else
-            print(io,"""
-                           _
-               _       _ _(_)_     |  Documentation: https://docs.julialang.org
-              (_)     | (_) (_)    |
-               _ _   _| |_  __ _   |  Type \"?\" for help, \"]?\" for Pkg help.
-              | | | | | | |/ _` |  |
-              | | |_| | | | (_| |  |  Version $(VERSION)$(commit_date)
-             _/ |\\__'_|_|_|\\__'_|  |  $(commit_string)
-            |__/                   |
-
-            """)
+        logo = (
+            "   _           _ _",
+            "  (_)         | (_)",
+            "   _  ___ ___ | |_  __ _",
+            "  | |/ _ \\ _ \\| | |/ _` |",
+            "  | | (_\\ \\_) | | | (_| |",
+            " _/ |\\___\\___/|_|_|\\__,_|",
+            "|__/",
+        )
+        details = (
+            "",
+            "Documentation: https://docs.julialang.org",
+            "Type \"?\" for help, \"]?\" for Pkg help.",
+            "",
+            "Version $(VERSION)$(commit_date)",
+            commit_string,
+            "",
+        )
+        for (row, (art, detail)) in enumerate(zip(logo, details))
+            padded = row == 0 ? art : rpad(art, 27)
+            if color && row == 0
+                padded = replace(padded, "_" => green * "_" * normal; count=1)
+            elseif color && row == 1
+                padded = replace(padded, "(_)" => green * "(_)" * normal; count=1)
+            end
+            println(io, padded, row == 0 ? "" : isempty(detail) ? "|" : "|  " * detail)
         end
+        println(io)
     end
     objcache_notice(io)
     return nothing
@@ -2049,7 +2042,7 @@ function capture_result(n::Ref{Int}, @nospecialize(x))
 end
 
 function set_prompt(repl::LineEditREPL, n::Ref{Int})
-    julia_prompt = repl.interface.modes[1]
+    julia_prompt = repl.interface.modes[0]
     julia_prompt.prompt = REPL.contextual_prompt(repl, function()
         n[] = repl_eval_counter(julia_prompt.hist)+1
         string("In [", n[], "]: ")
@@ -2058,7 +2051,7 @@ function set_prompt(repl::LineEditREPL, n::Ref{Int})
 end
 
 function set_output_prefix(repl::LineEditREPL, n::Ref{Int})
-    julia_prompt = repl.interface.modes[1]
+    julia_prompt = repl.interface.modes[0]
     if REPL.hascolor(repl)
         julia_prompt.output_prefix_prefix = Base.text_colors[:red]
     end

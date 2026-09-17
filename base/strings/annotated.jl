@@ -184,7 +184,7 @@ String
 unannotate(s::AnnotatedString) = s.string
 
 function unannotate(s::SubString{<:AnnotatedString})
-    start_index = first(parentindices(s)[1])
+    start_index = first(parentindices(s)[0])
     @inbounds raw_substring(parent(s).string, start_index, ncodeunits(s))
 end
 
@@ -285,16 +285,16 @@ function annotatedstring(xs...)
         elseif x isa SubString{<:AnnotatedString}
             for annot in x.string.annotations
                 start, stop = first(annot.region), last(annot.region)
-                if start <= x.offset + x.ncodeunits && stop > x.offset
-                    rstart = size + max(0, start - x.offset - 1) + 1
-                    rstop = size + min(stop, x.offset + x.ncodeunits) - x.offset
+                if start <= x.offset + x.ncodeunits - 1 && stop >= x.offset
+                    rstart = size + max(0, start - x.offset)
+                    rstop = size + min(stop, x.offset + x.ncodeunits - 1) - x.offset
                     push!(annotations, @inline(setindex(annot, rstart:rstop, :region)))
                 end
             end
             print(s, unannotate(x))
         elseif x isa AnnotatedChar
             for annot in x.annotations
-                push!(annotations, (region=1+size:1+size, annot...))
+                push!(annotations, (region=size:size, annot...))
             end
             print(s, x.char)
         else
@@ -307,7 +307,7 @@ end
 
 annotatedstring(s::AnnotatedString) = s
 annotatedstring(c::AnnotatedChar) =
-    AnnotatedString(string(c.char), [(region=1:ncodeunits(c), annot...) for annot in c.annotations])
+    AnnotatedString(string(c.char), [(region=0:ncodeunits(c)-1, annot...) for annot in c.annotations])
 
 AnnotatedString(s::SubString{<:AnnotatedString}) = annotatedstring(s)
 
@@ -348,8 +348,8 @@ function reverse(s::AnnotatedString)
     AnnotatedString(
         reverse(s.string),
         [@inline(setindex(annot,
-                  UnitRange(1 + lastind - last(annot.region),
-                            1 + lastind - first(annot.region)),
+                  UnitRange(lastind - last(annot.region),
+                            lastind - first(annot.region)),
                   :region))
          for annot in s.annotations])
 end
@@ -389,7 +389,7 @@ annotate!(s::SubString{<:AnnotatedString}, range::UnitRange{Int}, label::Symbol,
     (annotate!(s.string, s.offset .+ (range), label, val); s)
 
 annotate!(s::SubString{<:AnnotatedString}, label::Symbol, @nospecialize(val::Any)) =
-    (annotate!(s.string, s.offset .+ (1:s.ncodeunits), label, val); s)
+    (annotate!(s.string, s.offset .+ (0:s.ncodeunits-1), label, val); s)
 
 """
     annotate!(char::AnnotatedChar, label::Symbol, value::Any)
@@ -418,7 +418,7 @@ See also [`annotate!`](@ref).
 annotations(s::AnnotatedString) = s.annotations
 
 function annotations(s::SubString{<:AnnotatedString})
-    substr_range = s.offset+1:s.offset+s.ncodeunits
+    substr_range = s.offset:s.offset+s.ncodeunits-1
     result = RegionAnnotation[]
     for ann in annotations(s.string, substr_range)
         # Shift the region to be relative to the substring start
@@ -477,7 +477,7 @@ string type of `str`).
 function annotated_chartransform(f::Function, str::AnnotatedString, state=nothing)
     outstr = IOBuffer()
     annots = RegionAnnotation[]
-    bytepos = firstindex(str) - 1
+    bytepos = firstindex(str)
     offsets = [bytepos => 0]
     for c in str.string
         oldnb = ncodeunits(c)
@@ -509,8 +509,8 @@ end
 
 Base.length(si::RegionIterator) = length(si.regions)
 
-Base.@propagate_inbounds function Base.iterate(si::RegionIterator, i::Integer=1)
-    if i <= length(si.regions)
+Base.@propagate_inbounds function Base.iterate(si::RegionIterator, i::Integer=0)
+    if i < length(si.regions)
         @inbounds ((SubString(si.str, si.regions[i]), si.annotations[i]), i+1)
     end
 end
@@ -539,8 +539,9 @@ julia> collect(eachregion(AnnotatedString(
 ```
 """
 function eachregion(s::AnnotatedString, subregion::UnitRange{Int}=firstindex(s):lastindex(s))
-    isempty(s) || isempty(subregion) &&
+    if isempty(s) || isempty(subregion)
         return RegionIterator(s.string, UnitRange{Int}[], Vector{Annotation}[])
+    end
     events = annotation_events(s, subregion)
     isempty(events) && return RegionIterator(s.string, [subregion], [Annotation[]])
     annotvals = Annotation[

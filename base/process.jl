@@ -88,7 +88,7 @@ const SpawnIO  = Union{IO, IOServer, RawFD, OS_HANDLE, SyncCloseFD} # internal c
 const SpawnIOs = Memory{SpawnIO} # convenience name for readability (used for dispatch also to clearly distinguish from Vector{Redirectable})
 
 function as_cpumask(cpus::Vector{UInt16})
-    n = max(Int(maximum(cpus)), Int(ccall(:uv_cpumask_size, Cint, ())))
+    n = max(Int(maximum(cpus)) + 1, Int(ccall(:uv_cpumask_size, Cint, ())))
     cpumask = zeros(Bool, n)
     for i in cpus
         cpumask[i] = true
@@ -174,7 +174,7 @@ end
 # optimization: we can spawn `Cmd` directly without allocating the ProcessChain
 function _spawn(cmd::Cmd, stdios::SpawnIOs, tok::MaybeToken=default_cancel_token())
     isempty(cmd.exec) && throw(ArgumentError("cannot spawn empty command"))
-    return _spawn_primitive(cmd.exec[1], cmd, stdios, tok)
+    return _spawn_primitive(cmd.exec[0], cmd, stdios, tok)
 end
 
 # assume that having a ProcessChain means that the stdio are setup
@@ -184,7 +184,7 @@ end
 
 # helper function for making a copy of a SpawnIOs, with replacement
 function _stdio_copy(stdios::SpawnIOs, fd::Int, @nospecialize replace)
-    nio = max(fd, length(stdios))
+    nio = max(fd + 1, length(stdios))
     new = SpawnIOs(undef, nio)
     copyto!(fill!(new, devnull), stdios)
     new[fd] = replace
@@ -192,7 +192,7 @@ function _stdio_copy(stdios::SpawnIOs, fd::Int, @nospecialize replace)
 end
 
 function _spawn(redirect::CmdRedirect, stdios::SpawnIOs, tok::MaybeToken=default_cancel_token())
-    fdnum = redirect.stream_no + 1
+    fdnum = redirect.stream_no
     io, close_io = setup_stdio(redirect.handle, redirect.readable)
     try
         stdios = _stdio_copy(stdios, fdnum, io)
@@ -203,7 +203,7 @@ function _spawn(redirect::CmdRedirect, stdios::SpawnIOs, tok::MaybeToken=default
 end
 
 function _spawn(redirect::CmdRedirect, stdios::SpawnIOs, chain::ProcessChain, tok::MaybeToken)
-    fdnum = redirect.stream_no + 1
+    fdnum = redirect.stream_no
     io, close_io = setup_stdio(redirect.handle, redirect.readable)
     try
         stdios = _stdio_copy(stdios, fdnum, io)
@@ -216,9 +216,9 @@ end
 function _spawn(cmds::OrCmds, stdios::SpawnIOs, chain::ProcessChain, tok::MaybeToken)
     in_pipe, out_pipe = link_pipe(false, false)
     try
-        stdios_left = _stdio_copy(stdios, 2, out_pipe)
+        stdios_left = _stdio_copy(stdios, 1, out_pipe)
         _spawn(cmds.a, stdios_left, chain, tok)
-        stdios_right = _stdio_copy(stdios, 1, in_pipe)
+        stdios_right = _stdio_copy(stdios, 0, in_pipe)
         _spawn(cmds.b, stdios_right, chain, tok)
     finally
         close_pipe_sync(out_pipe)
@@ -230,9 +230,9 @@ end
 function _spawn(cmds::ErrOrCmds, stdios::SpawnIOs, chain::ProcessChain, tok::MaybeToken)
     in_pipe, out_pipe = link_pipe(false, false)
     try
-        stdios_left = _stdio_copy(stdios, 3, out_pipe)
+        stdios_left = _stdio_copy(stdios, 2, out_pipe)
         _spawn(cmds.a, stdios_left, chain, tok)
-        stdios_right = _stdio_copy(stdios, 1, in_pipe)
+        stdios_right = _stdio_copy(stdios, 0, in_pipe)
         _spawn(cmds.b, stdios_right, chain, tok)
     finally
         close_pipe_sync(out_pipe)
@@ -249,7 +249,7 @@ end
 
 function _spawn(cmd::Cmd, stdios::SpawnIOs, chain::ProcessChain, tok::MaybeToken)
     isempty(cmd.exec) && throw(ArgumentError("cannot spawn empty command"))
-    pp = _spawn_primitive(cmd.exec[1], cmd, stdios, tok)
+    pp = _spawn_primitive(cmd.exec[0], cmd, stdios, tok)
     push!(chain.processes, pp)
     return chain
 end
@@ -261,13 +261,13 @@ function setup_stdios(f, stdios::Vector{Redirectable})
     open_io = SpawnIOs(undef, nstdio)
     close_io = falses(nstdio)
     try
-        for i in 1:nstdio
-            open_io[i], close_io[i] = setup_stdio(stdios[i], i == 1)
+        for i in 0:nstdio-1
+            open_io[i], close_io[i] = setup_stdio(stdios[i], i == 0)
         end
         pp = f(open_io)
         return pp
     finally
-        for i in 1:nstdio
+        for i in 0:nstdio-1
             close_io[i] && close_stdio(open_io[i])
         end
     end
@@ -564,13 +564,13 @@ function run(cmds::AbstractCmd, args...; wait::Bool = true, cancel::CancelTokenA
         # might be able to use the return AbstractProcess as an IO object
         # (this really only applies to PipeEndpoint, Pipe, TCPSocket, or an AbstractPipe wrapping one of those)
         if length(stdios) > 0
-            in = stdios[1]
+            in = stdios[0]
             isa(in, IO) && (ps.in = in)
             if length(stdios) > 1
-                out = stdios[2]
+                out = stdios[1]
                 isa(out, IO) && (ps.out = out)
                 if length(stdios) > 2
-                    err = stdios[3]
+                    err = stdios[2]
                     isa(err, IO) && (ps.err = err)
                 end
             end
@@ -636,7 +636,7 @@ ProcessFailedException(proc::Process) = ProcessFailedException([proc])
 
 function showerror(io::IO, err::ProcessFailedException)
     if length(err.procs) == 1
-        proc = err.procs[1]
+        proc = err.procs[0]
         println(io, "failed process: ", proc, " [", proc.exitcode, "]")
     else
         println(io, "failed processes:")

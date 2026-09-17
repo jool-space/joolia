@@ -200,8 +200,8 @@ function du_visit!(ctx, state::DefUseState, e)
 
     elseif k == K"="
         # Visit RHS first, then record assignment
-        has_label = du_visit!(ctx, state, e[2])
-        lhs = e[1]
+        has_label = du_visit!(ctx, state, e[1])
+        lhs = e[0]
         if kind(lhs) == K"BindingId"
             du_assign!(state, syntax_id(lhs))
         end
@@ -209,7 +209,7 @@ function du_visit!(ctx, state::DefUseState, e)
 
     elseif k == K"lambda"
         # Check captures from nested lambda
-        for (id, is_capt) in lambda_bindings(e[1]).locals_capt
+        for (id, is_capt) in lambda_bindings(e[0]).locals_capt
             if is_capt
                 du_mark_captured!(state, id)
             end
@@ -233,15 +233,15 @@ function du_visit!(ctx, state::DefUseState, e)
         # Don't recurse into decl nodes - the BindingId is just a declaration,
         # not a use. We only need to visit the type expression.
         if numchildren(e) >= 2
-            return du_visit!(ctx, state, e[2])
+            return du_visit!(ctx, state, e[1])
         end
         return false
 
     elseif k == K"function_decl"
         # [function_decl] defines and instantiates the closure type and assigns
         # it to its first argument (but only once per unique closure key).
-        @assert kind(e[1]) == K"BindingId"
-        func_id = syntax_id(e[1])
+        @assert kind(e[0]) == K"BindingId"
+        func_id = syntax_id(e[0])
         func_id in state.seen && return false
         ck = ClosureKey(func_id, state.lambda_id)
         if haskey(ctx.closure_bindings, ck)
@@ -263,7 +263,7 @@ function du_visit!(ctx, state::DefUseState, e)
         return has_label
 
     elseif k == K"return"
-        has_label = numchildren(e) >= 1 ? du_visit!(ctx, state, e[1]) : false
+        has_label = numchildren(e) >= 1 ? du_visit!(ctx, state, e[0]) : false
         du_kill!(state) # not necessary, but included for flisp parity
         return has_label
 
@@ -303,7 +303,7 @@ function du_visit!(ctx, state::DefUseState, e)
         # Skip the first child (break target label) - it's not a @goto target
         # No save/restore needed: the body always executes (break just exits early)
         has_label = false
-        for child in children(e)[2:end]
+        for child in children(e)[1:end]
             has_label |= du_visit!(ctx, state, child)
         end
         return has_label
@@ -330,7 +330,7 @@ end
 function _analyze_lambda_vars!(ctx::VariableAnalysisContext, ex)
     # Collect candidate variables: captured and single-assigned
     candidates = Set{IdTag}()
-    for (id, from_outer_lambda) in lambda_bindings(ex[1]).locals_capt
+    for (id, from_outer_lambda) in lambda_bindings(ex[0]).locals_capt
         b = get_binding(ctx, id)
         !b.is_captured && continue
         from_outer_lambda && continue
@@ -340,7 +340,7 @@ function _analyze_lambda_vars!(ctx::VariableAnalysisContext, ex)
     end
     isempty(candidates) && return
 
-    state = DefUseState(lambda_bindings(ex[1]).scope_id, ctx, candidates)
+    state = DefUseState(lambda_bindings(ex[0]).scope_id, ctx, candidates)
     @stm ex begin
         [K"lambda" _ _ _ body] -> du_visit!(ctx, state, body)
         [K"lambda" _ _ _ body rett] -> (du_visit!(ctx, state, body);

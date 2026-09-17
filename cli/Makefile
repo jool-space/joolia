@@ -136,8 +136,8 @@ $(build_bindir)/julia$(EXE): Info.plist.phony
 $(build_bindir)/julia-debug$(EXE): Info.plist.phony
 endif
 
-julia-release: $(build_bindir)/julia$(EXE)
-julia-debug: $(build_bindir)/julia-debug$(EXE)
+julia-release: $(build_bindir)/julia$(EXE) $(build_bindir)/joolia$(EXE)
+julia-debug: $(build_bindir)/julia-debug$(EXE) $(build_bindir)/joolia-debug$(EXE)
 libjulia-release: $(build_shlibdir)/libjulia.$(SHLIB_EXT)
 libjulia-debug: $(build_shlibdir)/libjulia-debug.$(SHLIB_EXT)
 
@@ -185,6 +185,13 @@ $(build_shlibdir)/libjulia.$(SHLIB_EXT) $(build_shlibdir)/libjulia-debug.$(SHLIB
 	@$(call PRINT_LINK, ln -sf $(notdir $<) $@)
 endif
 
+# Public fork names; retain the upstream executables for build/package compatibility.
+$(build_bindir)/joolia$(EXE): $(build_bindir)/julia$(EXE)
+	@$(call PRINT_LINK, cp -f $< $@)
+
+$(build_bindir)/joolia-debug$(EXE): $(build_bindir)/julia-debug$(EXE)
+	@$(call PRINT_LINK, cp -f $< $@)
+
 $(build_bindir)/julia$(EXE): $(EXE_OBJS) $(build_shlibdir)/libjulia.$(SHLIB_EXT) | $(build_bindir)
 	@$(call PRINT_LINK, $(call link-exe,$@, \
 		$(JLDFLAGS), \
@@ -207,7 +214,7 @@ $(BUILDDIR)/julia.expmap: $(SRCDIR)/julia.expmap.in $(JULIAHOME)/VERSION
 clean: | $(CLEAN_TARGETS)
 	rm -rf $(BUILDDIR)/*.lto
 	rm -f $(BUILDDIR)/*.o $(BUILDDIR)/*.dbg.obj
-	rm -f $(build_bindir)/julia*
+	rm -f $(build_bindir)/julia* $(build_bindir)/joolia*
 	rm -f $(BUILDDIR)/julia.expmap
 	rm -f $(BUILDDIR)/Info.plist*
 

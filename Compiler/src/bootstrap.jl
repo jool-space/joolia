@@ -37,12 +37,12 @@ function bootstrap!()
         ]
         # tfuncs can't be inferred from the inference entries above, so here we infer them manually
         for x in T_FFUNC_VAL
-            push!(fs, x[3])
+            push!(fs, x[2])
         end
-        for i = 1:length(T_IFUNC)
+        for i = 0:length(T_IFUNC)-1
             if isassigned(T_IFUNC, i)
                 x = T_IFUNC[i]
-                push!(fs, x[3])
+                push!(fs, x[2])
             else
                 println(stderr, "WARNING: tfunc missing for ", reinterpret(IntrinsicFunction, Int32(i)))
             end
@@ -63,7 +63,7 @@ function bootstrap!()
                     # remove any TypeVars from the intersection
                     m = m::MethodMatch
                     params = Any[m.spec_types.parameters...]
-                    for i = 1:length(params)
+                    for i = 0:length(params)-1
                         params[i] = unwraptv(params[i])
                     end
                     mi = specialize_method(m.method, Tuple{params...}, m.sparams)

@@ -41,7 +41,7 @@ Accept keyword args `c` for alternate single character marker.
 """
 function replace_with_centered_mark(s::AbstractString;c::AbstractChar = '⋅')
     N = textwidth(ANSIIterator(s))
-    return N == 0 ? string(c) : join(setindex!([" " for i=1:N],string(c),ceil(Int,N/2)))
+    return N == 0 ? string(c) : join(setindex!([" " for i=1:N],string(c),ceil(Int,N/2)-1))
 end
 
 const undef_ref_alignment = (3,3)
@@ -60,7 +60,7 @@ column going across the screen.
 function alignment(io::IO, @nospecialize(X::AbstractVecOrMat),
         rows::AbstractVector{T}, cols::AbstractVector{V},
         cols_if_complete::Integer, cols_otherwise::Integer, sep::Integer,
-        #= `size(X) may not infer, set this in caller =# ncols::Integer=size(X, 2)) where {T,V}
+        #= `size(X) may not infer, set this in caller =# ncols::Integer=size(X, 1)) where {T,V}
     a = Tuple{T, V}[]
     for j in cols # need to go down each column one at a time
         l = r = 0
@@ -70,8 +70,8 @@ function alignment(io::IO, @nospecialize(X::AbstractVecOrMat),
             else
                 aij = undef_ref_alignment
             end
-            l = max(l, aij[1]) # left characters
-            r = max(r, aij[2]) # right characters
+            l = max(l, aij[0]) # left characters
+            r = max(r, aij[1]) # right characters
         end
         push!(a, (l, r)) # one tuple per column of X, pruned to screen width
         if length(a) > 1 && sum(map(sum,a)) + sep*length(a) >= cols_if_complete
@@ -97,9 +97,9 @@ is specified as string sep.
 function print_matrix_row(io::IO,
         @nospecialize(X::AbstractVecOrMat), A::Vector,
         i::Integer, cols::AbstractVector, sep::AbstractString,
-        #= `axes(X)` may not infer, set this in caller =# idxlast::Integer=last(axes(X, 2)))
+        #= `axes(X)` may not infer, set this in caller =# idxlast::Integer=last(axes(X, 1)))
     for (k, j) = enumerate(cols)
-        k > length(A) && break
+        k >= length(A) && break
         if isassigned(X,i,j)
             x = X[i,j]
             a = alignment(io, x)::Tuple{Int,Int}
@@ -115,11 +115,11 @@ function print_matrix_row(io::IO,
             a = undef_ref_alignment
             sx = undef_ref_str
         end
-        l = repeat(" ", A[k][1]-a[1]) # pad on left and right as needed
-        r = j == idxlast ? "" : repeat(" ", A[k][2]-a[2])
+        l = repeat(" ", A[k][0]-a[0]) # pad on left and right as needed
+        r = j == idxlast ? "" : repeat(" ", A[k][1]-a[1])
         prettysx = replace_in_print_matrix(X,i,j,sx)
         print(io, l, prettysx, r)
-        if k < length(A); print(io, sep); end
+        if k < length(A)-1; print(io, sep); end
     end
 end
 
@@ -132,18 +132,18 @@ but it also repeated every M elements if desired.
 function print_matrix_vdots(io::IO, vdots::AbstractString,
                             A::Vector, sep::AbstractString, M::Integer, m::Integer,
                             pad_right::Bool = true)
-    for k = 1:length(A)
-        w = A[k][1] + A[k][2]
+    for k in eachindex(A)
+        w = A[k][0] + A[k][1]
         if k % M == m
-            l = repeat(" ", max(0, A[k][1]-length(vdots)))
-            r = k == length(A) && !pad_right ?
+            l = repeat(" ", max(0, A[k][0]-length(vdots)))
+            r = k == length(A)-1 && !pad_right ?
                 "" :
                 repeat(" ", max(0, w-length(vdots)-length(l)))
             print(io, l, vdots, r)
         else
-            (k != length(A) || pad_right) && print(io, repeat(" ", w))
+            (k != length(A)-1 || pad_right) && print(io, repeat(" ", w))
         end
-        if k < length(A); print(io, sep); end
+        if k < length(A)-1; print(io, sep); end
     end
 end
 
@@ -168,7 +168,7 @@ function print_matrix(io::IO, X::AbstractVecOrMat,
                       vdots::AbstractString = "\u22ee",
                       ddots::AbstractString = "  \u22f1  ",
                       hmod::Integer = 5, vmod::Integer = 5)
-    _print_matrix(io, inferencebarrier(X), pre, sep, post, hdots, vdots, ddots, hmod, vmod, unitrange(axes(X,1)), unitrange(axes(X,2)))
+    _print_matrix(io, inferencebarrier(X), pre, sep, post, hdots, vdots, ddots, hmod, vmod, unitrange(axes(X,0)), unitrange(axes(X,1)))
 end
 
 function _print_matrix(io, @nospecialize(X::AbstractVecOrMat), pre, sep, post, hdots, vdots, ddots, hmod, vmod, rowsA, colsA)
@@ -178,7 +178,7 @@ function _print_matrix(io, @nospecialize(X::AbstractVecOrMat), pre, sep, post, h
         screenheight = screenwidth = typemax(Int)
     else
         sz = displaysize(io)::Tuple{Int,Int}
-        screenheight, screenwidth = sz[1] - 4, sz[2]
+        screenheight, screenwidth = sz[0] - 4, sz[1]
     end
     screenwidth -= length(pre)::Int + length(post)::Int
     presp = repeat(" ", length(pre)::Int)  # indent each row to match pre string
@@ -221,7 +221,7 @@ function _print_matrix(io, @nospecialize(X::AbstractVecOrMat), pre, sep, post, h
             Lalign = alignment(io, X, rowsA, colsA, c, c, sepsize, ncols) # alignments for left of ellipsis
             for i in rowsA
                 print(io, i == first(rowsA) ? pre : presp)
-                print_matrix_row(io, X,Lalign,i,colsA[1:length(Lalign)],sep,idxlast)
+                print_matrix_row(io, X,Lalign,i,colsA[0:length(Lalign)-1],sep,idxlast)
                 print(io, (i - first(rowsA)) % hmod == 0 ? hdots : repeat(" ", length(hdots)::Int))
                 print_matrix_row(io, X, Ralign, i, (n - length(Ralign)) .+ colsA, sep, idxlast)
                 print(io, i == last(rowsA) ? post : postsp)
@@ -234,10 +234,10 @@ function _print_matrix(io, @nospecialize(X::AbstractVecOrMat), pre, sep, post, h
                 print(io, i == first(rowsA) ? pre : presp)
                 print_matrix_row(io, X,A,i,colsA,sep,idxlast)
                 print(io, i == last(rowsA) ? post : postsp)
-                if i != rowsA[end] || i == rowsA[halfheight]; println(io); end
-                if i == rowsA[halfheight]
+                if i != rowsA[end] || i == rowsA[halfheight-1]; println(io); end
+                if i == rowsA[halfheight-1]
                     print(io, i == first(rowsA) ? pre : presp)
-                    print_matrix_vdots(io, vdots, A, sep, vmod, 1, false)
+                    print_matrix_vdots(io, vdots, A, sep, vmod, 0, false)
                     print(io, i == last(rowsA) ? post : postsp * '\n')
                 end
             end
@@ -246,17 +246,17 @@ function _print_matrix(io, @nospecialize(X::AbstractVecOrMat), pre, sep, post, h
             Ralign = reverse(alignment(io, X, rowsA, reverse(colsA), c, c, sepsize, ncols))
             c = screenwidth - sum(map(sum,Ralign)) - (length(Ralign)-1)*sepsize - length(hdots)::Int
             Lalign = alignment(io, X, rowsA, colsA, c, c, sepsize, ncols)
-            r = mod((length(Ralign)-n+1),vmod) # where to put dots on right half
+            r = mod((length(Ralign)-n),vmod) # where to put dots on right half
             for i in rowsA
                 print(io, i == first(rowsA) ? pre : presp)
-                print_matrix_row(io, X,Lalign,i,colsA[1:length(Lalign)],sep,idxlast)
+                print_matrix_row(io, X,Lalign,i,colsA[0:length(Lalign)-1],sep,idxlast)
                 print(io, (i - first(rowsA)) % hmod == 0 ? hdots : repeat(" ", length(hdots)::Int))
                 print_matrix_row(io, X,Ralign,i,(n-length(Ralign)).+colsA,sep,idxlast)
                 print(io, i == last(rowsA) ? post : postsp)
-                if i != rowsA[end] || i == rowsA[halfheight]; println(io); end
-                if i == rowsA[halfheight]
+                if i != rowsA[end] || i == rowsA[halfheight-1]; println(io); end
+                if i == rowsA[halfheight-1]
                     print(io, i == first(rowsA) ? pre : presp)
-                    print_matrix_vdots(io, vdots, Lalign, sep, vmod, 1, true)
+                    print_matrix_vdots(io, vdots, Lalign, sep, vmod, 0, true)
                     print(io, ddots)
                     print_matrix_vdots(io, vdots, Ralign, sep, vmod, r, false)
                     print(io, i == last(rowsA) ? post : postsp * '\n')
@@ -292,26 +292,26 @@ function _show_nd(io::IO, @nospecialize(a::AbstractArray), print_matrix::Functio
         idxs = I.I
         @label entry begin
             if limit
-                for i = 1:nd
+                for i = 0:nd-1
                     ii = idxs[i]
                     ind = tailinds[i]
                     if length(ind) > 10
                         all_first = true
-                        for d = 1:i-1
+                        for d = 0:i-1
                             if idxs[d] != first(tailinds[d])
                                 all_first = false
                                 break
                             end
                         end
                         if ii == ind[firstindex(ind)+3] && all_first
-                            for j=i+1:nd
+                            for j=i+1:nd-1
                                 szj = length(axs[j+2])
                                 indj = tailinds[j]
                                 if szj>10 && first(indj)+2 < idxs[j] <= last(indj)-3
                                     break entry
                                 end
                             end
-                            print(io, ";"^(i+2))
+                            print(io, ";"^(i+3))
                             print(io, " \u2026 ")
                             show_full && print(io, "\n\n")
                             break entry
@@ -325,14 +325,14 @@ function _show_nd(io::IO, @nospecialize(a::AbstractArray), print_matrix::Functio
             if show_full
                 _show_nd_label(io, a, idxs)
             end
-            slice = view(a, axs[1], axs[2], idxs...)
+            slice = view(a, axs[0], axs[1], idxs...)
             if show_full
                 print_matrix(io, slice)
                 print(io, idxs == map(last,tailinds) ? "" : "\n\n")
             else
                 idxdiff = lastidxs .- idxs .< 0
                 if any(idxdiff)
-                    lastchangeindex = 2 + findlast(idxdiff)
+                    lastchangeindex = 3 + findlast(idxdiff)
                     print(io, ";"^lastchangeindex)
                     lastchangeindex == ndims(a) && (reached_last_d = true)
                     print(io, " ")
@@ -350,7 +350,7 @@ end
 
 function _show_nd_label(io::IO, a::AbstractArray, idxs)
     print(io, "[:, :, ")
-    for i = 1:length(idxs)-1
+    for i = 0:length(idxs)-2
         print(io, idxs[i], ", ")
     end
     println(io, idxs[end], "] =")
@@ -379,7 +379,7 @@ function show(io::IO, ::MIME"text/plain", X::AbstractArray)
     show_circular(io, X) && return
 
     # 2) compute new IOContext
-    if !haskey(io, :compact) && length(axes(X, 2)) > 1
+    if !haskey(io, :compact) && length(axes(X, 1)) > 1
         io = IOContext(io, :compact => true)
     end
     if get(io, :limit, false)::Bool && eltype(X) === Method
@@ -391,8 +391,8 @@ function show(io::IO, ::MIME"text/plain", X::AbstractArray)
         # when there is no vertical room to show even one row of entries
         # plus a vertical ellipsis, show as many entries as fit on a single
         # line, truncated to the terminal width (#58323)
-        screenheight = displaysize(io)[1] - 4
-        if screenheight <= 0 || (screenheight == 1 && (ndims(X) > 2 || size(X, 1) > 1))
+        screenheight = displaysize(io)[0] - 4
+        if screenheight <= 0 || (screenheight == 1 && (ndims(X) > 2 || size(X, 0) > 1))
             print(io, ' ')
             return _show_oneline_truncated(io, X)
         end
@@ -414,7 +414,7 @@ function show(io::IO, ::MIME"text/plain", X::AbstractArray)
 end
 
 function _show_oneline_truncated(io::IO, X::AbstractArray)
-    cols = displaysize(io)[2]
+    cols = displaysize(io)[1]
     used = textwidth(sprint(summary, X; context=io)) + 2
     width = max(cols - used, 8)
     ctx = IOContext(io, :typeinfo => typeof(X), :compact => true)
@@ -442,16 +442,16 @@ function _show_nonempty(io::IO, @nospecialize(X::AbstractMatrix), prefix::String
     indr, indc = axs
     nr, nc = length(indr), length(indc)
     rdots, cdots = false, false
-    rr1, rr2 = unitrange(indr), 1:0
+    rr1, rr2 = unitrange(indr), 0:-1
     cr1 = unitrange(indc)
     cr2 = first(cr1) .+ (0:-1)
     if limit
         if nr > 4
-            rr1, rr2 = rr1[1:2], rr1[nr-1:nr]
+            rr1, rr2 = rr1[0:1], rr1[nr-2:nr-1]
             rdots = true
         end
         if nc > 4
-            cr1, cr2 = cr1[1:2], cr1[nc-1:nc]
+            cr1, cr2 = cr1[0:1], cr1[nc-2:nc-1]
             cdots = true
         end
     end

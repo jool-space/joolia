@@ -197,7 +197,7 @@ const SHIFTEDMONTHDAYS = (306, 337, 0, 31, 61, 92, 122, 153, 184, 214, 245, 275)
 function totaldays(y, m, d)
     # If we're in Jan/Feb, shift the given year back one
     z = m < 3 ? y - 1 : y
-    mdays = SHIFTEDMONTHDAYS[m]
+    mdays = SHIFTEDMONTHDAYS[m - 1]
     # days + month_days + year_days
     return d + mdays + 365z + fld(z, 4) - fld(z, 100) + fld(z, 400) - 306
 end
@@ -207,7 +207,7 @@ isleapyear(y::Integer) = (y % 4 == 0) && ((y % 100 != 0) || (y % 400 == 0))
 
 # Number of days in month
 const DAYSINMONTH = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-daysinmonth(y,m) = DAYSINMONTH[m] + (m == 2 && isleapyear(y))
+daysinmonth(y,m) = DAYSINMONTH[m - 1] + (m == 2 && isleapyear(y))
 
 ### UTILITIES ###
 

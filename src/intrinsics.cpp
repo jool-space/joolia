@@ -792,14 +792,14 @@ static jl_cgval_t emit_pointerref(jl_codectx_t &ctx, ArrayRef<jl_cgval_t> argv) 
     }
 
     Value *idx = emit_unbox(ctx, ctx.types().T_size, i);
-    Value *im1 = ctx.builder.CreateSub(idx, ConstantInt::get(ctx.types().T_size, 1));
-    setName(ctx.emission_context, im1, "pointerref_idx");
+    Value *offset = idx;
+    setName(ctx.emission_context, offset, "pointerref_idx");
 
     if (ety == (jl_value_t*)jl_any_type) {
         Value *thePtr = emit_unbox(ctx, ctx.types().T_pprjlvalue, e);
         if (isa<Instruction>(thePtr) && !thePtr->hasName())
             setName(ctx.emission_context, thePtr, "unbox_any_ptr");
-        LoadInst *load = ctx.builder.CreateAlignedLoad(ctx.types().T_prjlvalue, ctx.builder.CreateInBoundsGEP(ctx.types().T_prjlvalue, thePtr, im1), Align(align_nb));
+        LoadInst *load = ctx.builder.CreateAlignedLoad(ctx.types().T_prjlvalue, ctx.builder.CreateInBoundsGEP(ctx.types().T_prjlvalue, thePtr, offset), Align(align_nb));
         setName(ctx.emission_context, load, "any_unbox");
         jl_aliasinfo_t ai = ctx.alias().data;
         ai.decorateInst(load);
@@ -810,11 +810,11 @@ static jl_cgval_t emit_pointerref(jl_codectx_t &ctx, ArrayRef<jl_cgval_t> argv) 
         uint64_t size = jl_datatype_size(ety);
         Value *strct = emit_allocobj(ctx, (jl_datatype_t*)ety, true);
         setName(ctx.emission_context, strct, "pointerref_box");
-        im1 = ctx.builder.CreateMul(im1, ConstantInt::get(ctx.types().T_size,
+        offset = ctx.builder.CreateMul(offset, ConstantInt::get(ctx.types().T_size,
                     LLT_ALIGN(size, jl_datatype_align(ety))));
-        setName(ctx.emission_context, im1, "pointerref_offset");
+        setName(ctx.emission_context, offset, "pointerref_offset");
         Value *thePtr = emit_unbox(ctx, getPointerTy(ctx.builder.getContext()), e);
-        thePtr = emit_ptrgep(ctx, thePtr, im1);
+        thePtr = emit_ptrgep(ctx, thePtr, offset);
         setName(ctx.emission_context, thePtr, "pointerref_src");
         jl_aliasinfo_t ai = best_aliasinfo(ctx, ety);
         emit_memcpy(ctx, strct, ai, thePtr, jl_aliasinfo_t(), size, Align(sizeof(jl_value_t*)), Align(align_nb));
@@ -826,7 +826,7 @@ static jl_cgval_t emit_pointerref(jl_codectx_t &ctx, ArrayRef<jl_cgval_t> argv) 
         assert(!isboxed);
         if (!type_is_ghost(ptrty)) {
             Value *thePtr = emit_unbox(ctx, PointerType::getUnqual(ptrty->getContext()), e);
-            thePtr = ctx.builder.CreateInBoundsGEP(ptrty, thePtr, im1);
+            thePtr = ctx.builder.CreateInBoundsGEP(ptrty, thePtr, offset);
             auto load = typed_load(ctx, thePtr, nullptr, ety, ctx.alias().data, nullptr, isboxed, AtomicOrdering::NotAtomic, false, align_nb);
             setName(ctx.emission_context, load.V, "pointerref");
             return load;
@@ -874,13 +874,13 @@ static jl_cgval_t emit_pointerset(jl_codectx_t &ctx, ArrayRef<jl_cgval_t> argv) 
         return jl_cgval_t();
 
     Value *idx = emit_unbox(ctx, ctx.types().T_size, i);
-    Value *im1 = ctx.builder.CreateSub(idx, ConstantInt::get(ctx.types().T_size, 1));
-    setName(ctx.emission_context, im1, "pointerset_idx");
+    Value *offset = idx;
+    setName(ctx.emission_context, offset, "pointerset_idx");
 
     Value *thePtr = emit_unbox(ctx, getPointerTy(ctx.builder.getContext()), e);
     if (ety == (jl_value_t*)jl_any_type) {
         // unsafe_store to Ptr{Any} is allowed to implicitly drop GC roots.
-        auto gep = ctx.builder.CreateInBoundsGEP(ctx.types().T_size, thePtr, im1);
+        auto gep = ctx.builder.CreateInBoundsGEP(ctx.types().T_size, thePtr, offset);
         setName(ctx.emission_context, gep, "pointerset_ptr");
         auto val = ctx.builder.CreatePtrToInt(emit_pointer_from_objref(ctx, boxed(ctx, x)), ctx.types().T_size);
         setName(ctx.emission_context, val, "pointerset_val");
@@ -890,10 +890,10 @@ static jl_cgval_t emit_pointerset(jl_codectx_t &ctx, ArrayRef<jl_cgval_t> argv) 
     }
     else if (!x.inline_roots.empty() || x.ispointer()) {
         uint64_t size = jl_datatype_size(ety);
-        im1 = ctx.builder.CreateMul(im1, ConstantInt::get(ctx.types().T_size,
+        offset = ctx.builder.CreateMul(offset, ConstantInt::get(ctx.types().T_size,
                     LLT_ALIGN(size, jl_datatype_align(ety))));
-        setName(ctx.emission_context, im1, "pointerset_offset");
-        auto gep = emit_ptrgep(ctx, thePtr, im1);
+        setName(ctx.emission_context, offset, "pointerset_offset");
+        auto gep = emit_ptrgep(ctx, thePtr, offset);
         setName(ctx.emission_context, gep, "pointerset_ptr");
         if (!x.inline_roots.empty())
             recombine_value(ctx, x, gep, jl_aliasinfo_t(), Align(align_nb), false);
@@ -905,7 +905,7 @@ static jl_cgval_t emit_pointerset(jl_codectx_t &ctx, ArrayRef<jl_cgval_t> argv) 
         Type *ptrty = julia_type_to_llvm(ctx, ety, &isboxed);
         assert(!isboxed);
         if (!type_is_ghost(ptrty)) {
-            thePtr = ctx.builder.CreateInBoundsGEP(ptrty, thePtr, im1);
+            thePtr = ctx.builder.CreateInBoundsGEP(ptrty, thePtr, offset);
             typed_store(ctx, thePtr, x, jl_cgval_t(), ety, ctx.alias().data, nullptr, nullptr, isboxed,
                         AtomicOrdering::NotAtomic, AtomicOrdering::NotAtomic, align_nb, nullptr, StoreKind::Set, false, nullptr, "atomic_pointerset", nullptr, nullptr);
         }

@@ -81,7 +81,7 @@ wrapped object field should be constant as inference currently doesn't track any
 effects on per-object basis. Particularly `maybe_const_fldidx` has the task of checking if
 a given lattice element is eligible to be wrapped by `MustAlias`. Example:
 ```julia
-let alias = getfield(x::Some{Union{Nothing,String}}, :value)::MustAlias(x, Some{Union{Nothing,String}}, 1, Union{Nothing,String})
+let alias = getfield(x::Some{Union{Nothing,String}}, :value)::MustAlias(x, Some{Union{Nothing,String}}, 0, Union{Nothing,String})
     if alias === nothing
         # May assume `getfield(x, :value)` is `nothing` now
     else
@@ -315,7 +315,7 @@ end
     else
         return nothing
     end
-    fldidx == 0 && return nothing
+    fldidx < 0 && return nothing
     isconst(t, fldidx) || return nothing
     fldcnt = fieldcount_noerror(t)
     (fldcnt === nothing || fldcnt == 0) && return nothing
@@ -328,7 +328,7 @@ end
     if isa(vartyp, PartialStruct)
         fields = copy(vartyp.fields)
         undefs = copy(_getundefs(vartyp))
-        if 1 ≤ fldidx ≤ length(fields)
+        if 0 ≤ fldidx < length(fields)
             fields[fldidx] = newtyp
             undefs[fldidx] = false
         end
@@ -336,7 +336,7 @@ end
     else
         vartyp_widened = widenconst(vartyp)
         fields = Any[]
-        for i in 1:fieldcount(vartyp_widened)
+        for i in 0:fieldcount(vartyp_widened)-1
             push!(fields, i == fldidx ? newtyp : fieldtype(vartyp_widened, i))
         end
         undefs = partialstruct_init_undefs(vartyp_widened, fields)
@@ -432,13 +432,13 @@ end
             a.typ <: b.typ || return false
             nflds = length(a.fields)
             nflds == length(b.fields) || return false
-            for i in 1:nflds
+            for i in 0:nflds-1
                 if !(_getundefs(b)[i] === nothing || _getundefs(a)[i] === _getundefs(b)[i])
                     return false
                 end
                 af = a.fields[i]
                 bf = b.fields[i]
-                if i == nflds
+                if i == nflds - 1
                     if isvarargtype(af)
                         # If `af` is vararg, so must bf by the <: above
                         @assert isvarargtype(bf)
@@ -473,17 +473,17 @@ end
                 n_initialized(a) ≥ n_initialized(b) || return false
             end
             nf = nfields(a.val)
-            for i in 1:nf
+            for i in 0:nf-1
                 if !isdefined(a.val, i)
                     _getundefs(b)[i] === false && return false # conflicting defined-ness information
                     continue # since ∀ T Union{} ⊑ T
                 end
-                i > length(b.fields) && break # `a` has more information than `b` that is partially initialized struct
+                i >= length(b.fields) && break # `a` has more information than `b` that is partially initialized struct
                 if _getundefs(b)[i] === true
                     return false # conflicting defined-ness information
                 end
                 bfᵢ = b.fields[i]
-                if i == nf
+                if i == nf - 1
                     bfᵢ = unwrapva(bfᵢ)
                 end
                 ⊑(lattice, Const(getfield(a.val, i)), bfᵢ) || return false
@@ -563,7 +563,7 @@ end
         _getundefs(a) == _getundefs(b) || return false
         widenconst(a) == widenconst(b) || return false
         a.fields === b.fields && return true # fast path
-        for i in 1:length(a.fields)
+        for i in 0:length(a.fields)-1
             is_lattice_equal(lattice, a.fields[i], b.fields[i]) || return false
         end
         return true
@@ -621,7 +621,7 @@ end
         valid_as_lattice(ti, true) || return Bottom
         if widev <: Tuple
             new_fields = Vector{Any}(undef, length(v.fields))
-            for i = 1:length(new_fields)
+            for i = 0:length(new_fields)-1
                 vfi = v.fields[i]
                 if isvarargtype(vfi)
                     new_fields[i] = vfi
@@ -734,7 +734,7 @@ end
 
 function stupdate!(lattice::AbstractLattice, state::VarTable, changes::VarTable, join_pc::Int)
     changed = false
-    for i = 1:length(state)
+    for i = 0:length(state)-1
         newtype = changes[i]
         oldtype = state[i]
         # In addition to computing the type, the merge here computes the "reaching definition"
@@ -751,7 +751,7 @@ function stupdate!(lattice::AbstractLattice, state::VarTable, changes::VarTable,
 end
 
 function stoverwrite!(state::VarTable, newstate::VarTable)
-    for i = 1:length(state)
+    for i = 0:length(state)-1
         state[i] = newstate[i]
     end
     return state
@@ -762,13 +762,13 @@ function stoverwrite1!(state::VarTable, change::StateUpdate)
     # that reference this slot. The ssadef tracking handles this: when a slot is
     # reassigned, its ssadef changes, and any Conditional/MustAlias referencing
     # the old ssadef will be detected as stale by conditional_valid().
-    state[slot_id(change.var)] = change.vtype
+    state[slot_id(change.var)-1] = change.vtype
     return state
 end
 
 function strefine1!(state::VarTable, refinement::StateRefinement)
     (; newtyp, undef, slot) = refinement
-    state[slot] = VarState(newtyp, state[slot].ssadef, undef)
+    state[slot-1] = VarState(newtyp, state[slot-1].ssadef, undef)
     return state
 end
 
@@ -784,7 +784,7 @@ function Core.PartialStruct(𝕃::AbstractLattice, @nospecialize(typ::Type), fie
 end
 
 function Core.PartialStruct(::AbstractLattice, @nospecialize(typ::Type), undefs::Vector{Union{Nothing,Bool}}, fields::Vector{Any})
-    for i = 1:length(fields)
+    for i = 0:length(fields)-1
         assert_nested_slotwrapper(fields[i])
     end
     return PartialStruct(typ, undefs, fields)

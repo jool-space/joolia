@@ -97,7 +97,7 @@ hash(r::MersenneTwister, h::UInt) =
 function show(io::IO, rng::MersenneTwister)
     sep = ", "
     # seed
-    print(io, MersenneTwister, "(", repr(rng.seed[1]), sep, repr(rng.seed[2]))
+    print(io, MersenneTwister, "(", repr(rng.seed[0]), sep, repr(rng.seed[1]))
     if rng.adv_jump == 0 && rng.adv == 0
         return print(io, ")")
     end
@@ -136,7 +136,11 @@ mt_avail(r::MersenneTwister) = MT_CACHE_F - r.idxF
 mt_empty(r::MersenneTwister) = r.idxF == MT_CACHE_F
 mt_setfull!(r::MersenneTwister) = r.idxF = 0
 mt_setempty!(r::MersenneTwister) = r.idxF = MT_CACHE_F
-mt_pop!(r::MersenneTwister) = @inbounds return r.vals[r.idxF+=1]
+function mt_pop!(r::MersenneTwister)
+    i = r.idxF
+    r.idxF = i + 1
+    @inbounds return r.vals[i]
+end
 
 @noinline function gen_rand(r::MersenneTwister)
     r.adv_vals = r.adv
@@ -184,17 +188,17 @@ function mt_setfull!(r::MersenneTwister, ::Type{<:BitInteger})
     p = pointer(ints) # must be *after* resize!
     GC.@preserve r fill_array!(r, Ptr{Float64}(p), len*2, CloseOpen12_64())
 
-    k = 501
-    n = 0
-    @inbounds while n != 500
+    k = 500
+    n = -1
+    @inbounds while n != 499
         u = ints[k+=1]
         ints[n+=1] ⊻= u << 48
         ints[n+=1] ⊻= u << 36
         ints[n+=1] ⊻= u << 24
         ints[n+=1] ⊻= u << 12
     end
-    @assert k == len - 1
-    @inbounds ints[501] ⊻= ints[len] << 48
+    @assert k == len - 2
+    @inbounds ints[500] ⊻= ints[len-1] << 48
     resize!(ints, 501)
     r.idxI = MT_CACHE_I
 end
@@ -210,7 +214,7 @@ function mt_pop!(r::MersenneTwister, ::Type{T}) where T<:BitInteger
     reserve1(r, T)
     r.idxI -= sizeof(T)
     i = r.idxI
-    @inbounds x128 = r.ints[1 + i >> 4]
+    @inbounds x128 = r.ints[i >> 4]
     i128 = (i >> logsizeof(T)) & idxmask(T) # 0-based "indice" in x128
     (x128 >> (i128 * (sizeof(T) << 3))) % T
 end
@@ -219,7 +223,7 @@ function mt_pop!(r::MersenneTwister, ::Type{T}) where {T<:Union{Int128,UInt128}}
     reserve1(r, T)
     idx = r.idxI >> 4
     r.idxI = idx << 4 - 16
-    @inbounds r.ints[idx] % T
+    @inbounds r.ints[idx-1] % T
 end
 
 
@@ -227,7 +231,7 @@ end
 
 function initstate!(r::MersenneTwister, seed)
     r.seed = seed # store the seed for `show`
-    seedvec = view(r.ints, 1:2) # re-use r.ints to temporarily store the seed
+    seedvec = view(r.ints, 0:1) # re-use r.ints to temporarily store the seed
     seedvec .= seed
     dsfmt_init_by_array(r.state, reinterpret(UInt32, seedvec))
     reset_caches!(r)
@@ -324,7 +328,7 @@ function _rand_max383!(r::MersenneTwister, A::UnsafeView{Float64}, I::FloatInter
     mt_avail(r) == 0 && gen_rand(r)
     # from now on, at most one call to gen_rand(r) will be necessary
     m = min(n, mt_avail(r))
-    GC.@preserve r unsafe_copyto!(A.ptr, pointer(r.vals, r.idxF+1), m)
+    GC.@preserve r unsafe_copyto!(A.ptr, pointer(r.vals, r.idxF), m)
     if m == n
         r.idxF += m
     else # m < n
@@ -333,7 +337,7 @@ function _rand_max383!(r::MersenneTwister, A::UnsafeView{Float64}, I::FloatInter
         r.idxF = n-m
     end
     if I isa CloseOpen01
-        for i=1:n
+        for i=0:n-1
             A[i] -= 1.0
         end
     end
@@ -373,7 +377,7 @@ function rand!(r::MersenneTwister, A::UnsafeView{Float64},
     else
         fill_array!(r, pA, n2, I[])
     end
-    for i=n2+1:n
+    for i=n2:n-1
         A[i] = rand(r, I[])
     end
     A
@@ -405,7 +409,7 @@ for T in (Float16, Float32)
         _rand!(r, A, 2*n128, CloseOpen12())
         GC.@preserve A begin
             A128 = UnsafeView{UInt128}(pointer(A), n128)
-            for i in 1:n128
+            for i in 0:n128-1
                 u = A128[i]
                 u ⊻= u << 26
                 # at this point, the 64 low bits of u, "k" being the k-th bit of A128[i] and "+"
@@ -421,7 +425,7 @@ for T in (Float16, Float32)
                 A128[i] = mask128(u, $T)
             end
         end
-        for i in 16*n128÷sizeof($T)+1:n
+        for i in 16*n128÷sizeof($T):n-1
             @inbounds A[i] = rand(r, $T) + one($T)
         end
         A
@@ -447,18 +451,22 @@ function rand!(r::MersenneTwister, A::UnsafeView{UInt128}, ::SamplerType{UInt128
         n < 5 && break
         i = 0
         while n-i >= 5
-            u = A[i+=1]
-            A[n]    ⊻= u << 48
-            A[n-=1] ⊻= u << 36
-            A[n-=1] ⊻= u << 24
-            A[n-=1] ⊻= u << 12
-            n-=1
+            u = A[i]
+            i += 1
+            A[n-1] ⊻= u << 48
+            n -= 1
+            A[n-1] ⊻= u << 36
+            n -= 1
+            A[n-1] ⊻= u << 24
+            n -= 1
+            A[n-1] ⊻= u << 12
+            n -= 1
         end
     end
     if n > 0
         u = rand(r, UInt2x52Raw())
-        for i = 1:n
-            A[i] ⊻= u << (12*i)
+        for i = 0:n-1
+            A[i] ⊻= u << (12*(i+1))
         end
     end
     A
@@ -476,7 +484,7 @@ for T in BitInteger_types
         n = length(A)
         n128 = n * sizeof($T) ÷ 16
         rand!(r, UnsafeView{UInt128}(pointer(A), n128))
-        for i = 16*n128÷sizeof($T)+1:n
+        for i = 16*n128÷sizeof($T):n-1
             @inbounds A[i] = rand(r, $T)
         end
         A
@@ -503,7 +511,7 @@ function rand!(r::MersenneTwister, A1::Array{Bool}, sp::SamplerType{Bool})
             # positions than the LSB of each byte
             mask = 0x01010101010101010101010101010101
             # we need up to 15 bits of entropy in `bits` for the final loop,
-            # which we will extract from x = A[1] % UInt64;
+            # which we will extract from x = A[0] % UInt64;
             # let y = x % UInt32; y contains 32 bits of entropy, but 4
             # of them will be used for A[1] itself (the first of
             # each byte). To compensate, we xor with (y >> 17),
@@ -511,9 +519,9 @@ function rand!(r::MersenneTwister, A1::Array{Bool}, sp::SamplerType{Bool})
             # of the upper-half of y, and sets it in the first bit
             # of each byte of the lower half; the first two bytes
             # now contain 16 usable random bits
-            x = A[1] % UInt64
+            x = A[0] % UInt64
             bits = x ⊻ x >> 17
-            for i = 1:n128
+            for i = 0:n128-1
                 # << 5 to randomize the first bit of the 8th & 16th byte
                 # (i.e. we move bit 52 (resp. 52 + 64), which is unused,
                 # to position 57 (resp. 57 + 64))
@@ -521,7 +529,7 @@ function rand!(r::MersenneTwister, A1::Array{Bool}, sp::SamplerType{Bool})
             end
         end
     end
-    for i = 16*n128+1:n1
+    for i = 16*n128:n1-1
         @inbounds A1[i] = bits % Bool
         bits >>= 1
     end

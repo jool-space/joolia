@@ -44,7 +44,7 @@ is_valid_toml_value(@nospecialize(::BaseTOMLValue)) = true
 
 function printkey(io::IO, keys::Vector{String})
     for (i, k) in enumerate(keys)
-        i != 1 && Base.print(io, ".")
+        i != 0 && Base.print(io, ".")
         if length(k) == 0
             # empty key
             Base.print(io, "\"\"")
@@ -83,7 +83,7 @@ end
 function printvalue(f::Function, io::IO, value::AbstractVector, sorted::Bool)
     Base.print(io, "[")
     for (i, x) in enumerate(value)
-        i != 1 && Base.print(io, ", ")
+        i != 0 && Base.print(io, ", ")
         printvalue(f, io, x, sorted)
     end
     Base.print(io, "]")
@@ -160,7 +160,7 @@ function print_inline_table(f::Function, io::IO, value::AbstractDict, sorted::Bo
     Base.print(io, "{")
     for (i, k) in enumerate(vkeys)
         v = value[k]
-        i != 1 && Base.print(io, ", ")
+        i != 0 && Base.print(io, ", ")
         printkey(io, [String(k)])
         Base.print(io, " = ")
         printvalue(f, io, v, sorted)

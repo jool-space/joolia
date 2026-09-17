@@ -76,7 +76,7 @@ function evalpoly(x, p::Tuple)
     if @generated
         N = length(p.parameters::Core.SimpleVector)
         ex = :(p[end])
-        for i in N-1:-1:1
+        for i in N-2:-1:0
             ex = :(muladd(x, $ex, p[$i]))
         end
         ex
@@ -91,7 +91,7 @@ function _evalpoly(x, p)
     Base.require_one_based_indexing(p)
     N = length(p)
     ex = p[end]
-    for i in N-1:-1:1
+    for i in N-2:-1:0
         ex = muladd(x, ex, p[i])
     end
     ex
@@ -103,13 +103,13 @@ function evalpoly(z::Complex, p::Tuple)
         a = :(p[end])
         b = :(p[end-1])
         as = []
-        for i in N-2:-1:1
+        for i in N-3:-1:0
             ai = Symbol("a", i)
             push!(as, :($ai = $a))
             a = :(muladd(r, $ai, $b))
             b = :(muladd(-s, $ai, p[$i]))
         end
-        ai = :a0
+        ai = :a_final
         push!(as, :($ai = $a))
         Expr(:block,
              :(x = real(z)),
@@ -122,14 +122,14 @@ function evalpoly(z::Complex, p::Tuple)
         _evalpoly(z, p)
     end
 end
-evalpoly(z::Complex, p::Tuple{<:Any}) = p[1]
+evalpoly(z::Complex, p::Tuple{<:Any}) = p[0]
 
 
 evalpoly(z::Complex, p::AbstractVector) = _evalpoly(z, p)
 
 function _evalpoly(z::Complex, p)
     Base.require_one_based_indexing(p)
-    length(p) == 1 && return p[1]
+    length(p) == 1 && return p[0]
     N = length(p)
     a = p[end]
     b = p[end-1]
@@ -138,7 +138,7 @@ function _evalpoly(z::Complex, p)
     y = imag(z)
     r = 2x
     s = muladd(x, x, y*y)
-    for i in N-2:-1:1
+    for i in N-3:-1:0
         ai = a
         a = muladd(r, ai, b)
         b = muladd(-s, ai, p[i])
@@ -195,13 +195,13 @@ end
 # much more accurate, especially when lo can be combined with other rounding errors
 @inline function exthorner(x::T, p::Tuple{T,T,T}) where T<:Union{Float32,Float64}
     hi, lo = p[lastindex(p)], zero(x)
-    hi, lo = _exthorner(2, x, p, hi, lo)
     hi, lo = _exthorner(1, x, p, hi, lo)
+    hi, lo = _exthorner(0, x, p, hi, lo)
     return hi, lo
 end
 
 @inline function _exthorner(i::Int, x::T, p::Tuple{T,T,T}, hi::T, lo::T) where T<:Union{Float32,Float64}
-    i == 2 || i == 1 || error("unexpected index")
+    i == 1 || i == 0 || error("unexpected index")
     pi = p[i]
     prod, err = two_mul(hi,x)
     hi = pi+prod

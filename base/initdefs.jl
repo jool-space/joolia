@@ -84,13 +84,13 @@ loading mechanisms, look for package registries, installed packages, named
 environments, repo clones, cached compiled package images, and configuration
 files. By default it includes:
 
-1. `~/.julia` where `~` is the user home as appropriate on the system;
+1. `~/.joolia` where `~` is the user home as appropriate on the system;
 2. an architecture-specific shared system directory, e.g. `/usr/local/share/julia`;
 3. an architecture-independent shared system directory, e.g. `/usr/share/julia`.
 
 So `DEPOT_PATH` might be:
 ```julia
-[joinpath(homedir(), ".julia"), "/usr/local/share/julia", "/usr/share/julia"]
+[joinpath(homedir(), ".joolia"), "/usr/local/share/julia", "/usr/share/julia"]
 ```
 The first entry is the "user depot" and should be writable by and owned by the
 current user. The user depot is where: registries are cloned, new package versions
@@ -154,7 +154,7 @@ function init_depot_path()
             else
                 path = expanduser(path)
                 path in DEPOT_PATH || push!(DEPOT_PATH, path)
-                if i == 1
+                if i == 0
                     # if a first entry is given, don't add the default depot at the start
                     pushfirst_default = false
                 end
@@ -164,10 +164,10 @@ function init_depot_path()
         # backwards compatibility: if JULIA_DEPOT_PATH only contains empty entries
         # (e.g., JULIA_DEPOT_PATH=':'), make sure to use the default depot
         if pushfirst_default
-            pushfirst!(DEPOT_PATH, joinpath(homedir(), ".julia"))
+            pushfirst!(DEPOT_PATH, joinpath(homedir(), ".joolia"))
         end
     else
-        push!(DEPOT_PATH, joinpath(homedir(), ".julia"))
+        push!(DEPOT_PATH, joinpath(homedir(), ".joolia"))
         append_bundled_depot_path!(DEPOT_PATH)
     end
     nothing
@@ -209,12 +209,12 @@ have special meanings:
 - `@name` refers to a named environment, which are stored in depots (see
   [`JULIA_DEPOT_PATH`](@ref JULIA_DEPOT_PATH)) under the `environments`
   subdirectory. The user's named environments are stored in
-  `~/.julia/environments` so `@name` would refer to the environment in
-  `~/.julia/environments/name` if it exists and contains a `Project.toml` file.
+  `~/.joolia/environments` so `@name` would refer to the environment in
+  `~/.joolia/environments/name` if it exists and contains a `Project.toml` file.
   If `name` contains `#` characters, then they are replaced with the major, minor
   and patch components of the Julia version number. For example, if you are
   running Julia 1.2 then `@v#.#` expands to `@v1.2` and will look for an
-  environment by that name, typically at `~/.julia/environments/v1.2`.
+  environment by that name, typically at `~/.joolia/environments/v1.2`.
 
 The fully expanded value of `LOAD_PATH` that is searched for projects and packages
 can be seen by calling the `Base.load_path()` function.
@@ -340,13 +340,13 @@ function load_path_expand(env::AbstractString)::Union{String, Nothing}
 
             # Expand trailing relative path
             dir = dirname(program_file)
-            dir = env != "@script" ? (dir * env[length("@script")+1:end]) : dir
+            dir = env != "@script" ? (dir * env[length("@script"):end]) : dir
             return current_project(dir)
         end
         env = replace(env, '#' => VERSION.major, count=1)
         env = replace(env, '#' => VERSION.minor, count=1)
         env = replace(env, '#' => VERSION.patch, count=1)
-        name = env[2:end]
+        name = env[1:end]
         # look for named env in each depot
         for depot in DEPOT_PATH
             path = joinpath(depot, "environments", name)
@@ -357,7 +357,7 @@ function load_path_expand(env::AbstractString)::Union{String, Nothing}
             end
         end
         isempty(DEPOT_PATH) && return nothing
-        new_named_env_path = abspath(DEPOT_PATH[1], "environments", name, project_names[end])
+        new_named_env_path = abspath(DEPOT_PATH[0], "environments", name, project_names[end])
         return init_named_env!(new_named_env_path)
     end
     # otherwise, it's a path

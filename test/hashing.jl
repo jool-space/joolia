@@ -350,3 +350,18 @@ end
         @test hash_generator === hash_pointer
     end
 end
+
+# Generic shaped hashing must agree across representations at unroll and sampling boundaries.
+@testset "zero-origin shaped hashing" begin
+    for n in (0, 1, 7, 8, 9, 15, 16, 17, 32767, 32768)
+        a = [string(i) for i in 0:n-1]
+        @test hash(a) == hash(view(a, :))
+        @test hash(a) == hash(reshape(a, n))
+        @test hash(a, UInt(17)) == hash(view(a, :), UInt(17))
+        if n >= 32768
+            before = hash(a)
+            a[end-3] = "changed fourth sampled element"
+            @test hash(a) != before
+        end
+    end
+end

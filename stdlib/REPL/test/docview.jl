@@ -77,6 +77,25 @@ end
     @test exact_match_export ≈ 1.0
 end
 
+@testset "zero-origin Levenshtein distance" begin
+    @test REPL.levenshtein("", "") == 0
+    @test REPL.levenshtein("", "abc") == 3
+    @test REPL.levenshtein("abc", "") == 3
+    @test REPL.levenshtein("kitten", "sitting") == 3
+    @test REPL.levenshtein("αβ", "αδ") == 1
+    @test REPL.levenshtein("😀a", "😀b") == 1
+
+    candidates = REPL.AccessibleBinding[
+        REPL.AccessibleBinding(:cat),
+        REPL.AccessibleBinding(:dog),
+        REPL.AccessibleBinding(:catalog),
+    ]
+    @test isempty(REPL.levsort("zzzz", REPL.AccessibleBinding[]))
+    @test isempty(REPL.levsort("zzzz", candidates))
+    ranked = REPL.levsort("cat", candidates)
+    @test string(ranked[0]) == "cat"
+end
+
 @testset "Unicode doc lookup (#41589)" begin
     @test REPL.lookup_doc(:(÷=)) isa Markdown.MD
 end
@@ -257,13 +276,32 @@ helplines(s) = map(strip, split(get_help_io(s, @__MODULE__), '\n'; keepempty=fal
     lines = helplines("dango")
     # Ensure that public names that exactly match the search query are listed first
     # even if they aren't exported, as long as no exact exported/local match exists
-    @test startswith(lines[1], "search: TestSuggestPublic.dango dingo")
-    @test lines[2] == "Couldn't find dango"  # 🙈🍡
-    @test startswith(lines[3], "Perhaps you meant TestSuggestPublic.dango, dingo")
+    @test startswith(lines[0], "search: TestSuggestPublic.dango dingo")
+    @test lines[1] == "Couldn't find dango"  # 🙈🍡
+    @test startswith(lines[2], "Perhaps you meant TestSuggestPublic.dango, dingo")
 end
 dango() = "🍡"
 @testset "search prioritizes exported names" begin
     # Prioritize exported/local names if they exactly match
     lines = helplines("dango")
-    @test startswith(lines[1], "search: dango TestSuggestPublic.dango dingo")
+    @test startswith(lines[0], "search: dango TestSuggestPublic.dango dingo")
+end
+
+# Help search keeps character positions, terminal dimensions, and prefix counts distinct.
+@testset "zero-origin help rendering" begin
+    @test REPL.matchinds("ab", "axby") == [0,2]
+    @test REPL.matchinds("αβ", "αxβ") == [0,2]
+    @test REPL.fuzzyscore("", "") == 1.0
+    for (a,b,d) in (("", "abc", 3), ("a", "b", 1), ("ab", "ac", 1),
+                    ("ab", "ba", 1), ("abc", "acb", 1), ("kitten", "sitting", 3),
+                    ("αβ", "βα", 1), ("😀a", "😀b", 1))
+        @test REPL.string_distance(a, length(a), b, length(b)) == d
+        @test REPL.string_distance(b, length(b), a, length(a)) == d
+    end
+    bindings = REPL.AccessibleBinding.([:alpha, :beta, :gamma])
+    @test sprint(io->REPL.print_joined_cols(io, bindings, ", ", " or "; cols=80)) == "alpha, beta or gamma"
+    @test sprint(io->REPL.print_joined_cols(io, bindings, ", ", " or "; cols=4)) == ""
+    @test sprint(io->REPL.print_joined_cols(io, REPL.AccessibleBinding[])) == ""
+    rendered = sprint(io->REPL.repl_search(io, "reinterpret", Main); context=:displaysize=>(24,80))
+    @test startswith(rendered, "search:") && occursin("reinterpret", rendered)
 end

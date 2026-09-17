@@ -1,0 +1,75 @@
+--- a/src/Pkg.jl
++++ b/src/Pkg.jl
+@@ -32,7 +32,7 @@
+         return depot_list
+     else
+         isempty(depot_list) && Pkg.Types.pkgerror("no depots provided")
+-        return depot_list[1]
++        return first(depot_list)
+     end
+ end
+ 
+@@ -551,7 +551,7 @@
+ Make a package available for development by tracking it by path.
+ If `pkg` is given with only a name or by a URL, the package will be downloaded
+ to the location specified by the environment variable `JULIA_PKG_DEVDIR`, with
+-`joinpath(DEPOT_PATH[1],"dev")` being the default.
++`joinpath(DEPOT_PATH[0],"dev")` being the default.
+ 
+ If `pkg` is given as a local path, the package at that path will be tracked.
+ 
+--- a/src/Types.jl
++++ b/src/Types.jl
+@@ -1232,7 +1232,7 @@
+     end
+     for pkg in pkgs
+         if has_name(pkg) && !has_uuid(pkg) && pkg.name in keys(uuids)
+-            length(uuids[pkg.name]) == 1 && (pkg.uuid = uuids[pkg.name][1])
++            length(uuids[pkg.name]) == 1 && (pkg.uuid = first(uuids[pkg.name]))
+         end
+         if has_uuid(pkg) && !has_name(pkg) && pkg.uuid in keys(names)
+             pkg.name = names[pkg.uuid]
+@@ -1317,7 +1317,7 @@
+                         println(io)
+                         prefix = "   Suggestions:"
+                         printstyled(io, prefix, color = Base.info_color())
+-                        FuzzySorting.printmatches(io, name, all_names_ranked; cols = FuzzySorting._displaysize(ctx.io)[2] - length(prefix))
++                        FuzzySorting.printmatches(io, name, all_names_ranked; cols = FuzzySorting._displaysize(ctx.io)[1] - length(prefix))
+                     end
+                 else
+                     join(io, uuids, ", ", " or ")
+--- a/src/manifest.jl
++++ b/src/manifest.jl
+@@ -170,7 +170,7 @@
+                 "`$name=$uuid`'s dependency on `$dep` is ambiguous."
+             )
+         end
+-        final[dep] = infos[1].uuid
++        final[dep] = first(infos).uuid
+     end
+     return final
+ end
+@@ -407,7 +407,7 @@
+         if !isempty(entry.registries)
+             if length(entry.registries) == 1
+                 # For backwards compatibility, write a single registry as a string
+-                entry!(new_entry, "registries", entry.registries[1])
++                entry!(new_entry, "registries", first(entry.registries))
+             else
+                 entry!(new_entry, "registries", entry.registries)
+             end
+--- a/test/misc.jl
++++ b/test/misc.jl
+@@ -306,3 +306,12 @@
+ end
+ 
+ end # module
++
++# Depot selection uses the first collection position while preserving scalar paths and errors.
++@testset "zero-origin depot selection" begin
++    @test Pkg.depots1("/tmp/single") == "/tmp/single"
++    @test Pkg.depots1(["/tmp/first"]) == "/tmp/first"
++    @test Pkg.depots1(["/tmp/first", "/tmp/second"]) == "/tmp/first"
++    @test_throws Pkg.Types.PkgError Pkg.depots1(String[])
++end
++

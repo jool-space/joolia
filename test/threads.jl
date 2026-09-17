@@ -946,3 +946,79 @@ let code = """
     # JULIA_COPY_STACKS is broken on Windows (#35147)
     @test read(cmd, String) == "75025" skip=Sys.iswindows()
 end
+
+# Atomic-memory copies and fills include both zero-origin endpoints and preserve undefined slots.
+@testset "zero-origin atomic memory helpers" begin
+    src = AtomicMemory{Int}(undef, 3)
+    @test Base.fill_monotonic!(src, 7) === src
+    @test src[0] == 7 && src[2] == 7
+    dst = AtomicMemory{Int}(undef, 3)
+    @test Base.copyto_monotonic!(dst, src) === dst
+    @test dst[0] == 7 && dst[2] == 7
+    empty = AtomicMemory{Int}(undef, 0)
+    @test Base.fill_monotonic!(empty, 1) === empty
+    @test Base.copyto_monotonic!(empty, empty) === empty
+    refs = Memory{Any}(undef, 3)
+    refs[0] = :first
+    refs[2] = :last
+    copied = AtomicMemory{Any}(undef, 3)
+    Base.copyto_monotonic!(copied, refs)
+    @test copied[0] === :first && copied[2] === :last
+    @test !isassigned(copied, 1)
+end
+
+# Exercise scheduler heap roots and per-thread state at position zero.
+@testset "zero-origin scheduler storage" begin
+    heap = Base.Partr.taskheap()
+    for priority in 16:-1:0
+        t = Task(() -> nothing)
+        t.priority = UInt16(priority)
+        idx = Int(heap.ntasks)
+        heap.tasks[idx] = t
+        @atomic heap.ntasks = Int32(idx + 1)
+        Base.Partr.multiq_sift_up(heap, Int32(idx))
+        @test heap.tasks[0].priority == priority
+    end
+    for priority in 0:16
+        @test heap.tasks[0].priority == priority
+        n = Int(heap.ntasks)
+        @atomic heap.ntasks = Int32(n - 1)
+        heap.tasks[0] = heap.tasks[n - 1]
+        Base.unsetindex!(heap.tasks, n - 1)
+        Base.Partr.multiq_sift_down(heap, Int32(0))
+    end
+    @test heap.ntasks == 0
+    @test !isassigned(heap.tasks, 0)
+    calls = Ref(0)
+    once = Base.OncePerThread{Ref{Int}}() do
+        calls[] += 1
+        Ref(calls[])
+    end
+    @test once[0] === once[0]
+    @test calls[] == 1
+    @test once[0][] == 1
+    @test Threads.threadid() >= 0
+    @test Threads.threadid(Task(() -> nothing)) == -1
+end
+
+
+@testset "zero-origin thread APIs" begin
+    ni = Threads.threadpoolsize(:interactive)
+    nd = Threads.threadpoolsize(:default)
+    @test Threads.maxthreadid() == ni + nd - 1
+    @test 0 <= Threads.threadid() <= Threads.maxthreadid()
+    @test Threads.threadpooltids(:interactive) == collect(0:ni-1)
+    @test Threads.threadpooltids(:default) == collect(ni:ni+nd-1)
+
+    # Static workers are pinned to the default pool and receive its zero-origin IDs.
+    worker_ids = zeros(Int, nd)
+    Threads.@threads :static for i in 1:nd
+        worker_ids[i-1] = Threads.threadid()
+    end
+    @test sort(worker_ids) == collect(ni:ni+nd-1)
+
+    @test Threads.@threads [i for i in 0:3] == [0, 1, 2, 3]
+    @test Threads.@threads [i for i in 0:3 if iseven(i)] == [0, 2]
+    @test Threads.@threads [i + j for i in 0:1, j in 0:1] == [0, 1, 1, 2]
+    @test fetch(Threads.@spawn 42) == 42
+end

@@ -425,7 +425,7 @@ end
             (1.2345, "", ".2A", "1.3CP+0", "0X"),
         )
         _test_flags(i...)
-        _test_flags(-i[1], i[2:5]...)
+        _test_flags(-i[0], i[1:4]...)
     end
 
     # reasonably complex
@@ -460,8 +460,8 @@ end
     # issue #29662
     @test (Printf.@sprintf "%12.3e" pi*1e100) == "  3.142e+100"
 
-    @test string(Printf.Format("%a").formats[1]) == "%a"
-    @test string(Printf.Format("%a").formats[1]; modifier="R") == "%Ra"
+    @test string(Printf.Format("%a").formats[0]) == "%a"
+    @test string(Printf.Format("%a").formats[0]; modifier="R") == "%Ra"
 
     @test Printf.@sprintf("%d", 3.14) == "3"
     @test Printf.@sprintf("%2d", 3.14) == " 3"

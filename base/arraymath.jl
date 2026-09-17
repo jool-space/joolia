@@ -75,7 +75,7 @@ julia> b = Int64[1 2; 3 4]
  1  2
  3  4
 
-julia> reverse(b, dims=2)
+julia> reverse(b, dims=1)
 2×2 Matrix{Int64}:
  2  1
  4  3
@@ -113,7 +113,7 @@ function _reverse!(A::AbstractArray{<:Any,N}, dims::NTuple{M,Int}) where {N,M}
     end
 
     # swapping loop only needs to traverse ≈half of the array
-    halfsz = ntuple(k -> k == dims[1] ? size(A,k) ÷ 2 : size(A,k), Val{N}())
+    halfsz = ntuple(k -> k == dims[0] ? size(A,k) ÷ 2 : size(A,k), Val{N}())
 
     last1 = ntuple(k -> lastindex(A,k)+firstindex(A,k), Val{N}()) # offset for reversed index
     for i in CartesianIndices(ntuple(k -> firstindex(A,k):firstindex(A,k)-1+@inbounds(halfsz[k]), Val{N}()))
@@ -121,11 +121,11 @@ function _reverse!(A::AbstractArray{<:Any,N}, dims::NTuple{M,Int}) where {N,M}
         iᵣ = CartesianIndex(ifelse.(dimrev, last1 .- iₜ, iₜ))
         @inbounds A[iᵣ], A[i] = A[i], A[iᵣ]
     end
-    if M > 1 && isodd(size(A, dims[1]))
+    if M > 1 && isodd(size(A, dims[0]))
         # middle slice for odd dimensions must be recursively flipped
-        mid = firstindex(A, dims[1]) + (size(A, dims[1]) ÷ 2)
-        midslice = CartesianIndices(ntuple(k -> k == dims[1] ? (mid:mid) : (firstindex(A,k):lastindex(A,k)), Val{N}()))
-        _reverse!(view(A, midslice), dims[2:end])
+        mid = firstindex(A, dims[0]) + (size(A, dims[0]) ÷ 2)
+        midslice = CartesianIndices(ntuple(k -> k == dims[0] ? (mid:mid) : (firstindex(A,k):lastindex(A,k)), Val{N}()))
+        _reverse!(view(A, midslice), dims[1:end])
     end
     return A
 end
@@ -155,7 +155,7 @@ function rotl90(A::AbstractMatrix)
     ind1, ind2 = axes(A)
     B = similar(A, (ind2,ind1))
     n = first(ind2)+last(ind2)
-    for i=axes(A,1), j=ind2
+    for i=axes(A,0), j=ind2
         B[n-j,i] = A[i,j]
     end
     return B
@@ -183,7 +183,7 @@ function rotr90(A::AbstractMatrix)
     ind1, ind2 = axes(A)
     B = similar(A, (ind2,ind1))
     m = first(ind1)+last(ind1)
-    for i=ind1, j=axes(A,2)
+    for i=ind1, j=axes(A,1)
         B[j,m-i] = A[i,j]
     end
     return B
@@ -208,7 +208,7 @@ julia> rot180(a)
 """
 function rot180(A::AbstractMatrix)
     B = similar(A)
-    ind1, ind2 = axes(A,1), axes(A,2)
+    ind1, ind2 = axes(A,0), axes(A,1)
     m, n = first(ind1)+last(ind1), first(ind2)+last(ind2)
     for j=ind2, i=ind1
         B[m-i,n-j] = A[i,j]

@@ -23,9 +23,9 @@ function core_lowering_hook(@nospecialize(code), mod::Module, file::String="none
         st0 = code isa Expr ? expr_to_est(code, LineNumberNode(line, file)) : code
         if kind(st0) in KSet"toplevel module"
             return Core.svec(code)
-        elseif kind(st0) === K"doc" && numchildren(st0) >= 2 && kind(st0[2]) === K"module"
+        elseif kind(st0) === K"doc" && numchildren(st0) >= 2 && kind(st0[1]) === K"module"
             # TODO: this ignores module docstrings for now
-            return Core.svec(est_to_expr(st0[2]))
+            return Core.svec(est_to_expr(st0[1]))
         end
         st0 = rebase_layers(st0, mod, JL_OLD_SYNTAX_VERSION)
         st1 = expand_forms_1(st0, world, true)

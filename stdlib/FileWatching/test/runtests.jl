@@ -20,8 +20,8 @@ n = 20
 intvls = [2, .2, .1, .005, .00001]
 pipe_fds = fill((Base.INVALID_OS_HANDLE, Base.INVALID_OS_HANDLE), n)
 
-for i in 1:n
-    if Sys.iswindows() || i > n ÷ 2
+for i in 0:n-1
+    if Sys.iswindows() || i >= n ÷ 2
         uv_error("socketpair", ccall(:uv_socketpair, Cint, (Cint, Cint, Ptr{NTuple{2, Base.OS_HANDLE}}, Cint, Cint), 1, (Sys.iswindows() ? 6 : 0), Ref(pipe_fds, i), 0, 0))
     else
         uv_error("pipe", ccall(:uv_pipe, Cint, (Ptr{NTuple{2, Base.OS_HANDLE}}, Cint, Cint), Ref(pipe_fds, i), 0, 0))
@@ -29,8 +29,8 @@ for i in 1:n
     Ctype = Sys.iswindows() ? Ptr{Cvoid} : Cint
     FDmax = Sys.iswindows() ? typemax(Int32) : (n + 60 + (isdefined(Main, :Revise) * 30)) # expectations on reasonable values
     fd_in_limits =
-        0 <= Int(Base.cconvert(Ctype, pipe_fds[i][1])) <= FDmax &&
-        0 <= Int(Base.cconvert(Ctype, pipe_fds[i][2])) <= FDmax
+        0 <= Int(Base.cconvert(Ctype, pipe_fds[i][0])) <= FDmax &&
+        0 <= Int(Base.cconvert(Ctype, pipe_fds[i][1])) <= FDmax
     # Dump out what file descriptors are open for easier debugging of failure modes
     if !fd_in_limits && Sys.islinux()
         run(`ls -la /proc/$(getpid())/fd`)
@@ -44,9 +44,9 @@ function pfd_tst_reads(idx, intvl)
     global ready += 1
     wait(ready_c)
     start_evt2 = Condition()
-    evt2 = @async (notify(start_evt2); poll_fd(pipe_fds[idx][1], intvl; readable=true, writable=false))
+    evt2 = @async (notify(start_evt2); poll_fd(pipe_fds[idx][0], intvl; readable=true, writable=false))
     wait(start_evt2); yield() # make sure the async poll_fd is pumping events
-    evt = poll_fd(pipe_fds[idx][1], intvl; readable=true, writable=false)
+    evt = poll_fd(pipe_fds[idx][0], intvl; readable=true, writable=false)
     @test !evt.timedout
     @test evt.readable
     @test !evt.writable
@@ -54,11 +54,11 @@ function pfd_tst_reads(idx, intvl)
 
     dout = zeros(UInt8, 1)
     @static if Sys.iswindows()
-        1 == ccall(:recv, stdcall, Cint, (Ptr{Cvoid}, Ptr{UInt8}, Cint, Cint), pipe_fds[idx][1], dout, 1, 0) || error(Libc.FormatMessage())
+        1 == ccall(:recv, stdcall, Cint, (Ptr{Cvoid}, Ptr{UInt8}, Cint, Cint), pipe_fds[idx][0], dout, 1, 0) || error(Libc.FormatMessage())
     else
-        @test 1 == ccall(:read, Csize_t, (Cint, Ptr{UInt8}, Csize_t), pipe_fds[idx][1], dout, 1)
+        @test 1 == ccall(:read, Csize_t, (Cint, Ptr{UInt8}, Csize_t), pipe_fds[idx][0], dout, 1)
     end
-    @test dout[1] == Int8('A')
+    @test dout[0] == Int8('A')
 end
 
 
@@ -66,9 +66,9 @@ function pfd_tst_timeout(idx, intvl)
     global ready += 1
     wait(ready_c)
     start_evt2 = Condition()
-    evt2 = @async (notify(start_evt2); poll_fd(pipe_fds[idx][1], intvl; readable=true, writable=false))
+    evt2 = @async (notify(start_evt2); poll_fd(pipe_fds[idx][0], intvl; readable=true, writable=false))
     wait(start_evt2); yield() # make sure the async poll_fd is pumping events
-    evt = poll_fd(pipe_fds[idx][1], intvl; readable=true, writable=false)
+    evt = poll_fd(pipe_fds[idx][0], intvl; readable=true, writable=false)
     @test evt.timedout
     @test !evt.readable
     @test !evt.writable
@@ -80,7 +80,7 @@ for (i, intvl) in enumerate(intvls)
     Experimental.@sync begin
         global ready = 0
         global ready_c = Condition()
-        for idx in 1:n
+        for idx in 0:n-1
             if isodd(idx)
                 @async pfd_tst_reads(idx, intvl)
             else
@@ -93,17 +93,17 @@ for (i, intvl) in enumerate(intvls)
         end
         ready = 0
         # tickle only the odd ones, but test for writability for everyone
-        for idx in 1:n
-            event = poll_fd(pipe_fds[idx][2], 0.001; readable=true, writable=true)
+        for idx in 0:n-1
+            event = poll_fd(pipe_fds[idx][1], 0.001; readable=true, writable=true)
             @test !event.timedout
             @test !event.readable
             @test event.writable
 
             if isodd(idx)
                 @static if Sys.iswindows()
-                    1 == ccall(:send, stdcall, Cint, (Ptr{Cvoid}, Ptr{UInt8}, Cint, Cint), pipe_fds[idx][2], "A", 1, 0) || error(Libc.FormatMessage())
+                    1 == ccall(:send, stdcall, Cint, (Ptr{Cvoid}, Ptr{UInt8}, Cint, Cint), pipe_fds[idx][1], "A", 1, 0) || error(Libc.FormatMessage())
                 else
-                    @test 1 == ccall(:write, Csize_t, (Cint, Ptr{UInt8}, Csize_t), pipe_fds[idx][2], "A", 1)
+                    @test 1 == ccall(:write, Csize_t, (Cint, Ptr{UInt8}, Csize_t), pipe_fds[idx][1], "A", 1)
                 end
             end
         end
@@ -111,8 +111,8 @@ for (i, intvl) in enumerate(intvls)
     end
 end
 
-for i in 1:n
-    for j = 1:2
+for i in 0:n-1
+    for j = 0:1
         @static if Sys.iswindows()
             0 == ccall(:closesocket, stdcall, Cint, (Ptr{Cvoid},), pipe_fds[i][j]) || error(Libc.FormatMessage())
         else
@@ -222,7 +222,7 @@ function test_timeout(tval)
         @async test_file_poll(channel, 10, tval)
         tr = take!(channel)
     end
-    @test ispath(tr[1]::StatStruct) && tr[2] === EOFError()
+    @test ispath(tr[0]::StatStruct) && tr[1] === EOFError()
     @test tval <= t_elapsed
 end
 
@@ -235,7 +235,7 @@ function test_touch(slval)
     write(f, "Hello World\n")
     close(f)
     tr = take!(channel)
-    @test ispath(tr[1]::StatStruct) && ispath(tr[2]::StatStruct)
+    @test ispath(tr[0]::StatStruct) && ispath(tr[1]::StatStruct)
     fetch(t)
 end
 
@@ -406,23 +406,23 @@ if !Sys.isapple()
             if !Sys.isapple()
                 @test p == (F_PATH => FileWatching.FileEvent(FileWatching.UV_RENAME))
             end
-            while changes[end][1] == F_PATH
-                @test pop!(changes)[2] == FileWatching.FileEvent(FileWatching.UV_RENAME)
+            while changes[end][0] == F_PATH
+                @test pop!(changes)[1] == FileWatching.FileEvent(FileWatching.UV_RENAME)
             end
             p = pop!(changes)
             if !Sys.isapple()
                 @test p == (F_PATH * "~" => FileWatching.FileEvent(FileWatching.UV_RENAME))
             end
-            while changes[end][1] == F_PATH * "~"
-                @test pop!(changes)[2] == FileWatching.FileEvent(FileWatching.UV_RENAME)
+            while changes[end][0] == F_PATH * "~"
+                @test pop!(changes)[1] == FileWatching.FileEvent(FileWatching.UV_RENAME)
             end
-            if changes[end][1] == F_PATH
-                @test pop!(changes)[2] == FileWatching.FileEvent(FileWatching.UV_RENAME)
+            if changes[end][0] == F_PATH
+                @test pop!(changes)[1] == FileWatching.FileEvent(FileWatching.UV_RENAME)
             end
             for j = 1:4
                 for i = 3:-1:1
-                    while changes[end - 1][1] == "$F_PATH$i"
-                        @test let x = pop!(changes)[2]; x.changed ⊻ x.renamed; end
+                    while changes[end - 1][0] == "$F_PATH$i"
+                        @test let x = pop!(changes)[1]; x.changed ⊻ x.renamed; end
                     end
                     p = pop!(changes)
                     if !Sys.isapple()
@@ -431,7 +431,7 @@ if !Sys.isapple()
                 end
             end
         end
-        @test all(x -> (isa(x, Pair) && x[1] == F_PATH && (x[2].changed ⊻ x[2].renamed)), changes) context=changes
+        @test all(x -> (isa(x, Pair) && x[0] == F_PATH && (x[1].changed ⊻ x[1].renamed)), changes) context=changes
     end
 end
 @test_throws(Base._UVError("FileMonitor (start)", Base.UV_ENOENT),

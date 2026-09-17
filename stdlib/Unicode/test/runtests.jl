@@ -11,7 +11,7 @@ Random.seed!(12345)
 
 @testset "string normalization" begin
     # normalize (Unicode normalization etc.):
-    @test normalize("\u006e\u0303", :NFC) == "\u00f1" == normalize(SubString("ab\u006e\u0303cd",3,4), :NFC)
+    @test normalize("\u006e\u0303", :NFC) == "\u00f1" == normalize(SubString("ab\u006e\u0303cd",2,3), :NFC)
     @test "\u006e\u0303" == normalize("\u00f1", :NFD)
     @test normalize("\ufb00", :NFC) != "ff"
     @test normalize("\ufb00", :NFKC) == "ff"
@@ -279,13 +279,13 @@ end
 
     for pre in ("","ä"), post in ("","x̂")
         prelen = length(graphemes(pre))
-        @test graphemes(pre * "öü" * post, (1:2) .+ prelen) == "öü"
-        @test graphemes(pre * "ö" * post, (1:1) .+ prelen) == "ö"
+        @test graphemes(pre * "öü" * post, (0:1) .+ prelen) == "öü"
+        @test graphemes(pre * "ö" * post, (0:0) .+ prelen) == "ö"
     end
-    @test graphemes("äöüx", 6:5)::SubString{String} == ""
-    @test_throws BoundsError graphemes("äöüx", 2:5)
-    @test_throws BoundsError graphemes("äöüx", 5:5)
-    @test_throws ArgumentError graphemes("äöüx", 0:1)
+    @test graphemes("äöüx", 5:4)::SubString{String} == ""
+    @test_throws BoundsError graphemes("äöüx", 1:4)
+    @test_throws BoundsError graphemes("äöüx", 4:4)
+    @test_throws ArgumentError graphemes("äöüx", -1:0)
 
     @test @allocated(length(graphemes("äöüx"))) == 0
 end
@@ -328,9 +328,9 @@ end
     @test !isassigned(0xfffe)
     @test !isassigned(Int(0xffff))
     @test !isassigned(typemax(Int64))
-    @test !isassigned("\xf4\x90\x80\x80"[1])
-    @test !isassigned("\xf7\xbf\xbf\xbf"[1])
-    @test !isassigned("\xff"[1])
+    @test !isassigned("\xf4\x90\x80\x80"[0])
+    @test !isassigned("\xf7\xbf\xbf\xbf"[0])
+    @test !isassigned("\xff"[0])
 end
 
 @testset "isspace" begin
@@ -353,7 +353,7 @@ end
 end
 
 @testset "#22693: substring graphemes" begin
-    g = graphemes(SubString("123α56789", 1, 6))
+    g = graphemes(SubString("123α56789", 0, 5))
     @test eltype(g) == SubString{String}
     @test collect(g) == ["1","2","3","α","5"]
 end
@@ -546,4 +546,17 @@ end
 
 @testset "Docstrings" begin
     @test isempty(Docs.undocumented_names(Unicode))
+end
+
+# Stripped marks may produce empty segments before, after, or throughout a string.
+@testset "zero-origin empty normalization segments" begin
+    strings = ("", "a", "\u0301", "\u0301a", "a\u0301", "\u0301\u0308", "á", "Á",
+               "a" * repeat("\u0315\u0300", 40), repeat("\u0301", 40))
+    for a in strings, b in strings, stripmark in (false, true), casefold in (false, true)
+        expected = normalize(a; decompose=true, stripmark, casefold) ==
+                   normalize(b; decompose=true, stripmark, casefold)
+        @test isequal_normalized(a, b; stripmark, casefold) == expected
+    end
+    @test graphemes("", 0:-1) == ""
+    @test_throws BoundsError graphemes("", 0:0)
 end

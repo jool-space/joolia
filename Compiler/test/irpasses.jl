@@ -1636,6 +1636,19 @@ function persistent_dict_elim_multiple_phi2(c::Bool)
 end
 @test persistent_dict_elim_multiple_phi2(true) == 1
 
+# KeyValue.set stores its result in the final zero-origin Expr argument.
+function joolia_keyvalue_lastarg(value::Int, branch::Bool)
+    before = Base.PersistentDict(:key => value)
+    after = branch ? Base.PersistentDict(before, :other => -value) :
+                     Base.PersistentDict(before, :other => value + 1)
+    return after[:key], after[:other]
+end
+
+@test joolia_keyvalue_lastarg(7, true) == (7, -7)
+@test joolia_keyvalue_lastarg(7, false) == (7, 8)
+@test joolia_keyvalue_lastarg(0, true) == (0, 0)
+@test joolia_keyvalue_lastarg(-1, false) == (-1, 0)
+
 # Test CFG simplify with try/catch blocks
 let code = Any[
         # Block 1

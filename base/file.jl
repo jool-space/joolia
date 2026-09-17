@@ -733,8 +733,8 @@ const temp_prefix = "jl_"
 function _rand_filename(len = 10)
     slug = Base.StringVector(len)
     chars = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    for i = 1:len
-        slug[i] = chars[(Libc.rand() % length(chars)) + 1]
+    for i in eachindex(slug)
+        slug[i] = chars[Libc.rand() % length(chars)]
     end
     return String(slug)
 end
@@ -1508,7 +1508,7 @@ function Base.getproperty(stats::DiskStat, field::Symbol)
 end
 
 @eval Base.propertynames(stats::DiskStat) =
-    $((fieldnames(DiskStat)[1:end-1]..., :available, :total, :used))
+    $((fieldnames(DiskStat)[0:end-1]..., :available, :total, :used))
 
 Base.show(io::IO, x::DiskStat) =
     print(io, "DiskStat(total=$(x.total), used=$(x.used), available=$(x.available))")

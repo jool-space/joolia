@@ -4,6 +4,7 @@ module DSFMT
 
 import Base: copy, copy!, ==, hash
 using Base.GMP.MPZ
+using Base.GMP: BigInt
 
 export DSFMT_state, dsfmt_get_min_array_size, dsfmt_get_idstring,
        dsfmt_init_gen_rand, dsfmt_init_by_array, dsfmt_gv_init_by_array,
@@ -13,7 +14,7 @@ export DSFMT_state, dsfmt_get_min_array_size, dsfmt_get_idstring,
 const MEXP = 19937
 
 "DSFMT internal state array size of N 128-bit integers."
-const N = floor(Int, ((MEXP - 128) / 104 + 1))
+const N = (MEXP - 128) ÷ 104 + 1
 
 """
 Julia DSFMT state representation size counted in 32-bit integers.
@@ -142,7 +143,7 @@ function sqrmod!(f::GF2X, m::GF2X)::GF2X
         function sqrmod_closure(g, i)
             i <= d÷2 ? # optimization for "simple" squares
                 setcoeff!(g, 2i) :
-                xor!(g, sqrs[i])
+                xor!(g, sqrs[i-1])
         end
         foldl(sqrmod_closure, filter(Base.Fix1(coeff, f), 0:degree(f)); init=GF2X(0))
     end
@@ -195,7 +196,7 @@ function dsfmt_jump(s::DSFMT_state, jp::GF2X)
 
     val = s.val
     nval = length(val)
-    index = val[nval - 1]
+    index = val[nval - 2]
     work = zeros(Int32, JN32)
     rwork = reinterpret(UInt64, work)
     dsfmt = Vector{UInt64}(undef, nval >> 1)
@@ -223,21 +224,21 @@ function dsfmt_jump_add!(dest::AbstractVector{UInt64}, src::Vector{UInt64})
     diff = ((sp - dp + N) % N)
     i = 1
     while i <= N-diff
-        j = i*2-1
+        j = i*2-2
         p = j + diff*2
         dest[j]   ⊻= src[p]
         dest[j+1] ⊻= src[p+1]
         i += 1
     end
     while i <= N
-        j = i*2-1
+        j = i*2-2
         p = j + (diff - N)*2
         dest[j]   ⊻= src[p]
         dest[j+1] ⊻= src[p+1]
         i += 1
     end
+    dest[N*2] ⊻= src[N*2]
     dest[N*2+1] ⊻= src[N*2+1]
-    dest[N*2+2] ⊻= src[N*2+2]
     return dest
 end
 
@@ -250,9 +251,9 @@ function dsfmt_jump_next_state!(mts::Vector{UInt64})
 
     idx = (mts[end] >> 1) % N
 
-    a = idx*2+1
-    b = ((idx + POS1) % N)*2+1
-    u = N*2+1
+    a = idx*2
+    b = ((idx + POS1) % N)*2
+    u = N*2
 
     t0 = mts[a]
     t1 = mts[a+1]

@@ -178,7 +178,10 @@ function Base.print(io::IO, id::GitHash)
         print(io, string(i, base = 16, pad = 2))
     end
 end
-Base.string(id::GitShortHash) = string(id.hash)[1:id.len]
+function Base.string(id::GitShortHash)
+    id.len == 0 && return ""
+    return string(id.hash)[0:Int(id.len) - 1]
+end
 
 Base.show(io::IO, id::GitHash) = print(io, "GitHash(\"$(string(id))\")")
 Base.show(io::IO, id::GitShortHash) = print(io, "GitShortHash(\"$(string(id))\")")
@@ -212,7 +215,7 @@ Base.isless(id1::AbstractGitHash, id2::AbstractGitHash)  = cmp(id1, id2) < 0
 Determine whether all hexadecimal digits of the given [`GitHash`](@ref) are zero.
 """
 function iszero(id::GitHash)
-    for i in 1:OID_RAWSZ
+    for i in 0:(OID_RAWSZ - 1)
         id.val[i] != zero(UInt8) && return false
     end
     return true

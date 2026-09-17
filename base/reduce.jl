@@ -53,10 +53,10 @@ function _foldl_impl(op::OP, init, itr) where {OP}
     # If init is known, the call to op may be evaluated at compile time
     y = iterate(itr)
     y === nothing && return init
-    v = op(init, y[1])
+    v = op(init, y[0])
     # Using a for loop is more performant than a while loop (see #56492)
     # This unrolls the loop a second time before entering the body
-    for x in Iterators.rest(itr, y[2])
+    for x in Iterators.rest(itr, y[1])
         v = op(v, x)
     end
     return v
@@ -836,16 +836,16 @@ Values are compared with `isless`.
 
 ```jldoctest
 julia> findmax(identity, 5:9)
-(9, 5)
+(9, 4)
 
 julia> findmax(-, 1:10)
-(-1, 1)
+(-1, 0)
 
 julia> findmax(first, [(1, :a), (3, :b), (3, :c)])
-(3, 2)
+(3, 1)
 
 julia> findmax(cos, 0:π/2:2π)
-(1.0, 1)
+(1.0, 0)
 ```
 """
 findmax(f, domain) = _findmax(f, domain, :)
@@ -868,13 +868,13 @@ See also: [`findmin`](@ref), [`argmax`](@ref), [`maximum`](@ref).
 
 ```jldoctest
 julia> findmax([8, 0.1, -9, pi])
-(8.0, 1)
+(8.0, 0)
 
 julia> findmax([1, 7, 7, 6])
-(7, 2)
+(7, 1)
 
 julia> findmax([1, 7, 7, NaN])
-(NaN, 4)
+(NaN, 3)
 ```
 """
 findmax(itr) = _findmax(itr, :)
@@ -901,16 +901,16 @@ and [`pairs(domain)`](@ref).
 
 ```jldoctest
 julia> findmin(identity, 5:9)
-(5, 1)
+(5, 0)
 
 julia> findmin(-, 1:10)
-(-10, 10)
+(-10, 9)
 
 julia> findmin(first, [(2, :a), (2, :b), (3, :c)])
-(2, 1)
+(2, 0)
 
 julia> findmin(cos, 0:π/2:2π)
-(-1.0, 3)
+(-1.0, 2)
 ```
 
 """
@@ -934,13 +934,13 @@ See also: [`findmax`](@ref), [`argmin`](@ref), [`minimum`](@ref).
 
 ```jldoctest
 julia> findmin([8, 0.1, -9, pi])
-(-9.0, 3)
+(-9.0, 2)
 
 julia> findmin([1, 7, 7, 6])
-(1, 1)
+(1, 0)
 
 julia> findmin([1, 7, 7, NaN])
-(NaN, 4)
+(NaN, 3)
 ```
 """
 findmin(itr) = _findmin(itr, :)
@@ -970,7 +970,7 @@ julia> argmax(cos, 0:π/2:2π)
 0.0
 ```
 """
-argmax(f, domain) = mapfoldl(x -> (f(x), x), _rf_findmax, domain)[2]
+argmax(f, domain) = mapfoldl(x -> (f(x), x), _rf_findmax, domain)[1]
 
 """
     argmax(itr)
@@ -990,16 +990,16 @@ See also: [`argmin`](@ref), [`findmax`](@ref).
 # Examples
 ```jldoctest
 julia> argmax([8, 0.1, -9, pi])
-1
+0
 
 julia> argmax([1, 7, 7, 6])
-2
+1
 
 julia> argmax([1, 7, 7, NaN])
-4
+3
 ```
 """
-argmax(itr) = findmax(itr)[2]
+argmax(itr) = findmax(itr)[1]
 
 """
     argmin(f, domain)
@@ -1028,7 +1028,7 @@ julia> argmin(acos, 0:0.1:1)
 1.0
 ```
 """
-argmin(f, domain) = mapfoldl(x -> (f(x), x), _rf_findmin, domain)[2]
+argmin(f, domain) = mapfoldl(x -> (f(x), x), _rf_findmin, domain)[1]
 
 """
     argmin(itr)
@@ -1048,16 +1048,16 @@ See also: [`argmax`](@ref), [`findmin`](@ref).
 # Examples
 ```jldoctest
 julia> argmin([8, 0.1, -9, pi])
-3
-
-julia> argmin([7, 1, 1, 6])
 2
 
+julia> argmin([7, 1, 1, 6])
+1
+
 julia> argmin([7, 1, 1, NaN])
-4
+3
 ```
 """
-argmin(itr) = findmin(itr)[2]
+argmin(itr) = findmin(itr)[1]
 
 ## count
 
@@ -1102,11 +1102,11 @@ function _simple_count(::typeof(identity), x::Array{Bool}, init=0)
     mask = 0x0101010101010101 % UInt
     GC.@preserve x begin
         ptr = Ptr{UInt}(pointer(x))
-        for i in 1:chunks
+        for i in 0:chunks-1
             n = (n + count_ones(unsafe_load(ptr, i) & mask)) % T
         end
     end
-    for i in sizeof(UInt)*chunks+1:length(x)
+    for i in sizeof(UInt)*chunks:length(x)-1
         n = (n + x[i]) % T
     end
     return n

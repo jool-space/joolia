@@ -27,7 +27,7 @@ let
                 @test length([i for i in dr]) == 0
                 @test_throws ArgumentError minimum(dr)
                 @test_throws ArgumentError maximum(dr)
-                @test_throws BoundsError dr[1]
+                @test_throws BoundsError dr[0]
                 @test findall(in(dr), dr) == Int64[]
                 @test [dr;] == T[]
                 @test isempty(reverse(dr))
@@ -35,7 +35,7 @@ let
                 @test first(reverse(dr)) < f1
                 @test last(reverse(dr)) >= f1
                 @test issorted(dr)
-                @test sortperm(dr) === StepRange{Int64,Int}(1:1:0)
+                @test sortperm(dr) === StepRange{Int64,Int}(0:1:-1)
                 @test !(f1 in dr)
                 @test !(l1 in dr)
                 @test !(f1 - pos_step in dr)
@@ -53,14 +53,14 @@ let
                     @test last(dr) <= l
                     @test minimum(dr) == first(dr)
                     @test maximum(dr) == last(dr)
-                    @test dr[1] == f
+                    @test dr[0] == f
                     @test dr[end] <= l
                     @test iterate(dr) == (first(dr), (length(dr), 1))
 
                     if len < 10000
                         dr1 = [i for i in dr]
                         @test length(dr1) == len
-                        @test findall(in(dr), dr) == [1:len;]
+                        @test findall(in(dr), dr) == [0:len-1;]
                         @test length([dr;]) == len
                         @test dr == dr1
                         @test hash(dr) == hash(dr1)
@@ -85,7 +85,7 @@ let
                 @test length([i for i in dr]) == 0
                 @test_throws ArgumentError minimum(dr)
                 @test_throws ArgumentError maximum(dr)
-                @test_throws BoundsError dr[1]
+                @test_throws BoundsError dr[0]
                 @test findall(in(dr), dr) == Int64[]
                 @test [dr;] == T[]
                 @test isempty(reverse(dr))
@@ -93,7 +93,7 @@ let
                 @test first(reverse(dr)) > l1
                 @test last(reverse(dr)) <= l1
                 @test issorted(dr)
-                @test sortperm(dr) === StepRange{Int64,Int}(1:1:0)
+                @test sortperm(dr) === StepRange{Int64,Int}(0:1:-1)
                 @test !(l1 in dr)
                 @test !(l1 in dr)
                 @test !(l1 - neg_step in dr)
@@ -111,14 +111,14 @@ let
                     @test last(dr) >= f
                     @test minimum(dr) == last(dr)
                     @test maximum(dr) == first(dr)
-                    @test dr[1] == l
+                    @test dr[0] == l
                     @test dr[end] >= f
                     @test iterate(dr) == (first(dr), (length(dr), 1))
 
                     if len < 10000
                         dr1 = [i for i in dr]
                         @test length(dr1) == len
-                        @test findall(in(dr), dr) == [1:len;]
+                        @test findall(in(dr), dr) == [0:len-1;]
                         @test length([dr;]) == len
                         @test dr == dr1
                         @test hash(dr) == hash(dr1)
@@ -145,7 +145,7 @@ let
                     @test length([i for i in dr]) == 0
                     @test_throws ArgumentError minimum(dr)
                     @test_throws ArgumentError maximum(dr)
-                    @test_throws BoundsError dr[1]
+                    @test_throws BoundsError dr[0]
                     @test findall(in(dr), dr) == Int64[]
                     @test [dr;] == T[]
                     @test isempty(reverse(dr))
@@ -153,7 +153,7 @@ let
                     @test first(reverse(dr)) < f1
                     @test last(reverse(dr)) >= f1
                     @test issorted(dr)
-                    @test sortperm(dr) === StepRange{Int64,Int}(1:1:0)
+                    @test sortperm(dr) === StepRange{Int64,Int}(0:1:-1)
                     @test !(f1 in dr)
                     @test !(l1 in dr)
                     @test !(f1 - pos_step in dr)
@@ -171,14 +171,14 @@ let
                         @test last(dr) <= l
                         @test minimum(dr) == first(dr)
                         @test maximum(dr) == last(dr)
-                        @test dr[1] == f
+                        @test dr[0] == f
                         @test dr[end] <= l
                         @test iterate(dr) == (first(dr), (length(dr), 1))
 
                         if len < 10000
                             dr1 = [i for i in dr]
                             @test length(dr1) == len
-                            @test findall(in(dr), dr) == [1:len;]
+                            @test findall(in(dr), dr) == [0:len-1;]
                             @test length([dr;]) == len
                             @test dr == dr1
                             @test hash(dr) == hash(dr1)
@@ -203,7 +203,7 @@ let
                     @test length([i for i in dr]) == 0
                     @test_throws ArgumentError minimum(dr)
                     @test_throws ArgumentError maximum(dr)
-                    @test_throws BoundsError dr[1]
+                    @test_throws BoundsError dr[0]
                     @test findall(in(dr), dr) == Int64[]
                     @test [dr;] == T[]
                     @test isempty(reverse(dr))
@@ -211,7 +211,7 @@ let
                     @test first(reverse(dr)) > l1
                     @test last(reverse(dr)) <= l1
                     @test issorted(dr)
-                    @test sortperm(dr) === StepRange{Int64,Int}(1:1:0)
+                    @test sortperm(dr) === StepRange{Int64,Int}(0:1:-1)
                     @test !(l1 in dr)
                     @test !(l1 in dr)
                     @test !(l1 - neg_step in dr)
@@ -229,14 +229,14 @@ let
                         @test last(dr) >= f
                         @test minimum(dr) == last(dr)
                         @test maximum(dr) == first(dr)
-                        @test dr[1] == l
+                        @test dr[0] == l
                         @test dr[end] >= f
                         @test iterate(dr) == (first(dr), (length(dr), 1))
 
                         if len < 10000
                             dr1 = [i for i in dr]
                             @test length(dr1) == len
-                            @test findall(in(dr), dr) == [1:len;]
+                            @test findall(in(dr), dr) == [0:len-1;]
                             @test length([dr;]) == len
                             @test dr == dr1
                             @test hash(dr) == hash(dr1)
@@ -292,17 +292,17 @@ drs = Any[dr, dr1, dr2, dr3, dr4, dr5, dr6, dr7, dr8, dr9, dr10,
           dr11, dr12, dr13, dr14, dr15, dr16, dr17, dr18, dr19, dr20]
 drs2 = map(x->Dates.Date(first(x)):step(x):Dates.Date(last(x)), drs)
 
-@test map(length, drs) == map(x->size(x)[1], drs)
+@test map(length, drs) == map(x->size(x)[0], drs)
 @test map(length, drs) == map(x->length(Dates.Date(first(x)):step(x):Dates.Date(last(x))), drs)
 @test map(length, drs) == map(x->length(reverse(x)), drs)
-@test all(x->findall(in(x), x)==[1:length(x);], drs[1:4])
+@test all(x->findall(in(x), x)==[0:length(x)-1;], drs[0:3])
 @test isempty(dr2)
 @test all(x->reverse(x) == range(last(x), step=-step(x), length=length(x)), drs)
-@test all(x->minimum(x) == (step(x) < zero(step(x)) ? last(x) : first(x)), drs[4:end])
-@test all(x->maximum(x) == (step(x) < zero(step(x)) ? first(x) : last(x)), drs[4:end])
-@test all(drs[1:3]) do dd
+@test all(x->minimum(x) == (step(x) < zero(step(x)) ? last(x) : first(x)), drs[3:end])
+@test all(x->maximum(x) == (step(x) < zero(step(x)) ? first(x) : last(x)), drs[3:end])
+@test all(drs[0:2]) do dd
     for (i, d) in enumerate(dd)
-        @test d == (first(dd) + Dates.Day(i - 1))
+        @test d == (first(dd) + Dates.Day(i))
     end
     true
 end
@@ -312,7 +312,7 @@ b = Dates.DateTime(2013, 2, 1)
 @test map!(x->x + Dates.Day(1), Vector{Dates.DateTime}(undef, 32), dr) == [(a + Dates.Day(1)):Dates.Day(1):(b + Dates.Day(1));]
 @test map(x->x + Dates.Day(1), dr) == [(a + Dates.Day(1)):Dates.Day(1):(b + Dates.Day(1));]
 
-@test map(x->a in x, drs[1:4]) == [true, true, false, true]
+@test map(x->a in x, drs[0:3]) == [true, true, false, true]
 @test a in dr
 @test b in dr
 @test Dates.DateTime(2013, 1, 3) in dr
@@ -332,9 +332,9 @@ b = Dates.DateTime(2013, 2, 1)
 @test last(a:Dates.Day(7):b) == Dates.DateTime(2013, 1, 29)
 @test length(a:Dates.Day(32):b) == 1
 @test last(a:Dates.Day(32):b) == Dates.DateTime(2013, 1, 1)
-@test (a:Dates.Day(1):b)[1] == Dates.DateTime(2013, 1, 1)
-@test (a:Dates.Day(1):b)[2] == Dates.DateTime(2013, 1, 2)
-@test (a:Dates.Day(1):b)[7] == Dates.DateTime(2013, 1, 7)
+@test (a:Dates.Day(1):b)[0] == Dates.DateTime(2013, 1, 1)
+@test (a:Dates.Day(1):b)[1] == Dates.DateTime(2013, 1, 2)
+@test (a:Dates.Day(1):b)[6] == Dates.DateTime(2013, 1, 7)
 @test (a:Dates.Day(1):b)[end] == b
 @test first(a:Dates.Day(1):Dates.DateTime(20000, 1, 1)) == a
 @test first(a:Dates.Day(1):Dates.DateTime(200000, 1, 1)) == a
@@ -372,15 +372,15 @@ dr20 = typemin(Dates.Date):Dates.Day(2):typemax(Dates.Date)
 drs = Any[dr, dr1, dr2, dr3, dr4, dr5, dr6, dr7, dr8, dr9, dr10,
           dr11, dr12, dr13, dr14, dr15, dr16, dr17, dr18, dr19, dr20]
 
-@test map(length, drs) == map(x->size(x)[1], drs)
-@test all(x->findall(in(x), x) == [1:length(x);], drs[1:4])
+@test map(length, drs) == map(x->size(x)[0], drs)
+@test all(x->findall(in(x), x) == [0:length(x)-1;], drs[0:3])
 @test isempty(dr2)
 @test all(x->reverse(x) == last(x): - step(x):first(x), drs)
-@test all(x->minimum(x) == (step(x) < zero(step(x)) ? last(x) : first(x)), drs[4:end])
-@test all(x->maximum(x) == (step(x) < zero(step(x)) ? first(x) : last(x)), drs[4:end])
-@test all(drs[1:3]) do dd
+@test all(x->minimum(x) == (step(x) < zero(step(x)) ? last(x) : first(x)), drs[3:end])
+@test all(x->maximum(x) == (step(x) < zero(step(x)) ? first(x) : last(x)), drs[3:end])
+@test all(drs[0:2]) do dd
     for (i, d) in enumerate(dd)
-        @test d == (first(dd) + Dates.Day(i - 1))
+        @test d == (first(dd) + Dates.Day(i))
     end
     true
 end
@@ -390,7 +390,7 @@ b = Dates.Date(2013, 2, 1)
 @test map!(x->x + Dates.Day(1), Vector{Dates.Date}(undef, 32), dr) == [(a + Dates.Day(1)):Dates.Day(1):(b + Dates.Day(1));]
 @test map(x->x + Dates.Day(1), dr) == [(a + Dates.Day(1)):Dates.Day(1):(b + Dates.Day(1));]
 
-@test map(x->a in x, drs[1:4]) == [true, true, false, true]
+@test map(x->a in x, drs[0:3]) == [true, true, false, true]
 @test a in dr
 @test b in dr
 @test Dates.Date(2013, 1, 3) in dr
@@ -409,9 +409,9 @@ b = Dates.Date(2013, 2, 1)
 @test last(a:Dates.Day(7):b) == Dates.Date(2013, 1, 29)
 @test length(a:Dates.Day(32):b) == 1
 @test last(a:Dates.Day(32):b) == Dates.Date(2013, 1, 1)
-@test (a:Dates.Day(1):b)[1] == Dates.Date(2013, 1, 1)
-@test (a:Dates.Day(1):b)[2] == Dates.Date(2013, 1, 2)
-@test (a:Dates.Day(1):b)[7] == Dates.Date(2013, 1, 7)
+@test (a:Dates.Day(1):b)[0] == Dates.Date(2013, 1, 1)
+@test (a:Dates.Day(1):b)[1] == Dates.Date(2013, 1, 2)
+@test (a:Dates.Day(1):b)[6] == Dates.Date(2013, 1, 7)
 @test (a:Dates.Day(1):b)[end] == b
 @test first(a:Dates.Day(1):Dates.Date(20000, 1, 1)) == a
 @test first(a:Dates.Day(1):Dates.Date(200000, 1, 1)) == a
@@ -558,16 +558,16 @@ dr20 = typemin(Dates.Time):Dates.Microsecond(2):typemax(Dates.Time)
 drs = Any[dr, dr1, dr2, dr3, dr8, dr9, dr10,
           dr11, dr12, dr13, dr14, dr15, dr16, dr17, dr18, dr19, dr20]
 
-@test map(length, drs) == map(x->size(x)[1], drs)
-@test all(x->findall(in(x), x) == [1:length(x);], drs[1:4])
+@test map(length, drs) == map(x->size(x)[0], drs)
+@test all(x->findall(in(x), x) == [0:length(x)-1;], drs[0:3])
 @test isempty(dr2)
 @test all(x->reverse(x) == last(x): - step(x):first(x), drs)
-@test all(x->minimum(x) == (step(x) < zero(step(x)) ? last(x) : first(x)), drs[4:end])
-@test all(x->maximum(x) == (step(x) < zero(step(x)) ? first(x) : last(x)), drs[4:end])
+@test all(x->minimum(x) == (step(x) < zero(step(x)) ? last(x) : first(x)), drs[3:end])
+@test all(x->maximum(x) == (step(x) < zero(step(x)) ? first(x) : last(x)), drs[3:end])
 @test_throws MethodError dr .+ 1
 
 a = Dates.Time(23, 1, 1)
-@test map(x->a in x, drs[1:4]) == [true, true, false, true]
+@test map(x->a in x, drs[0:3]) == [true, true, false, true]
 @test a in dr
 
 @test all(x->sort(x) == (step(x) < zero(step(x)) ? reverse(x) : x), drs)

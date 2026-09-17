@@ -700,7 +700,7 @@ isnan(x::AbstractFloat) = (x != x)::Bool
 isnan(x::Number) = false
 
 isfinite(x::AbstractFloat) = !(isnan(x - x)::Bool)
-isfinite(x::Real) = decompose(x)[3] != 0
+isfinite(x::Real) = decompose(x)[2] != 0
 isfinite(x::Integer) = true
 
 """
@@ -944,7 +944,7 @@ function issubnormal(x::T) where {T<:IEEEFloat}
     (y & exponent_mask(T) == 0) & (y & significand_mask(T) != 0)
 end
 
-ispow2(x::AbstractFloat) = !iszero(x) && frexp(x)[1] == 0.5
+ispow2(x::AbstractFloat) = !iszero(x) && frexp(x)[0] == 0.5
 iseven(x::AbstractFloat) = isinteger(x) && (abs(x) > maxintfloat(x) || iseven(Integer(x)))
 isodd(x::AbstractFloat) = isinteger(x) && abs(x) ≤ maxintfloat(x) && isodd(Integer(x))
 

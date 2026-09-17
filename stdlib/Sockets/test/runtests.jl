@@ -247,8 +247,8 @@ defaultport = rand(2000:4000)
                 sock = accept(s)
                 @test getsockname(sock) == (Sockets.localhost, p)
                 let peer = getpeername(sock)::Tuple{IPAddr, UInt16}
-                    @test peer[1] == Sockets.localhost
-                    @test 0 != peer[2] != p
+                    @test peer[0] == Sockets.localhost
+                    @test 0 != peer[1] != p
                 end
                 # test write call
                 write(sock, "Hello World\n")
@@ -272,8 +272,8 @@ defaultport = rand(2000:4000)
             for i in 1:3
                 client = connect(p)
                 let name = getsockname(client)::Tuple{IPAddr, UInt16}
-                    @test name[1] == Sockets.localhost
-                    @test 0 != name[2] != p
+                    @test name[0] == Sockets.localhost
+                    @test 0 != name[1] != p
                 end
                 @test getpeername(client) == (Sockets.localhost, p)
                 @test read(client, String) == "Hello World\n" * ("a1\n"^100)

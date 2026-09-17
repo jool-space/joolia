@@ -209,7 +209,7 @@ rather than line 2 where `@test` is used as an implementation detail.
 function replace_sourceloc!(sourceloc, @nospecialize(ex))
     if ex isa Expr
         if ex.head === :macrocall
-            ex.args[2] = sourceloc
+            ex.args[1] = sourceloc
         end
         map!(e -> replace_sourceloc!(sourceloc, e), ex.args, ex.args)
     end
@@ -272,7 +272,7 @@ Takes the expression `x` and returns an equivalent expression in lowered form
 for executing in module `m`.
 See also [`code_lowered`](@ref).
 """
-lower(m::Module, @nospecialize(x)) = Core._lower(x, m, "none", 0, typemax(Csize_t), false)[1]
+lower(m::Module, @nospecialize(x)) = Core._lower(x, m, "none", 0, typemax(Csize_t), false)[0]
 
 """
     @lower [m] x
@@ -315,11 +315,11 @@ end
 function _parse_string(text::AbstractString, filename::AbstractString,
                        lineno::Integer, index::Integer, options,
                        _parse=parser_for_module(nothing))
-    if index < 1 || index > ncodeunits(text) + 1
+    if index < 0 || index > ncodeunits(text)
         throw(BoundsError(text, index))
     end
-    ex, offset::Int = _parse(text, filename, lineno, index-1, options)
-    ex, offset+1
+    ex, offset::Int = _parse(text, filename, lineno, index, options)
+    ex, offset
 end
 
 """
@@ -338,27 +338,27 @@ evaluation. If `depwarn` is `false`, deprecation warnings will be suppressed.
 The `filename` argument is used to display diagnostics when an error is raised.
 
 ```jldoctest
-julia> Meta.parse("(α, β) = 3, 5", 1) # start of string
-(:((α, β) = (3, 5)), 16)
+julia> Meta.parse("(α, β) = 3, 5", 0) # start of string
+(:((α, β) = (3, 5)), 15)
 
-julia> Meta.parse("(α, β) = 3, 5", 1, greedy=false)
-(:((α, β)), 9)
+julia> Meta.parse("(α, β) = 3, 5", 0, greedy=false)
+(:((α, β)), 8)
 
-julia> Meta.parse("(α, β) = 3, 5", 16) # end of string
-(nothing, 16)
+julia> Meta.parse("(α, β) = 3, 5", 15) # end of string
+(nothing, 15)
 
-julia> Meta.parse("(α, β) = 3, 5", 11) # index of 3
-(:((3, 5)), 16)
+julia> Meta.parse("(α, β) = 3, 5", 10) # index of 3
+(:((3, 5)), 15)
 
-julia> Meta.parse("(α, β) = 3, 5", 11, greedy=false)
-(3, 13)
+julia> Meta.parse("(α, β) = 3, 5", 10, greedy=false)
+(3, 12)
 ```
 """
 function parse(str::AbstractString, pos::Integer;
                filename="none", greedy::Bool=true, raise::Bool=true, depwarn::Bool=true, mod::Union{Nothing, Module}=nothing, _parse = parser_for_module(mod))
     ex, pos = _parse_string(str, String(filename), 1, pos, greedy ? :statement : :atom, _parse)
     if raise && isexpr(ex, :error)
-        err = ex.args[1]
+        err = ex.args[0]
         if err isa String
             err = ParseError(err) # For flisp parser
         end
@@ -396,11 +396,11 @@ julia> Meta.parse("x = ")
 """
 function parse(str::AbstractString;
                filename="none", raise::Bool=true, depwarn::Bool=true, mod::Union{Nothing, Module}=nothing, _parse = parser_for_module(mod))
-    ex, pos = parse(str, 1; filename, greedy=true, raise, depwarn, _parse)
+    ex, pos = parse(str, 0; filename, greedy=true, raise, depwarn, _parse)
     if isexpr(ex, :error)
         return ex
     end
-    if pos <= ncodeunits(str)
+    if pos < ncodeunits(str)
         raise && throw(ParseError("extra token after end of expression"))
         return Expr(:error, "extra token after end of expression")
     end
@@ -416,7 +416,7 @@ end
 function parseall(text::AbstractString; filename="none", lineno=1,
                   mod::Union{Nothing, Module}=nothing,
                   _parse = parser_for_module(mod))
-    ex,_ = _parse_string(text, String(filename), lineno, 1, :all, _parse)
+    ex,_ = _parse_string(text, String(filename), lineno, 0, :all, _parse)
     return ex
 end
 
@@ -452,7 +452,7 @@ function partially_inline!(code::Vector{Any}, slot_replacements::Vector{Any},
                            static_param_values::Vector{Any},
                            slot_offset::Int, statement_offset::Int,
                            boundscheck::Symbol)
-    for i = 1:length(code)
+    for i in eachindex(code)
         isassigned(code, i) || continue
         code[i] = _partially_inline!(code[i], slot_replacements, type_signature,
                                      static_param_values, slot_offset,
@@ -474,7 +474,7 @@ function _partially_inline!(@nospecialize(x), slot_replacements::Vector{Any},
     if isa(x, Core.SlotNumber)
         id = x.id
         if 1 <= id <= length(slot_replacements)
-            return slot_replacements[id]
+            return slot_replacements[id-1]
         end
         return Core.SlotNumber(id + slot_offset)
     end
@@ -529,30 +529,30 @@ function _partially_inline!(@nospecialize(x), slot_replacements::Vector{Any},
     if isa(x, Expr)
         head = x.head
         if head === :static_parameter
-            if isassigned(static_param_values, x.args[1])
-                return QuoteNode(static_param_values[x.args[1]])
+            if isassigned(static_param_values, x.args[0]-1)
+                return QuoteNode(static_param_values[x.args[0]-1])
             end
             return x
         elseif head === :cfunction
             @assert !isa(type_signature, UnionAll) || !isempty(static_param_values)
-            if !isa(x.args[2], QuoteNode) # very common no-op
-                x.args[2] = _partially_inline!(x.args[2], slot_replacements, type_signature,
+            if !isa(x.args[1], QuoteNode) # very common no-op
+                x.args[1] = _partially_inline!(x.args[1], slot_replacements, type_signature,
                                                static_param_values, slot_offset,
                                                statement_offset, boundscheck)
             end
-            x.args[3] = _instantiate_type_in_env(x.args[3], type_signature, static_param_values)
-            x.args[4] = Core.svec(Any[_instantiate_type_in_env(argt, type_signature, static_param_values) for argt in x.args[4]]...)
+            x.args[2] = _instantiate_type_in_env(x.args[2], type_signature, static_param_values)
+            x.args[3] = Core.svec(Any[_instantiate_type_in_env(argt, type_signature, static_param_values) for argt in x.args[3]]...)
         elseif head === :foreigncall
             @assert !isa(type_signature, UnionAll) || !isempty(static_param_values)
-            for i = 1:length(x.args)
-                if i == 2
-                    x.args[2] = _instantiate_type_in_env(x.args[2], type_signature, static_param_values)
+            for i in eachindex(x.args)
+                if i == 1
+                    x.args[1] = _instantiate_type_in_env(x.args[1], type_signature, static_param_values)
+                elseif i == 2
+                    x.args[2] = Core.svec(Any[_instantiate_type_in_env(argt, type_signature, static_param_values) for argt in x.args[2]]...)
                 elseif i == 3
-                    x.args[3] = Core.svec(Any[_instantiate_type_in_env(argt, type_signature, static_param_values) for argt in x.args[3]]...)
+                    @assert isa(x.args[3], Int)
                 elseif i == 4
-                    @assert isa(x.args[4], Int)
-                elseif i == 5
-                    @assert isa((x.args[5]::QuoteNode).value,
+                    @assert isa((x.args[4]::QuoteNode).value,
                                 Union{Symbol, Tuple{Symbol, UInt16, Bool}, Tuple{Symbol, UInt16, Bool, Bool},
                                       Tuple{Symbol, UInt16, Bool, Bool, Bool}})
                 else
@@ -571,17 +571,17 @@ function _partially_inline!(@nospecialize(x), slot_replacements::Vector{Any},
                 return true
             end
         elseif head === :gotoifnot
-            x.args[1] = _partially_inline!(x.args[1], slot_replacements, type_signature,
+            x.args[0] = _partially_inline!(x.args[0], slot_replacements, type_signature,
                                            static_param_values, slot_offset,
                                            statement_offset, boundscheck)
-            x.args[2] += statement_offset
+            x.args[1] += statement_offset
         elseif head === :isdefined
-            arg = x.args[1]
+            arg = x.args[0]
             # inlining a QuoteNode or literal into `Expr(:isdefined, x)` is invalid, replace with true
             if isa(arg, Core.SlotNumber)
                 id = arg.id
                 if 1 <= id <= length(slot_replacements)
-                    replacement = slot_replacements[id]
+                    replacement = slot_replacements[id-1]
                     if isa(replacement, Union{Core.SlotNumber, GlobalRef, Symbol})
                         return Expr(:isdefined, replacement)
                     else
@@ -591,7 +591,7 @@ function _partially_inline!(@nospecialize(x), slot_replacements::Vector{Any},
                 end
                 return Expr(:isdefined, Core.SlotNumber(id + slot_offset))
             elseif isexpr(arg, :static_parameter)
-                if isassigned(static_param_values, arg.args[1])
+                if isassigned(static_param_values, arg.args[0]-1)
                     return true
                 end
                 return x
@@ -620,13 +620,13 @@ Specifically, the following expressions are stripped by this function:
 """
 function unblock(@nospecialize ex)
     while isexpr(ex, :var"hygienic-scope")
-        isexpr(ex.args[1], :escape) || break
-        ex = ex.args[1].args[1]
+        isexpr(ex.args[0], :escape) || break
+        ex = ex.args[0].args[0]
     end
     isexpr(ex, :block) || return ex
     exs = filter(ex -> !(isa(ex, LineNumberNode) || isexpr(ex, :line)), ex.args)
     length(exs) == 1 || return ex
-    return unblock(exs[1])
+    return unblock(exs[0])
 end
 
 """
@@ -638,7 +638,7 @@ Peel away `:escape` expressions and redundant block expressions (see
 function unescape(@nospecialize ex)
     ex = unblock(ex)
     while isexpr(ex, :escape) || isexpr(ex, :var"hygienic-scope")
-       ex = unblock(ex.args[1])
+       ex = unblock(ex.args[0])
     end
     return ex
 end
@@ -652,7 +652,7 @@ was escaped, the unescaped expression is wrapped in `:escape` again.
 """
 function reescape(@nospecialize(unescaped_expr), @nospecialize(original_expr))
     if isexpr(original_expr, :escape)
-        return reescape(Expr(:escape, unescaped_expr), original_expr.args[1])
+        return reescape(Expr(:escape, unescaped_expr), original_expr.args[0])
     elseif isexpr(original_expr, :var"hygienic-scope")
         next, ctx... = original_expr.args
         return reescape(Expr(:var"hygienic-scope", unescaped_expr, ctx...), next)
@@ -666,6 +666,6 @@ end
 
 Turn `T{P...}` into just `T`.
 """
-uncurly(@nospecialize ex) = isexpr(ex, :curly) ? ex.args[1] : ex
+uncurly(@nospecialize ex) = isexpr(ex, :curly) ? ex.args[0] : ex
 
 end # module

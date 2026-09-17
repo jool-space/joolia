@@ -9,3 +9,16 @@ mktempdir() do dir
         include("libgit2-tests.jl")
     end
 end
+
+# Generated constructors accept an ownerless native config pointer and close it safely.
+@testset "zero-origin optional Git owner" begin
+    @test hasmethod(LibGit2.GitConfig, Tuple{Ptr{Cvoid}})
+    config = LibGit2.GitConfig()
+    try
+        @test config.owner === nothing
+        @test !isempty(config)
+    finally
+        close(config)
+    end
+    @test isempty(config)
+end

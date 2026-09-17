@@ -814,6 +814,16 @@ t = Rational{BigInt}(0, 1)
     end
 end
 
+@testset "multi-limb conversions" begin
+    x = (big(1) << 128) + (big(1) << 64) + big(7)
+    u = (big(1) << 64) + big(7)
+    @test UInt128(u) == (UInt128(1) << 64) + UInt128(7)
+    @test Int128(-u) == -Int128(u)
+    @test Base.GMP._bit_magnitude(x) == 129
+    @test Float64(x) == 2.0^128
+    @test hash(x) == hash(Base.GMP.MPZ.set(x))
+end
+
 @testset "hashing" begin
     for i in 1:10:100
         for shift in vcat(0:8, 9:8:81)

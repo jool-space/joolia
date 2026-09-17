@@ -256,7 +256,7 @@ function Base.push!(cache::InferenceCache, entry::InferenceCacheEntry)
     push!(cache.results, entry)
     result = entry isa LocalInferenceResult ? entry.result : entry
     mi = result.linfo
-    idx = length(cache.results)
+    idx = lastindex(cache.results)
     if haskey(cache.index, mi)
         push!(cache.index[mi], idx)
     else
@@ -686,7 +686,7 @@ function lookup_local_inference_result(interp::AbstractInterpreter, mi::MethodIn
     cache = get_inference_cache(interp)
     indices = get_indices(cache, mi)
     world = get_inference_world(interp)
-    for i in length(indices):-1:1
+    for i in lastindex(indices):-1:0
         cached = cache.results[indices[i]]
         cached isa LocalInferenceResult || continue
         result = cached.result

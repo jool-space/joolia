@@ -73,8 +73,8 @@ cmove_col(t::TextTerminal, c) = cmove(c, getY(t))
 hascolor(::TextTerminal) = false
 
 # Utility Functions
-width(t::TextTerminal) = (displaysize(t)::Tuple{Int,Int})[2]
-height(t::TextTerminal) = (displaysize(t)::Tuple{Int,Int})[1]
+width(t::TextTerminal) = (displaysize(t)::Tuple{Int,Int})[1]
+height(t::TextTerminal) = (displaysize(t)::Tuple{Int,Int})[0]
 
 # For terminals with buffers
 flush(t::TextTerminal) = nothing

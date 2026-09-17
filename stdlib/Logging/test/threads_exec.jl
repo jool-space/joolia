@@ -9,5 +9,5 @@ function test_threads_exec(n)
     end
 end
 
-n = parse(Int, ARGS[1])
+n = parse(Int, only(ARGS))
 test_threads_exec(n)

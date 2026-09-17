@@ -163,15 +163,15 @@ function show_env(io::IO, env::Vector{String})
     mode = get_show_env_mode(io)
     print(io, "[")
     for (i, e) in enumerate(env)
-        i > 1 && print(io, ", ")
-        eqidx = findnext('=', e, 2)
+        i > 0 && print(io, ", ")
+        eqidx = findnext('=', e, 1)
         if eqidx === nothing || mode === :all
             show(io, e)
         elseif mode === :keys
-            key = e[1:prevind(e, eqidx)]
+            key = e[0:prevind(e, eqidx)]
             show(io, key)
         else  # :redact
-            key = e[1:prevind(e, eqidx)]
+            key = e[0:prevind(e, eqidx)]
             if is_sensitive_env_name(key)
                 show(io, key)
             else
@@ -358,11 +358,11 @@ setenv(cmd::Cmd; dir=cmd.dir) = Cmd(cmd; dir=dir)
 
 # split environment entry string into before and after first `=` (key and value)
 function splitenv(e::String)
-    i = findnext('=', e, 2)
+    i = findnext('=', e, 1)
     if i === nothing
         throw(ArgumentError("malformed environment entry"))
     end
-    e[1:prevind(e, i)], e[nextind(e, i):end]
+    e[0:prevind(e, i)], e[nextind(e, i):end]
 end
 
 """
@@ -410,7 +410,7 @@ end
 """
     setcpuaffinity(original_command::Cmd, cpus) -> command::Cmd
 
-Set the CPU affinity of the `command` by a list of CPU IDs (1-based) `cpus`.  Passing
+Set the CPU affinity of the `command` by a list of CPU IDs (0-based) `cpus`.  Passing
 `cpus = nothing` means to unset the CPU affinity if the `original_command` has any.
 
 This function is supported only in Linux and Windows.  It is not supported in macOS because
@@ -424,7 +424,7 @@ libuv does not support affinity setting.
 In Linux, the `taskset` command line program can be used to see how `setcpuaffinity` works.
 
 ```julia
-julia> run(setcpuaffinity(`sh -c 'taskset -p \$\$'`, [1, 2, 5]));
+julia> run(setcpuaffinity(`sh -c 'taskset -p \$\$'`, [0, 1, 4]));
 pid 2273's current affinity mask: 13
 ```
 
@@ -611,8 +611,8 @@ end
 
 function cmd_gen(parsed)
     args = String[]
-    if length(parsed) >= 1 && isa(parsed[1], Tuple{Cmd})
-        cmd = (parsed[1]::Tuple{Cmd})[1]
+    if length(parsed) >= 1 && isa(parsed[0], Tuple{Cmd})
+        cmd = (parsed[0]::Tuple{Cmd})[0]
         (ignorestatus, flags, env, dir, cpus, uid, gid) = (cmd.ignorestatus, cmd.flags, cmd.env, cmd.dir, cmd.cpus, cmd.uid, cmd.gid)
         append!(args, cmd.exec)
         for arg in tail(parsed)
@@ -650,7 +650,7 @@ Process(`echo 1`, ProcessExited(0))
 ```
 """
 macro cmd(str::String)
-    cmd_ex = shell_parse(str, special=shell_special, filename=String(__source__.file))[1]
+    cmd_ex = shell_parse(str, special=shell_special, filename=String(__source__.file))[0]
     if Meta.isexpr(cmd_ex, :tuple)
         return :(cmd_gen($(esc(cmd_ex))))
     else

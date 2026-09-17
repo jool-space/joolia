@@ -260,3 +260,20 @@ _gimmedoc(x) = strip(sprint(show, MIME"text/plain"(), Docs.doc(Docs.Binding(@__M
 @test _gimmedoc.(instances(Citrus)) == "C. " .* ("reticulata", "maxima", "medica", "japonica")
 @test _gimmedoc(Citrus) == "Ancestral species of citrus"
 end
+
+# Both enum declaration forms must retain their first member and explicit numeric values.
+@enum JooliaOriginEnum::UInt8 begin
+    joolia_origin_zero = 0
+    joolia_origin_seventeen = 17
+end
+@enum JooliaOriginCompact joolia_origin_first joolia_origin_second
+@testset "zero-origin enum declarations" begin
+    @test UInt8(joolia_origin_zero) == 0
+    @test UInt8(joolia_origin_seventeen) == 17
+    @test JooliaOriginEnum(0) === joolia_origin_zero
+    @test instances(JooliaOriginEnum)[0] === joolia_origin_zero
+    @test instances(JooliaOriginEnum)[1] === joolia_origin_seventeen
+    @test Int(joolia_origin_first) == 0
+    @test Int(joolia_origin_second) == 1
+    @test_throws ArgumentError JooliaOriginEnum(1)
+end

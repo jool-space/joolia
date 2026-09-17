@@ -1,0 +1,326 @@
+--- a/src/common.jl
++++ b/src/common.jl
+@@ -46,7 +46,7 @@
+ 
+ # Pad the remainder leaving space for the bitcount
+ function pad_remainder!(context::T) where T<:SHA_CTX
+-    usedspace = Int(context.bytecount % blocklen(T))
++    usedspace = Int(context.bytecount % Int(blocklen(T)))
+     # If we have anything in the buffer still, pad and transform that data
+     if usedspace > 0
+         # Begin padding with a 1 bit:
+@@ -54,26 +54,26 @@
+         usedspace += 1
+ 
+         # If we have room for the bitcount, then pad up to the short blocklen
+-        if usedspace < short_blocklen(T)
+-            for i = 0:(short_blocklen(T) - usedspace - 1)
++        if usedspace <= Int(short_blocklen(T))
++            for i = 0:(Int(short_blocklen(T)) - usedspace - 1)
+                 context.buffer[usedspace + i] = 0x0
+             end
+         else
+             # Otherwise, pad out this entire block, transform it, then pad up to short blocklen
+-            if usedspace < blocklen(T)
+-                for i = 0:(blocklen(T) - usedspace - 1)
++            if usedspace < Int(blocklen(T))
++                for i = 0:(Int(blocklen(T)) - usedspace - 1)
+                     context.buffer[usedspace + i] = 0x0
+                 end
+             end
+             transform!(context)
+-            for i = 0:(short_blocklen(T) - 1)
++            for i = 0:(Int(short_blocklen(T)) - 1)
+                 context.buffer[i] = 0x0
+             end
+         end
+     else
+         # If we don't have anything in the buffer, pad an entire shortbuffer
+         context.buffer[0] = 0x80
+-        for i = 1:(short_blocklen(T) - 1)
++        for i = 1:(Int(short_blocklen(T)) - 1)
+             context.buffer[i] = 0x0
+         end
+     end
+--- a/src/sha3.jl
++++ b/src/sha3.jl
+@@ -1,31 +1,31 @@
+ @inline function keccak_theta(state::NTuple{25,UInt64})
+     C = ntuple(i -> state[i] ⊻ state[i + 5] ⊻ state[i + 10] ⊻ state[i + 15] ⊻ state[i + 20], Val(5))
+-    D = ntuple(i -> C[rem(i + 3, 5) + 1] ⊻ L64(1, C[rem(i, 5) + 1]), Val(5))
+-    return ntuple(k -> state[k] ⊻ D[rem(k - 1, 5) + 1], Val(25))
++    D = ntuple(i -> C[rem(i + 4, 5)] ⊻ L64(1, C[rem(i + 1, 5)]), Val(5))
++    return ntuple(k -> state[k] ⊻ D[rem(k, 5)], Val(25))
+ end
+ 
+ @inline keccak_rho(state::NTuple{25,UInt64}) =
+     ntuple(k -> bitrotate(state[k], SHA3_ROTC[k]), Val(25))
+ 
+ @inline keccak_pi(state::NTuple{25,UInt64}) =
+-    ntuple(k -> state[SHA3_PILN[k]], Val(25))
++    ntuple(k -> state[SHA3_PILN[k]-1], Val(25))
+ 
+ @inline function keccak_chi(state::NTuple{25,UInt64})
+     return ntuple(
+-        k -> let j = k - rem(k - 1, 5)
+-            state[k] ⊻ (~state[rem(k, 5) + j] & state[rem(k + 1, 5) + j])
++        k -> let j = k - rem(k, 5)
++            state[k] ⊻ (~state[rem(k + 1, 5) + j] & state[rem(k + 2, 5) + j])
+         end,
+         Val(25)
+     )
+ end
+ 
+ @inline keccak_iota(round, state::NTuple{25,UInt64}) =
+-    (state[1] ⊻ SHA3_ROUND_CONSTS[round+1], state[2:end]...)
++    (state[0] ⊻ SHA3_ROUND_CONSTS[round], state[1:end]...)
+ 
+ function transform!(context::T) where {T<:SHA3_CTX}
+     # First, update state with buffer
+     pbuf = Ptr{eltype(context.state)}(pointer(context.buffer))
+-    for idx in 1:div(blocklen(T),8)
++    for idx in 0:Int(div(blocklen(T),8))-1
+         context.state[idx] = context.state[idx] ⊻ unsafe_load(pbuf, idx)
+     end
+ 
+@@ -40,7 +40,7 @@
+         state = keccak_iota(round, state)
+     end
+ 
+-    for k in 1:25
++    for k in 0:24
+         context.state[k] = state[k]
+     end
+ 
+@@ -56,9 +56,9 @@
+         # If we have anything in the buffer still, pad and transform that data
+         if usedspace < blocklen(T) - 1
+             # Begin padding with a 0x06
+-            context.buffer[usedspace+1] = 0x06
++            context.buffer[usedspace] = 0x06
+             # Fill with zeros up until the last byte
+-            context.buffer[usedspace+2:end-1] .= 0x00
++            context.buffer[usedspace+1:end-1] .= 0x00
+             # Finish it off with a 0x80
+             context.buffer[end] = 0x80
+         else
+@@ -73,5 +73,5 @@
+     end
+ 
+     # Return the digest
+-    return reinterpret(UInt8, context.state)[1:digestlen(T)]
++    return reinterpret(UInt8, context.state)[0:digestlen(T)-1]
+ end
+--- a/src/shake.jl
++++ b/src/shake.jl
+@@ -28,7 +28,7 @@
+     pbuf = Ptr{eltype(context.state)}(pointer(context.buffer))
+     # after SHAKE_256_MAX_READ (digestlen) is reached, simply work with context.state[idx]
+     if !context.used 
+-        for idx in 1:div(blocklen(T),8)
++        for idx in 0:Int(div(blocklen(T),8))-1
+             context.state[idx] = context.state[idx] ⊻ unsafe_load(pbuf, idx)
+         end
+     end 
+@@ -44,7 +44,7 @@
+         state = keccak_iota(round, state)
+     end
+ 
+-    for k in 1:25
++    for k in 0:24
+         context.state[k] = state[k]
+     end
+ 
+@@ -55,9 +55,9 @@
+     # If we have anything in the buffer still, pad and transform that data
+     if usedspace < blocklen(T) - 1
+         # Begin padding with a 0x1f
+-        context.buffer[usedspace+1] = 0x1f
++        context.buffer[usedspace] = 0x1f
+         # Fill with zeros up until the last byte
+-        context.buffer[usedspace+2:end-1] .= 0x00
++        context.buffer[usedspace+1:end-1] .= 0x00
+         # Finish it off with a 0x80
+         context.buffer[end] = 0x80
+     else
+@@ -69,12 +69,12 @@
+     # Return the digest:
+     # fill the given memory via pointer, if d>blocklen, update pointer and digest again.
+     if d <= blocklen(T)
+-        for i = 1:d
++        for i = 0:Int(d)-1
+             unsafe_store!(p,reinterpret(UInt8, context.state)[i],i)
+         end 
+         return
+     else 
+-        for i = 1:blocklen(T)
++        for i = 0:Int(blocklen(T))-1
+             unsafe_store!(p,reinterpret(UInt8, context.state)[i],i)
+         end 
+         context.used = true
+--- a/test/runtests.jl
++++ b/test/runtests.jl
+@@ -36,9 +36,9 @@
+ @testset "Hashing" begin
+     # First, test processing the data in one go
+     @testset "Complete" begin
+-        for idx in 1:length(data)
++        for idx in eachindex(data)
+             @testset "$(data_desc[idx])" begin
+-                for sha_idx in 1:length(sha_funcs)
++                for sha_idx in eachindex(sha_funcs)
+                     sha_func = sha_funcs[sha_idx]
+                     hash = bytes2hex(sha_func(deepcopy(data[idx])))
+                     @test hash == answers[sha_func][idx]
+@@ -57,10 +57,10 @@
+     # two chunks, (sized appropriately to AVOID overflow from one update to another)
+     # in order to test multiple update!() calls
+     @testset "Chunked Properly" begin
+-        for sha_idx in 1:length(sha_funcs)
++        for sha_idx in eachindex(sha_funcs)
+             ctx = sha_types[sha_funcs[sha_idx]]()
+-            SHA.update!(ctx, so_many_as_array[1:2*SHA.blocklen(typeof(ctx))])
+-            SHA.update!(ctx, so_many_as_array[2*SHA.blocklen(typeof(ctx))+1:end])
++            SHA.update!(ctx, so_many_as_array[0:2*SHA.blocklen(typeof(ctx))-1])
++            SHA.update!(ctx, so_many_as_array[2*SHA.blocklen(typeof(ctx)):end])
+             hash = bytes2hex(SHA.digest!(ctx))
+             @test hash == answers[sha_funcs[sha_idx]][end]
+         end
+@@ -70,7 +70,7 @@
+     # three chunks, (sized appropriately to CAUSE overflow from one update to another)
+     # in order to test multiple update!() calls as well as the overflow codepaths
+     @testset "Chunked clumsily" begin
+-        for sha_idx in 1:length(sha_funcs)
++        for sha_idx in eachindex(sha_funcs)
+             ctx = sha_types[sha_funcs[sha_idx]]()
+ 
+             # Get indices awkwardly placed for the blocklength of this hash type
+@@ -79,13 +79,13 @@
+             idx2 = round(Int, 2.6*SHA.blocklen(typeof(ctx)))
+ 
+             # Feed data in according to our dastardly blocking scheme
+-            SHA.update!(ctx, so_many_as_array[0      + 1:1*idx0])
+-            SHA.update!(ctx, so_many_as_array[1*idx0 + 1:2*idx0])
+-            SHA.update!(ctx, so_many_as_array[2*idx0 + 1:3*idx0])
+-            SHA.update!(ctx, so_many_as_array[3*idx0 + 1:4*idx0])
+-            SHA.update!(ctx, so_many_as_array[4*idx0 + 1:idx1])
+-            SHA.update!(ctx, so_many_as_array[idx1 + 1:idx2])
+-            SHA.update!(ctx, so_many_as_array[idx2 + 1:end])
++            SHA.update!(ctx, so_many_as_array[0:idx0-1])
++            SHA.update!(ctx, so_many_as_array[idx0:2*idx0-1])
++            SHA.update!(ctx, so_many_as_array[2*idx0:3*idx0-1])
++            SHA.update!(ctx, so_many_as_array[3*idx0:4*idx0-1])
++            SHA.update!(ctx, so_many_as_array[4*idx0:idx1-1])
++            SHA.update!(ctx, so_many_as_array[idx1:idx2-1])
++            SHA.update!(ctx, so_many_as_array[idx2:end])
+ 
+             # Ensure the hash is the appropriate one
+             hash = bytes2hex(SHA.digest!(ctx))
+@@ -96,7 +96,7 @@
+     # Test that the hash states cannot be updated after having been finalized,
+     # but can still return the same digest
+     @testset "Reuse" begin
+-        for sha_idx in 1:length(sha_funcs)
++        for sha_idx in eachindex(sha_funcs)
+             ctx = sha_types[sha_funcs[sha_idx]]()
+             update!(ctx, codeunits("abracadabra"))
+             hash1 = digest!(ctx)
+@@ -166,7 +166,7 @@
+ 
+ replstr(x) = sprint((io, x) -> show(IOContext(io, :limit => true), MIME("text/plain"), x), x)
+ @testset "REPL" begin
+-    for idx in 1:length(ctxs)
++    for idx in eachindex(ctxs)
+         @test typeof(copy(ctxs[idx]())) == typeof(ctxs[idx]())
+         @test replstr(ctxs[idx]()) == shws[idx]
+     end
+@@ -192,7 +192,7 @@
+     # test some official testvectors from https://csrc.nist.gov/Projects/Cryptographic-Algorithm-Validation-Program/Secure-Hashing
+     @testset "shake128" begin
+         for (k,v) in SHA128test
+-            @test SHA.shake128(hex2bytes(k[1]),k[2]) == hex2bytes(v)
++            @test SHA.shake128(hex2bytes(k[0]),k[1]) == hex2bytes(v)
+         end
+         @test SHA.shake128(b"",UInt(16)) == hex2bytes("7f9c2ba4e88f827d616045507605853e")
+         @test SHA.shake128(codeunits("0" ^ 167), UInt(32)) == hex2bytes("ff60b0516fb8a3d4032900976e98b5595f57e9d4a88a0e37f7cc5adfa3c47da2")
+@@ -200,9 +200,79 @@
+ 
+     @testset "shake256" begin
+         for (k,v) in SHA256test
+-            @test SHA.shake256(hex2bytes(k[1]),k[2]) == hex2bytes(v)
++            @test SHA.shake256(hex2bytes(k[0]),k[1]) == hex2bytes(v)
+         end
+         @test SHA.shake256(b"",UInt(32)) == hex2bytes("46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f")
+         @test SHA.shake256(codeunits("0"^135),UInt(32)) == hex2bytes("ab11f61b5085a108a58670a66738ea7a8d8ce23b7c57d64de83eaafb10923cf8")
+     end
+ end
++
++# Independent digests cover padding boundaries and streaming updates.
++@testset "zero-origin SHA padding reference vectors" begin
++    vectors = [
++        (0, sha1, SHA1_CTX, "da39a3ee5e6b4b0d3255bfef95601890afd80709"),
++        (0, sha256, SHA256_CTX, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
++        (0, sha512, SHA512_CTX, "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"),
++        (1, sha1, SHA1_CTX, "5ba93c9db0cff93f52b521d7420e43f6eda2784f"),
++        (1, sha256, SHA256_CTX, "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"),
++        (1, sha512, SHA512_CTX, "b8244d028981d693af7b456af8efa4cad63d282e19ff14942c246e50d9351d22704a802a71c3580b6370de4ceb293c324a8423342557d4e5c38438f0e36910ee"),
++        (54, sha1, SHA1_CTX, "cfae6d86a767b9c700b5081a54265fb2fe0f6fd9"),
++        (54, sha256, SHA256_CTX, "675f28acc0b90a72d1c3a570fe83ac565555db358cf01826dc8eefb2bf7ca0f3"),
++        (54, sha512, SHA512_CTX, "6d7644db575c5c238da02cc4259996cf163a3a3b5eccc4fc62442ddf01aa05ef0c4edbe3e6d220df189c984aa55726a4922efe004832f2d8887f0b8a9267db40"),
++        (55, sha1, SHA1_CTX, "8ae2d46729cfe68ff927af5eec9c7d1b66d65ac2"),
++        (55, sha256, SHA256_CTX, "463eb28e72f82e0a96c0a4cc53690c571281131f672aa229e0d45ae59b598b59"),
++        (55, sha512, SHA512_CTX, "6856647f269c2ee3d8128f0b25427659d880641ef343300dd3cd4679168f58d6527fda70b4ebc854e2065e172b7d58c1536992c0810599259ba84a2b40c65414"),
++        (56, sha1, SHA1_CTX, "636e2ec698dac903498e648bd2f3af641d3c88cb"),
++        (56, sha256, SHA256_CTX, "da2ae4d6b36748f2a318f23e7ab1dfdf45acdc9d049bd80e59de82a60895f562"),
++        (56, sha512, SHA512_CTX, "8b12b2f6fe400a51d29656e2b8c42a1bbfe6fcf3e425da430db05d1a2dda14790dee20fa8b22d8762afffe4988a5c98a4430d22a17e41e23d90fa61ab75671a9"),
++        (57, sha1, SHA1_CTX, "7cb1330f35244b57437539253304ea78a6b7c443"),
++        (57, sha256, SHA256_CTX, "2fe741af801cc238602ac0ec6a7b0c3a8a87c7fc7d7f02a3fe03d1c12eac4d8f"),
++        (57, sha512, SHA512_CTX, "92cb9f2e4eee07c7b32b06cf4917fbe54365f55247cc9b5bc4478d9fada52b07d1c302b3959d0ca9a75a629653ea7c245a8fbba2a265cda4ea70ac5a860a6f3d"),
++        (63, sha1, SHA1_CTX, "6d942da0c4392b123528f2905c713a3ce28364bd"),
++        (63, sha256, SHA256_CTX, "29af2686fd53374a36b0846694cc342177e428d1647515f078784d69cdb9e488"),
++        (63, sha512, SHA512_CTX, "9dc9c5598e55dc42955695320839788e353f1d7f6ba74df74c80a8a52f463c0697f57f68835d1418f4ce9b6530cd79bd0f4c6f7e13c93feb1218c0b65c2c0561"),
++        (64, sha1, SHA1_CTX, "c6138d514ffa2135bfce0ed0b8fac65669917ec7"),
++        (64, sha256, SHA256_CTX, "fdeab9acf3710362bd2658cdc9a29e8f9c757fcf9811603a8c447cd1d9151108"),
++        (64, sha512, SHA512_CTX, "ee4320ebaf3fdb4f2c832b137200c08e235e0fa7bbd0eb1740c7063ba8a0d151da77e003398e1714a955d475b05e3e950b639503b452ec185de4229bc4873949"),
++        (65, sha1, SHA1_CTX, "69bd728ad6e13cd76ff19751fde427b00e395746"),
++        (65, sha256, SHA256_CTX, "4bfd2c8b6f1eec7a2afeb48b934ee4b2694182027e6d0fc075074f2fabb31781"),
++        (65, sha512, SHA512_CTX, "02856cef735f9acec6b9e33f0fbc8f9804d2aa54187f382b8ae842e5d3696c07459aad2a5aed25ea5e117eb1c7ba35da6a7a8adce9e6afe3ad79e9fa42d5bba8"),
++        (110, sha1, SHA1_CTX, "670f7a869e90ce86e0a18232a9d4b1f97c1c77d0"),
++        (110, sha256, SHA256_CTX, "a47a551b01e55aaaa015531a4fa26a666f1ebd4ba4573898de712b8b5e0ca7e9"),
++        (110, sha512, SHA512_CTX, "51f2ba331c24541efec042cc66398d388348c4fedc3f77a4ddfda39752ae2880c68e0465c15b07abfd93e16ba635ae7ca7d7e144018ade57607de8643992f50b"),
++        (111, sha1, SHA1_CTX, "bc544e24573d592290fdaff8ecf3f7f2b00cd483"),
++        (111, sha256, SHA256_CTX, "60780e9451bdc43cf4530ffc95cbb0c4eb24dae2c39f55f334d679e076c08065"),
++        (111, sha512, SHA512_CTX, "a1a111449b198d9b1f538bad7f3fc1022b3a5b1a5e90a0bc860de8512746cbc31599e6c834de3a3235327af0b51ff57bf7acf1974a73014d9c3953812edc7c8d"),
++        (112, sha1, SHA1_CTX, "e4ce142d09a84a8645338dd6535cbfaaf800d320"),
++        (112, sha256, SHA256_CTX, "09373f127d34e61dbbaa8bc4499c87074f2ddb10e1b465f506d7d70a15011979"),
++        (112, sha512, SHA512_CTX, "c5fbd731d19d2ae1180f001be72c2c1aaba1d7b094b3748880e24593b8e117a750e11c1bd867cc2f96dace8c8b74abd2d5c4f236be444e77d30d1916174070b9"),
++        (113, sha1, SHA1_CTX, "1c26461e26eb697ccc36a98714ee70caaa87a84e"),
++        (113, sha256, SHA256_CTX, "13aaa9b5fb739cdb0e2af99d9ac0a409390adc4d1cb9b41f1ef94f8552060e92"),
++        (113, sha512, SHA512_CTX, "61b2e77db697dfe5571fff3ed06bd60c41e1e7b7c08a80de01cb16526d9a9a52d690dfbe792278a60f6e2b4c57a97c729773f26e258d2393890c985d645f6715"),
++        (127, sha1, SHA1_CTX, "89d7312a903f65cd2b3e34a975e55dbea9033353"),
++        (127, sha256, SHA256_CTX, "92ca0fa6651ee2f97b884b7246a562fa71250fedefe5ebf270d31c546bfea976"),
++        (127, sha512, SHA512_CTX, "eab89674feaa34e27aebeeff3c0a4d70070bb872d5e9f186cf1dbbdee517b6e35724d629ff025a5b07185e911ada7e3c8acf830aa0e4f71777bd2d44f504f7f0"),
++        (128, sha1, SHA1_CTX, "e6434bc401f98603d7eda504790c98c67385d535"),
++        (128, sha256, SHA256_CTX, "471fb943aa23c511f6f72f8d1652d9c880cfa392ad80503120547703e56a2be5"),
++        (128, sha512, SHA512_CTX, "1dffd5e3adb71d45d2245939665521ae001a317a03720a45732ba1900ca3b8351fc5c9b4ca513eba6f80bc7b1d1fdad4abd13491cb824d61b08d8c0e1561b3f7"),
++        (129, sha1, SHA1_CTX, "3352e41cc30b40ae80108970492b21014049e625"),
++        (129, sha256, SHA256_CTX, "5099c6a56203f9687f7d33f4bfdf576d31dc91f6b695ecea38b2770c87631135"),
++        (129, sha512, SHA512_CTX, "1d9da57fbbdab09afb3506ab2d223d06109d65c1c8ad197f50138f714bc4c3f2fe5787922639c680acad1c651f955990425954ce2cba0c5cc83f2667d878eb0f"),
++        (255, sha1, SHA1_CTX, "47defa228fbd72b6de16bf15fb5ddd0d95f00cab"),
++        (255, sha256, SHA256_CTX, "857df204175f077a9986709897f00ee0bcc0449585248e4b42498337e9329999"),
++        (255, sha512, SHA512_CTX, "e9746a5516961da1fdc8e6c59350cd147b7d80c120cc7ed621399faeb2462c28f34217a13009a8e6a721f538356db9a9b64d9a5412e0fd07d24cac1315d95548"),
++        (256, sha1, SHA1_CTX, "d761175408c7032430f9e22f87ce8417be700f73"),
++        (256, sha256, SHA256_CTX, "5bc31b283cef0072274e97d74916552954c935794536cab632641e5ea071379d"),
++        (256, sha512, SHA512_CTX, "7ff1cd1e9773a4b7ba1f40e642db0d879bd5f6cc151a7d3401a0bc7778b8270c108b530fb195f2383f4cec8cf05778e6af4db56811673371674cec1524488f83"),
++    ]
++    for (n, hash, Context, expected) in vectors
++        data = UInt8[mod(i, 251) for i in 0:n-1]
++        @test bytes2hex(hash(data)) == expected
++        for split in unique([0, div(n, 2), n])
++            ctx = Context()
++            update!(ctx, data[0:split-1])
++            update!(ctx, data[split:end])
++            @test bytes2hex(digest!(ctx)) == expected
++        end
++    end
++end

@@ -285,3 +285,17 @@ end
     run_53584() # warmup
     @test (@allocated run_53584()) < 10_000
 end
+
+# Keep the first scoped binding, grow its HAMT storage, and restore the outer values.
+@testset "zero-origin scoped bindings" begin
+    a, b = ScopedValue(1), ScopedValue(2)
+    @test (@with a=>10 a[]) == 10
+    @test (@with a=>10 b=>20 (a[], b[])) == (10, 20)
+    @test (a[], b[]) == (1, 2)
+    vars = [ScopedValue(i) for i in 0:64]
+    bindings = [v => i + 100 for (i, v) in enumerate(vars)]
+    @test with(() -> [v[] for v in vars], bindings...) == collect(100:164)
+    @test [v[] for v in vars] == collect(0:64)
+    @test collect(Base.HashArrayMappedTries.HAMT(:zero => 0)) == [:zero => 0]
+    @test iterate(Base.HashArrayMappedTries.HAMT{Symbol,Int}()) === nothing
+end

@@ -1,5 +1,354 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
+# Check zero-origin UTF-8 primitives and their bootstrap dependencies without a system image.
+if Core.Intrinsics.not_int(Core.isdefined(Base, :end_base_include))
+    Core.eval(Base, quote
+        include("reflection.jl")
+        include("refpointer.jl")
+        include("flfrontend.jl")
+        Core._setparser!(fl_parse)
+        Core._setlowerer!(fl_lower)
+        include("meta.jl")
+        using .Meta
+        include("multimedia.jl")
+        using .Multimedia
+        include("char.jl")
+        include("strings/basic.jl")
+        include("strings/string.jl")
+        include("strings/substring.jl")
+        include("strings/cstring.jl")
+        include("cartesian.jl")
+        using .Cartesian
+        include("hashing.jl")
+        include("subarray.jl")
+        include("views.jl")
+        include("strings/stringview.jl")
+        include("strings/search.jl")
+        include("some.jl")
+        include("div.jl")
+        include("simdloop.jl")
+        using .SimdLoop
+        include("floatfuncs.jl")
+        include("twiceprecision.jl")
+        include("complex.jl")
+        include("rational.jl")
+        include("multinverses.jl")
+        using .MultiplicativeInverses
+        include("reduce.jl")
+        include("reshapedarray.jl")
+        include("reinterpretarray.jl")
+        include("intfuncs.jl")
+        include("multidimensional.jl")
+        include("combinatorics.jl")
+        include("abstractarraymath.jl")
+        include("arraymath.jl")
+        include("broadcast.jl")
+        using .Broadcast: broadcasted, broadcasted_kwsyntax, materialize, materialize!, broadcast_preserving_zero_d, andand, oror
+    end)
+    Core.eval(Core.Main, :(module JooliaStringFoundationTests
+    const checks = Base.RefValue(0)
+    function check(ok::Bool, label::String)
+        ok || throw(ErrorException(label))
+        checks[] += 1
+    end
+    function throws(f, T, label::String)
+        try
+            f()
+        catch err
+            check(err isa T, label)
+            return
+        end
+        throw(ErrorException(label))
+    end
+    struct ByteSequence
+        bytes::Vector{UInt8}
+    end
+    Base.iterate(x::ByteSequence, state...) = iterate(x.bytes,state...)
+    function run()
+        rdec = 0.1:0.1:0.3
+        check(firstindex(rdec) == 0 && lastindex(rdec) == 2, "decimal range bounds")
+        check(rdec[0] === 0.1 && rdec[1] === 0.2 && rdec[2] === 0.3, "decimal range values")
+        rdesc = 0.3:-0.1:0.1
+        check(rdesc[0] === 0.3 && rdesc[2] === 0.1, "descending range values")
+        rf = Base.floatrange(Float64, -10, 2, 11, 1)
+        check(rf.offset == 5 && rf[0] == -10 && rf[10] == 10, "middle reference")
+        rf = Base.floatrange(Float64, -1, 2, 4, 1)
+        check(rf.offset == 0 && rf[0] == -1 && rf[3] == 5, "boundary reference")
+        rslice = rdec[1:2]
+        check(firstindex(rslice) == 0 && lastindex(rslice) == 1 && rslice[0] == 0.2 && rslice[1] == 0.3, "range slice")
+        ru = range(0.0, stop=1.0, length=UInt(3))
+        check(length(ru) == 3 && ru[0] == 0.0 && ru[2] == 1.0, "unsigned length")
+        rempty = range(1.0, stop=0.0, length=0)
+        check(isempty(rempty) && firstindex(rempty) == 0 && lastindex(rempty) == -1 && sum(rempty) == 0.0, "empty range")
+        roffset = Base.StepRangeLen(Base.TwicePrecision(10.0), Base.TwicePrecision(1.0), 3, 2)
+        check(roffset[0] == 8.0 && roffset[2] == 10.0 && sum(roffset) == 27.0, "explicit reference offset")
+        check(sum(range(-3.5, 4.4, length=97)) == 43.65, "twice precision sum")
+        s = "aα😀z"
+        check(findnext('a', s, 0) == 0 && findnext('α', s, 0) == 1 &&
+              findnext('😀', s, 1) == 3 && findnext('z', s, 0) == 7,
+              "UTF-8 forward search positions")
+        check(findprev('a', s, 7) == 0 && findprev('😀', s, 7) == 3 &&
+              findprev('a', s, 0) == 0,
+              "UTF-8 reverse search positions")
+        check(findfirst("α", s) == (1:1) && findlast("α", s) == (1:1) &&
+              findfirst("α😀", s) == (1:3) && findlast("α😀", s) == (1:3),
+              "UTF-8 substring search ranges")
+        check(findall("α", s) == [1:1] && occursin("😀", s),
+              "UTF-8 search collection and containment")
+        check(isempty(findnext("", s, 0)) && isempty(findprev("", s, 7)),
+              "UTF-8 empty search")
+        bytes = codeunits(s)
+        check(findfirst(UInt8[0xce, 0xb1], bytes) == (1:2),
+              "UTF-8 byte sequence search")
+        throws(() -> findnext('a', s, -1), BoundsError, "forward search lower bound")
+        throws(() -> findprev('a', s, 9), BoundsError, "reverse search upper bound")
+        check(firstindex(s) == 0 && lastindex(s) == 7 && ncodeunits(s) == 8, "UTF-8 byte origins")
+        check(s[0] == 'a' && s[1] == 'α' && s[3] == '😀' && s[7] == 'z', "UTF-8 character positions")
+        check(codeunit(s,0) == 0x61 && codeunit(s,7) == 0x7a, "first and last code units")
+        check(length(s) == 4 && length(s,1,6) == 2, "UTF-8 character counts")
+        check(collect(Char,s) == ['a','α','😀','z'], "UTF-8 iteration")
+        check(collect(Int,eachindex(s)) == [0,1,3,7], "UTF-8 eachindex")
+        check(thisind(s,2) == 1 && thisind(s,6) == 3, "continuation-byte rewind")
+        check(nextind(s,1) == 3 && nextind(s,6) == 7, "continuation-byte advance")
+        check(prevind(s,7) == 3 && prevind(s,2) == 1, "UTF-8 previous index")
+        check(thisind(s,-1) == -1 && thisind(s,8) == 8, "string boundary sentinels")
+        check(nextind(s,-1) == 0 && nextind(s,7) == 8 && prevind(s,0) == -1, "string boundary navigation")
+        check(nextind(s,-1,5) == 8 && prevind(s,8,5) == -1, "multi-step boundary navigation")
+        check(first(s,2) == "aα" && last(s,2) == "😀z", "string prefix and suffix")
+        check(first(s,0) == "" && last(s,0) == "", "empty string prefix and suffix")
+        throws(() -> s[-1], BoundsError, "negative string index")
+        throws(() -> s[8], BoundsError, "upper string index")
+        throws(() -> s[2], Base.StringIndexError, "continuation byte is not a character index")
+        check(s[1:3] == "α😀", "inclusive UTF-8 slicing")
+        check(length("") == 0 && lastindex("") == -1 && iterate("") === nothing, "empty string")
+        check(Base.isvalid(s) && !Base.isvalid(String(UInt8[0xff])), "UTF-8 DFA table")
+        check(Base.isvalid(repeat("a",1600)) && Base.isvalid(repeat("α",800)), "UTF-8 chunk boundaries")
+        for c in ('a', 'α', '─', '🍕'), n in (0, 1, 2, 7, 8, 63, 64, 65, 255, 256)
+            actual = repeat(c, n)
+            check(actual == repeat(string(c), n) && ncodeunits(actual) == n*ncodeunits(string(c)) && Base.isvalid(actual), "character repetition UTF-8 widths and word boundaries")
+        end
+
+        sub = SubString(s,1,3)
+        check(sub.offset == 1 && ncodeunits(sub) == 6 && length(sub) == 2, "substring offset and count")
+        check(sub[0] == 'α' && sub[2] == '😀' && String(sub) == "α😀", "substring zero positions")
+        check(String(SubString(sub,2,2)) == "😀", "nested substring")
+        check(parentindices(sub) == (1:3,), "substring parent positions")
+        check(String(Base.raw_substring(s,1,2)) == "α", "raw substring code units")
+        check(isempty(Base.raw_substring(s,8,0)), "empty raw substring at end")
+        throws(() -> Base.raw_substring(s,9,0), BoundsError, "raw substring beyond end")
+        check(string('a',"α",sub) == "aαα😀", "string concatenation write offsets")
+        check(filter(c -> c != 'α',s) == "a😀z", "string filter offsets")
+        check(map(identity,s) == s, "string map offsets")
+        u16 = transcode(UInt16,s)
+        check(u16 == UInt16[0x61,0x3b1,0xd83d,0xde00,0x7a], "UTF-8 to UTF-16")
+        check(String(transcode(UInt8,u16)) == s, "UTF-16 to UTF-8")
+        check(isempty(transcode(UInt16,"")), "empty UTF-16 transcoding")
+        check(Ref([10,20],0)[] == 10, "Ref first collection position")
+        ex,pos = Base.Meta.parse("10 + 20",0; _parse=Base.fl_parse)
+        check(ex == :(10 + 20) && pos == 7, "Meta parser byte offsets")
+        check(Base.Meta.parse("10 + 20"; _parse=Base.fl_parse) == ex, "Meta parser default origin")
+        check(Base.Cartesian.exprresolve(:(2 + 3)) == 5, "Cartesian AST argument positions")
+        check((Base.Cartesian.@ntuple 3 d -> d) == (0,1,2), "Cartesian generated dimensions")
+        mat = [1 2; 3 4]
+        check(mat[0,0] == 1 && mat[1,0] == 3 && mat[0,1] == 2, "matrix literal column-major storage")
+        aa = reshape(collect(0:5), 2, 3)
+        check(axes(aa) == (Base.ZeroTo(2), Base.ZeroTo(3)), "array math zero-origin axes")
+        dsource = reshape(collect(0:3), 2, 2, 1)
+        dd = dropdims(dsource, dims=2)
+        check(size(dd) == (2, 2) && dd[0, 1] == 2, "dropdims zero dimension and values")
+        dfirst = dropdims(reshape(collect(0:3), 1, 2, 2), dims=0)
+        check(size(dfirst) == (2, 2) && dfirst[0, 1] == 2, "dropdims first dimension")
+        dd[0, 0] = 99
+        check(dd[0, 0] == 99 && dsource[0, 0, 0] == 99, "dropdims result aliases source")
+        throws(() -> dropdims(reshape(collect(0:3), 2, 2, 1), dims=3), ArgumentError, "dropdims out-of-range dimension")
+        throws(() -> dropdims(reshape(collect(0:3), 2, 2, 1), dims=(2, 2)), ArgumentError, "dropdims duplicate dimension")
+        ins0 = insertdims(aa, dims=0)
+        inslast = insertdims(aa, dims=2)
+        check(size(ins0) == (1, 2, 3) && size(inslast) == (2, 3, 1), "insertdims first and last dimensions")
+        check(axes(ins0) == (Base.ZeroTo(1), Base.ZeroTo(2), Base.ZeroTo(3)) && axes(inslast) == (Base.ZeroTo(2), Base.ZeroTo(3), Base.ZeroTo(1)), "insertdims singleton axes")
+        inslast[0, 0, 0] = 77
+        check(aa[0, 0] == 77, "insertdims result aliases source")
+        check(dropdims(insertdims(aa, dims=(0, 2)), dims=(0, 2)) == aa, "insertdims and dropdims round trip")
+        throws(() -> insertdims(aa, dims=3), ArgumentError, "insertdims out-of-range dimension")
+        throws(() -> insertdims(aa, dims=(0, 0)), ArgumentError, "insertdims duplicate dimension")
+        row = selectdim(aa, 0, 1)
+        col = selectdim(aa, 1, 2)
+        check(size(row) == (3,) && row[0] == 1 && row[1] == 3 && row[2] == 5 &&
+              size(col) == (2,) && col[0] == 4 && col[1] == 5,
+              "selectdim zero dimensions and indices")
+        check(selectdim(aa, 2, 0) == aa, "selectdim singleton trailing dimension")
+        throws(() -> selectdim(aa, -1, 0), ArgumentError, "selectdim negative dimension")
+        throws(() -> selectdim(aa, 2, 1), BoundsError, "selectdim singleton bound")
+        rv = repeat([1, 2], outer=2)
+        ri = repeat([1, 2], inner=2)
+        check(rv == [1, 2, 1, 2] && ri == [1, 1, 2, 2], "repeat vector outer and inner")
+        am = reshape(collect(1:4), 2, 2)
+        rm = repeat(am, outer=(2, 2))
+        check(size(rm) == (4, 4) && rm[0, 0] == 1 && rm[2, 2] == 1 && rm[3, 3] == 4, "repeat matrix outer zero dimensions")
+        a3 = reshape(collect(0:5), 2, 1, 3)
+        ro = repeat(a3, outer=(1, 2, 1))
+        rinner = repeat(a3, inner=(2, 1, 1))
+        check(size(ro) == (2, 2, 3) && ro[0, 0, 0] == 0 && ro[0, 1, 0] == 0 && ro[1, 1, 2] == 5, "repeat outer zero coordinates")
+        check(size(rinner) == (4, 1, 3) && rinner[0, 0, 0] == 0 && rinner[1, 0, 0] == 0 && rinner[2, 0, 0] == 1, "repeat inner zero coordinates")
+        check(size(repeat(a3, outer=(0, 1, 1))) == (0, 1, 3), "repeat zero count shape")
+        check((Base.Cartesian.@nref 2 mat d -> 0) == 1, "Cartesian generated indexing")
+        sv = Base.StringView(UInt8[0x61,0xce,0xb1,0x0a])
+        check(sv[0] == 'a' && sv[1] == 'α' && lastindex(sv) == 3, "StringView positions")
+        check(String(chomp(sv)) == "aα", "StringView chomp")
+        check(reverse(sv) == "\nαa", "StringView reverse write offsets")
+        check(String(sv[0:1]) == "aα", "StringView inclusive slicing")
+        check(isempty(sv[0:-1]), "empty StringView slice")
+        check(String(SubString(sv,1,1)) == "α", "StringView substring")
+        vv = view([10,20,30],1:2)
+        check(vv[0] == 20 && vv[1] == 30 && stride(vv,0) == 1, "array view origins and stride")
+        check(view(mat,1,:)[0] == 3 && view(mat,:,1)[0] == 2, "matrix view dimension origins")
+        ci = CartesianIndex(2,3)
+        check(ci[0] == 2 && ci[1] == 3 && firstindex(ci) == 0, "CartesianIndex coordinate positions")
+        check(CartesianIndex{3}() == CartesianIndex(0,0,0), "CartesianIndex default origin")
+        check(CartesianIndex{3}((2,)) == CartesianIndex(2,0,0), "CartesianIndex missing coordinates")
+        cis = CartesianIndices((2,3))
+        check(first(cis) == CartesianIndex(0,0) && last(cis) == CartesianIndex(1,2), "CartesianIndices zero axes")
+        check(cis[0,0] == CartesianIndex(0,0) && cis[1,2] == CartesianIndex(1,2), "CartesianIndices coordinate indexing")
+        check(collect(CartesianIndex{2},cis)[:] == [CartesianIndex(0,0),CartesianIndex(1,0),CartesianIndex(0,1),CartesianIndex(1,1),CartesianIndex(0,2),CartesianIndex(1,2)], "Cartesian column-major iteration")
+        check(iterate(CartesianIndices((0,2))) === nothing, "empty CartesianIndices")
+        check(iterate(CartesianIndices(()))[0] == CartesianIndex(), "zero-dimensional CartesianIndices")
+        check(LinearIndices(cis)[1,2] == 5 && LinearIndices(cis)[0,0] == 0, "Cartesian to linear positions")
+        check(Base.nextind(mat,CartesianIndex(1,0)) == CartesianIndex(0,1), "Cartesian column carry")
+        check(Base.prevind(mat,CartesianIndex(0,1)) == CartesianIndex(1,0), "Cartesian column borrow")
+        rr = reshape(1:6,2,3)
+        check(rr[0,0] == 1 && rr[1,2] == 6, "reshape range column-major indexing")
+        dense = reshape([1,2,3,4,5,6],2,3)
+        check(stride(dense,0) == 1 && stride(dense,1) == 2, "reshape dense column-major strides")
+        check(view(rr,:,1)[0] == 3, "view of reshaped range")
+        for n in (0,1,2,3,4,7,8,15,16,17,31,32,33,47,48,49,63,64,65,96,256,512)
+            bytes = UInt8[(i*17) % UInt8 for i in 0:n-1]
+            harray = Base.hash_bytes(bytes,UInt64(0),Base.HASH_SECRET)
+            hptr = GC.@preserve bytes Base.hash_bytes(pointer(bytes),length(bytes),UInt64(0),Base.HASH_SECRET)
+            hiter = Base.hash_bytes(ByteSequence(bytes),UInt64(0),Base.HASH_SECRET)
+            check(harray == hptr && harray == hiter, "byte hashing implementations agree")
+        end
+        check(string(0) == "0" && string(-123) == "-123", "decimal formatting positions")
+        check(string(typemax(UInt128)) == "340282366920938463463374607431768211455", "wide decimal formatting")
+        check(string(5;base=2,pad=8) == "00000101" && string(-255;base=16) == "-ff", "binary and hex formatting")
+        check(string(35;base=36) == "z" && string(61;base=62) == "z", "digit lookup table positions")
+        check(bitstring(UInt8(0xa5)) == "10100101", "bitstring first and last writes")
+        check(foldl(-,[1,2,3]) == -4 && foldr(-,[1,2,3]) == 2, "fold direction and iterator tuple positions")
+        check(foldl(+,Int[];init=7) == 7, "empty fold initial value")
+        check(mapfoldl(x -> 2*x,+,[1,2,3];init=4) == 16, "mapped fold first element")
+        check(findmax([1,7,7,6]) == (7,1) && findmin([7,1,1,6]) == (1,1), "extrema positions preserve first tie")
+        check(argmax([8,2,1]) == 0 && argmin([8,2,1]) == 2, "arg extrema boundary positions")
+        check(findmax(identity,5:9) == (9,4) && findmin(-,1:10) == (-10,9), "range extrema positions differ from values")
+        check(argmax(abs,-10:5) == -10 && argmin(identity,5:9) == 5, "mapped arg extrema return domain values")
+        check(sum(Int[]) == 0 && prod(Int[]) == 1, "empty reduction identities")
+        for n in (0,1,7,8,9,15,16,17,63,64,65,255,256,257,1023,1024,1025)
+            bs = Bool[isodd(i) for i in 0:n-1]
+            check(count(bs) == n ÷ 2 && count(bs;init=UInt(3)) == UInt(3+n÷2), "Boolean count word boundaries")
+            xs = Int[i for i in 0:n-1]
+            check(sum(xs) == n*(n-1)÷2, "sum empty and pairwise block boundaries")
+        end
+        words = UInt64[0x3ff0000000000000,0x4000000000000000]
+        floats = reinterpret(Float64,words)
+        check(floats[0] == 1.0 && floats[1] == 2.0, "reinterpret equal-size primitive positions")
+        floats[0] = 3.0
+        check(words[0] == reinterpret(UInt64,3.0), "reinterpret stores alias first element")
+        halves = reinterpret(UInt32,words)
+        check(length(halves) == 4 && firstindex(halves) == 0, "reinterpret resized first axis")
+        check(reinterpret(UInt64,halves) == words, "reinterpret byte-width round trip")
+        throws(() -> halves[-1],BoundsError,"reinterpret negative bounds")
+        throws(() -> halves[4],BoundsError,"reinterpret upper bounds")
+        check(isempty(reinterpret(UInt8,UInt64[])), "empty reinterpretation")
+        channels = reinterpret(reshape,Int,[(1,2),(3,4)])
+        check(size(channels) == (2,2) && axes(channels) == (Base.ZeroTo(2),Base.ZeroTo(2)), "reinterpret zero-origin channel dimension")
+        check(channels[0,0] == 1 && channels[1,1] == 4, "reinterpret channel positions")
+        check(Int[channels[i] for i in eachindex(channels)][:] == [1,2,3,4], "reinterpret static Cartesian iteration")
+        check(sum(channels) == 10, "reinterpret static Cartesian reduction")
+        channels[1,0] = 20
+        check(parent(channels)[0] == (1,20), "reinterpret channel store aliases tuple")
+        check(reinterpret(reshape,Tuple{Int,Int},channels) == [(1,20),(3,4)], "reinterpret consumes channel dimension")
+        lazy = reinterpret(Tuple{Int,Int},1:6)
+        check(lazy[0] == (1,2) && lazy[2] == (5,6), "reinterpret lazy range generic reads")
+        tuples = [(1,2),(3,4),(5,6)]
+        strided = reinterpret(Int,view(tuples,0:2:2))
+        check(strided[0] == 1 && strided[3] == 6, "reinterpret strided generic reads")
+        strided[1] = 20
+        check(tuples[0] == (1,20), "reinterpret strided generic writes")
+        triples = Tuple{UInt8,UInt8,UInt8}[(1,2,3),(7,8,9),(4,5,6)]
+        crossing = reinterpret(Tuple{UInt8,UInt8},view(triples,0:2:2))
+        check(crossing[0] == (0x01,0x02) && crossing[1] == (0x03,0x04) && crossing[2] == (0x05,0x06), "reinterpret reads across unequal element widths")
+        crossing[1] = (0x0a,0x0b)
+        check(triples[0] == (0x01,0x02,0x0a) && triples[2] == (0x0b,0x05,0x06), "reinterpret partial-element writes preserve neighbors")
+        padded = reinterpret(UInt32,Tuple{UInt8,UInt32}[(0x01,0x00000002)])
+        throws(() -> padded[0],Base.PaddingError,"reinterpret rejects reads of padding")
+        scalar = reinterpret(Float64,reshape(UInt64[0x3ff0000000000000],()))
+        check(size(scalar) == () && scalar[] == 1.0, "zero-dimensional reinterpretation")
+        wide = NTuple{32,Int}(Int[i for i in 0:32])
+        check(wide[0] == 0 && wide[31] == 31, "tuple reinterpret fast path takes first 32 positions")
+        check(factorial(0) == 1 && factorial(20) == 2432902008176640000, "factorial zero-origin table")
+        u34 = let u = UInt128(1)
+            for i in 1:34
+                u *= UInt128(i)
+            end
+            u
+        end
+        check(factorial(UInt128(34)) == u34, "UInt128 factorial endpoint")
+        throws(() -> factorial(-1), DomainError, "negative factorial")
+        throws(() -> factorial(UInt128(35)), OverflowError, "large UInt128 factorial")
+        check(Base._foldoneto(+, 0, Val(3)) == 6 && Base._foldoneto(+, 7, Val(0)) == 7,
+              "fold callback values and empty fold")
+        check(isperm((2, 0, 1)) && invperm((2, 0, 1)) == (1, 2, 0), "tuple permutation positions")
+        vp = Int[2, 0, 1]
+        check(isperm(vp) && invperm(vp) == Int[1, 2, 0], "vector permutation positions")
+        p256 = Vector{UInt8}(undef, 256)
+        for i in 0:255
+            p256[i] = UInt8(i)
+        end
+        ip256 = invperm(p256)
+        check(ip256[0] == 0 && ip256[255] == 255, "UInt8 256-element inverse permutation")
+        pm = Array{Int}(undef, 3, 4)
+        for r in 0:2, c in 0:3
+            pm[r, c] = 10*r + c
+        end
+        pcols = Int[1, 3, 2, 0]
+        Base.permutecols!(pm, pcols)
+        check(pm[0, 0] == 1 && pm[0, 1] == 3 && pm[0, 2] == 2 && pm[0, 3] == 0,
+              "column permutation cycle")
+        Base.invpermutecols!(pm, pcols)
+        check(pm[0, 0] == 0 && pm[0, 1] == 1 && pm[0, 2] == 2 && pm[0, 3] == 3,
+              "inverse column permutation")
+        prows = Int[0, 2, 1]
+        Base.permuterows!(pm, prows)
+        check(pm[0, 0] == 0 && pm[1, 0] == 20 && pm[2, 0] == 10,
+              "row fixed point and cycle")
+        Base.invpermuterows!(pm, prows)
+        check(pm[0, 0] == 0 && pm[1, 0] == 10 && pm[2, 0] == 20,
+              "inverse row cycle")
+        pdestructive = Int[2, 0, 1]
+        Base.permutecols!!(reshape(Int[0, 1, 2], 1, 3), pdestructive)
+        check(pdestructive[0] == 0 && pdestructive[1] == 0 && pdestructive[2] == 0,
+              "destructive permutation consumes input")
+        q = reshape(collect(0:11), 3, 4)
+        check(reverse(q, dims=0)[0, 0] == 2 && reverse(q, dims=1)[0, 0] == 9 &&
+              reverse(q, dims=(0, 1))[0, 0] == 11, "reverse zero-origin dimensions")
+        check(size(reverse(Array{Int}(undef, 0, 3), dims=0), 0) == 0, "reverse empty dimension")
+        empty = Array{Int}(undef, 0, 3)
+        check(size(rotl90(empty)) == (3, 0) && size(rotr90(empty)) == (3, 0) &&
+              size(rot180(empty)) == (0, 3), "empty rotations")
+        lq = rotl90(q)
+        rq = rotr90(q)
+        check(size(lq) == (4, 3) && lq[0, 0] == 9 && lq[3, 2] == 2,
+              "left rectangular rotation")
+        check(size(rq) == (4, 3) && rq[0, 0] == 2 && rq[3, 2] == 9,
+              "right rectangular rotation")
+        check(rot180(q)[0, 0] == 11 && rotl90(q, 5)[0, 0] == lq[0, 0] &&
+              rotr90(q, -3)[0, 0] == rq[0, 0] && rot180(q, 2)[0, 0] == q[0, 0],
+              "integer rotation counts")
+        Core.println("joolia string foundation checks passed: ", checks[])
+    end
+    run()
+    end))
+    ccall(:jl_exit, Core.Cvoid, (Core.Int32,), Core.Int32(0))
+end
+
 using Random
 
 @testset "constructors" begin
@@ -764,6 +1113,12 @@ Base.length(x::CharStr) = length(x.chars)
 end
 
 @testset "repeat" begin
+    # Character stores must start at offset zero for every UTF-8 width.
+    for c in ('a', 'α', '─', '🍕'), n in (0, 1, 2, 7, 8, 63, 64, 65, 255, 256)
+        @test repeat(c, n) == repeat(string(c), n)
+        @test ncodeunits(repeat(c, n)) == n*ncodeunits(string(c))
+    end
+
     @inferred repeat(GenericString("x"), 1)
     @test repeat("xx",3) === repeat(SubString("xx", 2),6) === repeat("x",6) === repeat('x',6) === repeat(GenericString("x"), 6) === "xxxxxx"
     @test repeat("αα",3) === repeat(SubString("αα", 3),6) === repeat("α",6) === repeat('α',6) === repeat(GenericString("α"), 6) === "αααααα"
@@ -1611,4 +1966,23 @@ end
     @test Base.dataids(codeunits(ss)) === ()
     @test !Base.mightalias(dest, codeunits(ss))
     @test copyto!(zeros(UInt8, 5), codeunits(ss)) == Vector{UInt8}(codeunits(ss))
+end
+
+@testset "zero-origin generic reverse search" begin
+    @test invoke(Base._rsearchindex, Tuple{AbstractString,AbstractString,Integer}, "xαβz", "αβ", 5) == 1
+    @test invoke(Base._rsearchindex, Tuple{AbstractString,AbstractString,Integer}, "αβz", "αβ", 4) == 0
+    @test invoke(Base._rsearchindex, Tuple{AbstractString,AbstractString,Integer}, "xαβz", "γ", 5) == -1
+end
+
+# First-character casing starts at byte zero and preserves the remaining Unicode text.
+@testset "zero-origin first-character case" begin
+    for (input, upper, lower) in (("", "", ""), ("warning", "Warning", "warning"),
+                                  ("Julia", "Julia", "julia"), ("αβ", "Αβ", "αβ"),
+                                  ("Αβ", "Αβ", "αβ"), ("😀a", "😀a", "😀a"),
+                                  ("ǆuro", "ǅuro", "ǆuro"))
+        @test uppercasefirst(input) == upper
+        @test lowercasefirst(input) == lower
+    end
+    @test uppercasefirst(SubString("xαβ", 1)) == "Αβ"
+    @test lowercasefirst(SubString("xΑβ", 1)) == "αβ"
 end

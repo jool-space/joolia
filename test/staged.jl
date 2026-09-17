@@ -530,3 +530,11 @@ let m = methods(f_generated_lno2)[1]
         @test mgen.file |> string == @__FILE__()
     end
 end
+
+# Unnamed optional arguments must not alias temporaries when lowering generated bodies.
+@generated function joolia_generated_anonymous(::Type{T}, x, flag=false) where T
+    Expr(:block, [:((a, b) = (x, x + 1)) for _ in 1:128]..., :(a + b))
+end
+
+@test joolia_generated_anonymous(Int, 3) == 7
+@test joolia_generated_anonymous(Int, 3, true) == 7

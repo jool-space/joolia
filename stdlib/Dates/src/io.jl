@@ -47,7 +47,7 @@ function Base.string(t::Time)
     mii = lpad(mi, 2, "0")
     ss = lpad(s, 2, "0")
     nss = tons(Millisecond(t)) + tons(Microsecond(t)) + tons(Nanosecond(t))
-    ns = nss == 0 ? "" : rstrip(@sprintf("%.9f", nss / 1e+9)[2:end], '0')
+    ns = nss == 0 ? "" : rstrip(@sprintf("%.9f", nss / 1e+9)[1:end], '0')
     return "$hh:$mii:$ss$ns"
 end
 
@@ -66,10 +66,10 @@ function Base.show(io::IO, t::Time)
             microsecond(t)
             nanosecond(t)
         ]
-        index = something(findlast(!iszero, values), 1)
+        index = something(findlast(!iszero, values), 0)
 
         print(io, Time, "(")
-        for i in 1:index
+        for i in 0:index
             show(io, values[i])
             i != index && print(io, ", ")
         end
@@ -210,7 +210,7 @@ end
     # will be 0 padded if y has less than n digits
     str = string(y, base = 10, pad = n)
     l = lastindex(str)
-    if l == n
+    if l == n - 1
         # fast path
         print(io, str)
     else
@@ -411,7 +411,7 @@ respectively.
 function DateFormat(f::AbstractString, locale::DateLocale=ENGLISH)
     tokens = AbstractDateToken[]
     prev = ()
-    prev_offset = 1
+    prev_offset = firstindex(f)
 
     # To understand this block, please see the comments attached to the definitions of
     # DATEFORMAT_REGEX_LOCK, DATEFORMAT_REGEX_HASH, and DATEFORMAT_REGEX_CACHE.
@@ -677,7 +677,7 @@ function format(dt::TimeType, fmt::DateFormat, bufsize=12)
     # preallocate to reduce resizing
     io = IOBuffer(Vector{UInt8}(undef, bufsize), read=true, write=true)
     format(io, dt, fmt)
-    String(io.data[1:io.ptr - 1])
+    String(io.data[0:io.ptr - 1])
 end
 
 

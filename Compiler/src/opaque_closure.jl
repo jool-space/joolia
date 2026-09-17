@@ -13,7 +13,7 @@ end
 
 function compute_oc_signature(ir::IRCode, nargs::Int, isva::Bool)
     argtypes = Vector{Any}(undef, nargs)
-    for i = 1:nargs
+    for i = 0:nargs-1
         argtypes[i] = Compiler.widenconst(ir.argtypes[i+1])
     end
     if isva
@@ -31,7 +31,7 @@ function Core.OpaqueClosure(ir::IRCode, @nospecialize env...;
                             isva::Bool = false,
                             slotnames::Union{Nothing,Vector{Symbol}}=nothing,
                             kwargs...)
-    # NOTE: we need ir.argtypes[1] == typeof(env)
+    # NOTE: we need ir.argtypes[0] == typeof(env)
     ir = Core.Compiler.copy(ir)
     # if the user didn't specify a definition MethodInstance or filename Symbol to use for the debuginfo, set a filename now
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")

@@ -157,7 +157,7 @@ end
     dt = Dates.DateTime(1999, 12, 27)
     dt1 = Dates.Date(1999, 12, 27)
     check = (52, 52, 52, 52, 52, 52, 52, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2)
-    for i = 1:21
+    for i in eachindex(check)
         @test Dates.week(dt) == check[i]
         @test Dates.week(dt1) == check[i]
         dt = dt + Dates.Day(1)
@@ -166,7 +166,7 @@ end
     # Tests from https://www.epochconverter.com/date-and-time/weeknumbers-by-year.php?year=2000
     dt = Dates.DateTime(2000, 12, 25)
     dt1 = Dates.Date(2000, 12, 25)
-    for i = 1:21
+    for i in eachindex(check)
         @test Dates.week(dt) == check[i]
         @test Dates.week(dt1) == check[i]
         dt = dt + Dates.Day(1)
@@ -175,7 +175,7 @@ end
     # Test from https://www.epochconverter.com/date-and-time/weeknumbers-by-year.php?year=2030
     dt = Dates.DateTime(2030, 12, 23)
     dt1 = Dates.Date(2030, 12, 23)
-    for i = 1:21
+    for i in eachindex(check)
         @test Dates.week(dt) == check[i]
         @test Dates.week(dt1) == check[i]
         dt = dt + Dates.Day(1)
@@ -185,7 +185,7 @@ end
     dt = Dates.DateTime(2004, 12, 20)
     dt1 = Dates.Date(2004, 12, 20)
     check = (52, 52, 52, 52, 52, 52, 52, 53, 53, 53, 53, 53, 53, 53, 1, 1, 1, 1, 1, 1, 1)
-    for i = 1:21
+    for i in eachindex(check)
         @test Dates.week(dt) == check[i]
         @test Dates.week(dt1) == check[i]
         dt = dt + Dates.Day(1)

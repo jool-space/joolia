@@ -2379,10 +2379,9 @@ static bool memoryref_bounds_check_enabled(jl_codectx_t &ctx, jl_value_t *inboun
 
 static Value *emit_bounds_check(jl_codectx_t &ctx, const jl_cgval_t &ainfo, jl_value_t *ty, Value *i, Value *len, jl_value_t *boundscheck) JL_CANSAFEPOINT
 {
-    Value *im1 = ctx.builder.CreateSub(i, ConstantInt::get(ctx.types().T_size, 1));
     if (bounds_check_enabled(ctx, boundscheck)) {
         ++EmittedBoundschecks;
-        Value *ok = ctx.builder.CreateICmpULT(im1, len);
+        Value *ok = ctx.builder.CreateICmpULT(i, len);
         setName(ctx.emission_context, ok, "boundscheck");
         BasicBlock *failBB = BasicBlock::Create(ctx.builder.getContext(), "fail", ctx.f);
         BasicBlock *passBB = BasicBlock::Create(ctx.builder.getContext(), "pass");
@@ -2420,7 +2419,7 @@ static Value *emit_bounds_check(jl_codectx_t &ctx, const jl_cgval_t &ainfo, jl_v
         passBB->insertInto(ctx.f);
         ctx.builder.SetInsertPoint(passBB);
     }
-    return im1;
+    return i;
 }
 
 static void emit_write_barrier(jl_codectx_t&, Value*, ArrayRef<Value*>);
@@ -3408,7 +3407,6 @@ static bool emit_getfield_unknownidx(jl_codectx_t &ctx,
             return true;
         }
         else if (strct.isboxed) {
-            idx = ctx.builder.CreateSub(idx, ConstantInt::get(ctx.types().T_size, 1));
             Value *fld = ctx.builder.CreateCall(prepare_call(jlgetnthfieldchecked_func), { boxed(ctx, strct), idx });
             *ret = mark_julia_type(ctx, fld, true, jl_any_type);
             return true;
@@ -5081,7 +5079,7 @@ static jl_cgval_t emit_memoryref_direct(jl_codectx_t &ctx, const jl_cgval_t &mem
     if (idx.typ == jl_bottom_type)
         return jl_cgval_t();
     Value *i = emit_unbox(ctx, ctx.types().T_size, idx);
-    Value *idx0 = ctx.builder.CreateSub(i, ConstantInt::get(ctx.types().T_size, 1));
+    Value *idx0 = i;
     bool bc = memoryref_bounds_check_enabled(ctx, inbounds);
     if (bc) {
         BasicBlock *failBB, *endBB;
@@ -5155,7 +5153,7 @@ static jl_cgval_t emit_memoryref(jl_codectx_t &ctx, const jl_cgval_t &ref, jl_cg
     Value *mem = CreateSimplifiedExtractValue(ctx, V, 1);
     maybeSetName(ctx.emission_context, mem, "memoryref_mem");
     Value *i = emit_unbox(ctx, ctx.types().T_size, idx);
-    Value *offset = ctx.builder.CreateSub(i, ConstantInt::get(ctx.types().T_size, 1));
+    Value *offset = i;
     setName(ctx.emission_context, offset, "memoryref_offset");
     Value *elsz = emit_genericmemoryelsize(ctx, mem, ref.typ, false);
     bool bc = memoryref_bounds_check_enabled(ctx, inbounds);
@@ -5292,7 +5290,6 @@ static jl_cgval_t emit_memoryref_offset(jl_codectx_t &ctx, const jl_cgval_t &ref
         offset = ctx.builder.CreateExactUDiv(offset, elsz);
         setName(ctx.emission_context, offset, "memoryref_offsetidx");
     }
-    offset = ctx.builder.CreateAdd(offset, ConstantInt::get(ctx.types().T_size, 1));
     return mark_julia_type(ctx, offset, false, jl_long_type);
 }
 

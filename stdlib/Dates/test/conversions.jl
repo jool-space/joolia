@@ -78,12 +78,12 @@ end
 end
 @testset "Issue #9171, #9169" begin
     let t = Dates.Period[Dates.Week(2), Dates.Day(14), Dates.Hour(14 * 24), Dates.Minute(14 * 24 * 60), Dates.Second(14 * 24 * 60 * 60), Dates.Millisecond(14 * 24 * 60 * 60 * 1000)]
-        for i = 1:length(t)
+        for i in eachindex(t)
             Pi = typeof(t[i])
-            for j = 1:length(t)
+            for j in eachindex(t)
                 @test t[i] == t[j]
             end
-            for j = i+1:length(t)
+            for j = i+1:lastindex(t)
                 Pj = typeof(t[j])
                 tj1 = t[j] + Pj(1)
                 @test t[i] < tj1

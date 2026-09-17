@@ -54,8 +54,8 @@ end
 
 import Base.in
 function in(x::T, r::StepRange{T}) where T<:TimeType
-    n = len(first(r), x, step(r)) + 1
-    n >= 1 && n <= length(r) && r[n] == x
+    n = len(first(r), x, step(r))
+    n >= 0 && n < length(r) && r[n] == x
 end
 
 Base.iterate(r::StepRange{<:TimeType}) = length(r) <= 0 ? nothing : (r.start, (length(r), 1))

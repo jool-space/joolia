@@ -413,7 +413,7 @@ function get_oc_code_rt(passed_interp, oc::Core.OpaqueClosure, types, optimize::
                 error("inference not successful")
             else
                 code = _uncompressed_ir(m)
-                return Pair{CodeInfo, Any}(code, typeof(oc).parameters[2])
+                return Pair{CodeInfo, Any}(code, typeof(oc).parameters[1])
             end
         else
             # OC constructed from optimized IR
@@ -945,7 +945,7 @@ function print_statement_costs(io::IO, @nospecialize(tt::Type);
             maxcost = invoke_interp_compiler(passed_interp, :statement_costs!, interp, cst, code.code, code, match)
             nd = ndigits(maxcost)
             irshow_config = IRShow.IRShowConfig() do io, linestart, idx
-                print(io, idx > 0 ? lpad(cst[idx], nd+1) : " "^(nd+1), " ")
+                print(io, idx > 0 ? lpad(cst[idx-1], nd+1) : " "^(nd+1), " ")
                 return ""
             end
             IRShow.show_ir(io, code, irshow_config)
@@ -1121,7 +1121,7 @@ function hasmethod(f, t, kwnames::Tuple{Vararg{Symbol}}; world::UInt=get_world_c
     match = ccall(:jl_gf_invoke_lookup, Any, (Any, Any, UInt), tt, nothing, world)
     match === nothing && return false
     kws = ccall(:jl_uncompress_argnames, Array{Symbol,1}, (Any,), (match::Method).slot_syms)
-    kws = kws[((match::Method).nargs + 1):end] # remove positional arguments
+    kws = kws[(match::Method).nargs:end] # remove positional arguments
     isempty(kws) && return true # some kwfuncs simply forward everything directly
     for kw in kws
         endswith(String(kw), "...") && return true
@@ -1146,27 +1146,27 @@ function bodyfunction(basemethod::Method)
     if isa(ast, Core.CodeInfo) && length(ast.code) >= 2
         callexpr = ast.code[end-1]
         if isa(callexpr, Expr) && callexpr.head === :call
-            fsym = callexpr.args[1]
+            fsym = callexpr.args[0]
             while true
                 if isa(fsym, Symbol)
                     return getfield(fmod, fsym)
                 elseif isa(fsym, GlobalRef)
                     if fsym.mod === Core && fsym.name === :_apply
-                        fsym = callexpr.args[2]
+                        fsym = callexpr.args[1]
                     elseif fsym.mod === Core && fsym.name === :_apply_iterate
-                        fsym = callexpr.args[3]
+                        fsym = callexpr.args[2]
                     end
                     if isa(fsym, Symbol)
                         return getfield(fmod, fsym)::Function
                     elseif isa(fsym, GlobalRef)
                         return getfield(fsym.mod, fsym.name)::Function
                     elseif isa(fsym, Core.SSAValue)
-                        fsym = ast.code[fsym.id]
+                        fsym = ast.code[fsym.id-1]
                     else
                         return nothing
                     end
                 elseif isa(fsym, Core.SSAValue)
-                    fsym = ast.code[fsym.id]
+                    fsym = ast.code[fsym.id-1]
                 else
                     return nothing
                 end
@@ -1351,8 +1351,8 @@ macro invoke(ex)
     push!(out.args, types)
     for arg in args
         if isexpr(arg, :(::))
-            push!(out.args, esc(arg.args[1]))
-            push!(types.args, esc(arg.args[2]))
+            push!(out.args, esc(arg.args[0]))
+            push!(types.args, esc(arg.args[1]))
         else
             push!(out.args, esc(arg))
             push!(types.args, Expr(:call, GlobalRef(Core, :Typeof), esc(arg)))
@@ -1413,17 +1413,17 @@ macro invokelatest(ex)
         if isexpr(f, :(.))
             s = :s
             check = quote
-                $s = $(esc(f.args[1]))
+                $s = $(esc(f.args[0]))
                 isa($s, Module)
             end
-            push!(out_f.args, Expr(:(.), s, esc(f.args[2])))
+            push!(out_f.args, Expr(:(.), s, esc(f.args[1])))
         else
             push!(out_f.args, esc(f))
         end
         append!(out_f.args, Any[esc(arg) for arg in args])
 
         if @isdefined(s)
-            f = :(GlobalRef($s, $(esc(f.args[2]))))
+            f = :(GlobalRef($s, $(esc(f.args[1]))))
         elseif isa(f, Symbol)
             check = esc(:($(Expr(:isglobal, f))))
         else
@@ -1463,7 +1463,7 @@ function destructure_callex(topmod::Module, @nospecialize(ex))
     if isexpr(ex, :call) # `f(args...)`
         f = first(ex.args)
         args = Any[]
-        for x in ex.args[2:end]
+        for x in ex.args[1:end]
             if isexpr(x, :parameters)
                 append!(kwargs, x.args)
             elseif isexpr(x, :kw)
@@ -1485,7 +1485,7 @@ function destructure_callex(topmod::Module, @nospecialize(ex))
             args = flatten(Any[lhs.args..., rhs])
         elseif isexpr(lhs, :ref)
             f = GlobalRef(topmod, :setindex!)
-            args = flatten(Any[lhs.args[1], rhs, lhs.args[2]])
+            args = flatten(Any[lhs.args[0], rhs, lhs.args[1]])
         else
             throw(ArgumentError("expected a `setproperty!` expression `x.f = v` or `setindex!` expression `x[i] = v`"))
         end

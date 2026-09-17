@@ -1846,3 +1846,102 @@ if !Sys.iswindows() && !running_under_rr()
         end
     end
 end
+
+# Keyword constructors and terminal styling retain their first zero-origin entries.
+@testset "zero-origin utility APIs" begin
+    @eval module JooliaUtilityConstructors
+        Base.@kwdef struct Defaults
+            a::Int = 3
+            b::String
+        end
+        abstract type Parent end
+        Base.@kwdef struct Param{T<:Integer} <: Parent
+            x::T = 2
+        end
+        Base.@kwdef mutable struct ConstField
+            const a::Int = 7
+            b::Int = 8
+        end
+        Base.@kwdef struct Empty end
+    end
+    U = JooliaUtilityConstructors
+    @test U.Defaults(b="x").a == 3 && U.Defaults(b="x").b == "x"
+    @test U.Defaults(a=4, b="y").a == 4
+    @test U.Param().x == 2 && U.Param{Int16}().x === Int16(2)
+    @test U.ConstField().a == 7 && U.ConstField().b == 8
+    @test U.Empty() isa U.Empty
+    names = Base.available_text_colors
+    @test ndims(names) == 1 && length(names) == 25 && :black in names && :nothing in names
+    @test Base.text_colors[0] == "\e[38;5;0m" && Base.text_colors[255] == "\e[38;5;255m"
+    @test sprint(printstyled, "a\nb"; context=:color=>false) == "a\nb"
+    @test sprint(io -> printstyled(io, "x"; color=:red); context=:color=>true) == "\e[31mx\e[39m"
+end
+
+# Timing macros and unit labels use zero-origin tuple, expression, and vector positions.
+@testset "zero-origin timing" begin
+    result = @timed identity(7)
+    @test result.value == 7
+    @test result.compile_time >= 0 && result.recompile_time >= 0
+    @test (@allocated identity(1)) isa Int
+    @test (@allocated identity((1,)...)) isa Int
+    @test (@allocated 1 .+ 2) isa Int
+    @test Base.format_bytes(0) == "0 bytes"
+    @test Base.format_bytes(1) == "1 byte"
+    @test Base.format_bytes(1024) == "1024 bytes"
+    @test Base.format_bytes(10000) == "9.766 KiB"
+    @test Base.format_bytes(10000; binary=false) == "10.000 kB"
+    @test occursin("1 allocation: 1 byte", sprint(io -> Base.time_print(io, 1, 1, 0, 1)))
+    @test occursin("1.50 k allocations", sprint(io -> Base.time_print(io, 1, 1, 0, 1500)))
+end
+
+# Test selection and reporting must preserve argument prefixes, paths, and valid JSON.
+@testset "zero-origin test runner infrastructure" begin
+    m = Module(gensym(:RunnerInfrastructure))
+    Base.include(m, joinpath(@__DIR__, "choosetests.jl"))
+    choose(args) = Base.invokelatest(m.choosetests, args)
+    path(name) = Base.invokelatest(m.test_path, name)
+    opts = choose(["--buildroot=/tmp/joolia build", "--seed=123", "--exit-on-error", "tuple"])
+    @test opts.buildroot == "/tmp/joolia build"
+    @test opts.seed == UInt128(123)
+    @test opts.exit_on_error
+    @test opts.tests == ["tuple"]
+    @test choose(["tuple", "numbers", "-tuple"]).tests == ["numbers"]
+    @test path("tuple") == joinpath(@__DIR__, "tuple")
+    @test path("Dates/io") == joinpath(Sys.STDLIB, "Dates", "test", "io")
+    @test normpath(path("Compiler/irutils")) == normpath(joinpath(@__DIR__, "..", "Compiler", "test", "irutils"))
+    @test normpath(path("Compiler/extras/CompilerDevTools/testpkg")) == normpath(joinpath(@__DIR__, "..", "Compiler", "extras", "CompilerDevTools", "test", "testpkg"))
+    Base.include(m, joinpath(@__DIR__, "buildkitetestjson.jl"))
+    json(x) = sprint(io -> Base.invokelatest(m.BuildkiteTestJSON.json_repr, io, x))
+    @test json(Dict("a"=>1)) == "{\n  \"a\": 1\n}"
+    @test json([1,2]) == "[\n  1,\n  2\n]"
+    @test json(Dict{String,Int}()) == "{\n}"
+end
+
+# Ordered stdlib patches must work on pristine, partial, and fully patched sources.
+@testset "stdlib patch stack application" begin
+    helper = joinpath(realpath(@__DIR__), "..", "contrib", "apply-stdlib-patches.sh")
+    if Sys.isunix() && isfile(helper) && Sys.which("patch") !== nothing
+        mktempdir() do root
+            source = joinpath(root, "source")
+            mkdir(source)
+            patches = String[]
+            for (i, (before, after)) in enumerate((("middle", "one"), ("one", "two")))
+                path = joinpath(root, "patch$i")
+                write(path, "--- a/file\n+++ b/file\n@@ -1,3 +1,3 @@\n alpha\n-$before\n+$after\n omega\n")
+                push!(patches, path)
+            end
+            write(joinpath(source, "unrelated"), "local contents")
+            command = `sh $helper $source $patches`
+            for middle in ("middle", "one", "two")
+                write(joinpath(source, "file"), "alpha\n$middle\nomega\nlocal suffix\n")
+                @test success(pipeline(command; stdout=devnull, stderr=devnull))
+                @test read(joinpath(source, "file"), String) == "alpha\ntwo\nomega\nlocal suffix\n"
+                @test read(joinpath(source, "unrelated"), String) == "local contents"
+            end
+            write(joinpath(source, "file"), "conflicting local edit\n")
+            @test !success(pipeline(command; stdout=devnull, stderr=devnull))
+            @test read(joinpath(source, "file"), String) == "conflicting local edit\n"
+            @test read(joinpath(source, "unrelated"), String) == "local contents"
+        end
+    end
+end

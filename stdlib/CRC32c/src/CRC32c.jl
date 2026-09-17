@@ -44,7 +44,7 @@ function crc32c(a::AbstractVector{UInt8}, crc::UInt32=0x00000000)
     buf = Memory{UInt8}(undef, Int(min(nb, 24576)))
     while nb > 0
         n = min(nb, 24576)
-        copyto!(buf, 1, a, last - nb + 1, n)
+        copyto!(buf, firstindex(buf), a, last - nb + 1, n)
         crc = Base.unsafe_crc32c(buf, n % Csize_t, crc)
         nb -= n
     end

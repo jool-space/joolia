@@ -23,7 +23,7 @@ using Base:       # Base definitions
     @nospecialize, @specialize, BitSet, IdDict, IdSet, UnitRange, Vector,
     delete!, empty!, enumerate, first, get, get!, hasintersect, haskey, isassigned,
     isempty, length, max, min, missing, println, push!, pushfirst!,
-    !, !==, &, *, +, -, :, <, <<, >, |, ∈, ∉, ∩, ∪, ≠, ≤, ≥, ⊆
+    !, !==, &, *, +, -, :, <, <<, >, >=, |, ∈, ∉, ∩, ∪, ≠, ≤, ≥, ⊆
 using ..Compiler: # Compiler specific definitions
     AbstractLattice, Compiler, IRCode, IR_FLAG_NOTHROW,
     argextype, argextype_widened, fieldcount_noerror, has_flag, intrinsic_nothrow,
@@ -177,7 +177,7 @@ merge_to_unindexable(AliasInfo::IndexableFields) = Unindexable(merge_to_unindexa
 merge_to_unindexable(AliasInfo::Unindexable, AliasInfos::IndexableFields) = Unindexable(merge_to_unindexable(AliasInfo.info, AliasInfos.infos))
 merge_to_unindexable(infos::Vector{AInfo}) = merge_to_unindexable(AInfo(), infos)
 function merge_to_unindexable(info::AInfo, infos::Vector{AInfo})
-    for i = 1:length(infos)
+    for i = 0:length(infos)-1
         info = info ∪ infos[i]
     end
     return info
@@ -252,12 +252,12 @@ x::EscapeInfo ⊑ₑ y::EscapeInfo = begin
             xinfos, yinfos = xa.infos, ya.infos
             xn, yn = length(xinfos), length(yinfos)
             xn > yn && return false
-            for i in 1:xn
+            for i in 0:xn-1
                 xinfos[i] ⊆ yinfos[i] || return false
             end
         elseif isa(ya, Unindexable)
             xinfos, yinfo = xa.infos, ya.info
-            for i = length(xinfos)
+            for i = 0:length(xinfos)-1
                 xinfos[i] ⊆ yinfo || return false
             end
         else
@@ -354,8 +354,8 @@ function merge_alias_info(@nospecialize(xa), @nospecialize(ya))
             xn, yn = length(xinfos), length(yinfos)
             nmax, nmin = max(xn, yn), min(xn, yn)
             infos = Vector{AInfo}(undef, nmax)
-            for i in 1:nmax
-                if i > nmin
+            for i in 0:nmax-1
+                if i >= nmin
                     infos[i] = (xn > yn ? xinfos : yinfos)[i]
                 else
                     infos[i] = xinfos[i] ∪ yinfos[i]
@@ -402,12 +402,12 @@ function EscapeState(nargs::Int, nstmts::Int)
 end
 function getindex(estate::EscapeState, @nospecialize(x))
     xidx = iridx(x, estate)
-    return xidx === nothing ? nothing : estate.escapes[xidx]
+    return xidx === nothing ? nothing : estate.escapes[xidx-1]
 end
 function setindex!(estate::EscapeState, v::EscapeInfo, @nospecialize(x))
     xidx = iridx(x, estate)
     if xidx !== nothing
-        estate.escapes[xidx] = v
+        estate.escapes[xidx-1] = v
     end
     return estate
 end
@@ -456,12 +456,13 @@ end
 function getaliases(xidx::Int, estate::EscapeState)
     aliasset = estate.aliasset
     root = find_root!(aliasset, xidx)
-    if xidx ≠ root || aliasset.ranks[xidx] > 0
+    if xidx ≠ root || aliasset.ranks[xidx-1] > 0
         # the size of this alias set containing `key` is larger than 1,
         # collect the entire alias set
         aliases = Int[]
-        for aidx in 1:length(aliasset.parents)
-            if aliasset.parents[aidx] == root
+        for aidx0 in 0:length(aliasset.parents)-1
+            aidx = aidx0 + 1
+            if aliasset.parents[aidx0] == root
                 push!(aliases, aidx)
             end
         end
@@ -509,9 +510,9 @@ struct ArgEscapeCache
         argescapes = Vector{ArgEscapeInfo}(undef, nargs)
         argaliases = ArgAliasing[]
         for i = 1:nargs
-            info = estate.escapes[i]
+            info = estate.escapes[i-1]
             @assert info.AliasInfo === true
-            argescapes[i] = ArgEscapeInfo(info)
+            argescapes[i-1] = ArgEscapeInfo(info)
             for j = (i+1):nargs
                 if isaliased(i, j, estate)
                     push!(argaliases, ArgAliasing(i, j))
@@ -587,7 +588,7 @@ function analyze_escapes(ir::IRCode, nargs::Int, 𝕃ₒ::AbstractLattice, get_e
                 elseif head === :foreignglobal
                     escape_foreignglobal!(astate, pc, stmt.args)
                 elseif head === :throw_undef_if_not # XXX when is this expression inserted ?
-                    add_escape_change!(astate, stmt.args[1], ThrownEscape(pc))
+                    add_escape_change!(astate, stmt.args[0], ThrownEscape(pc))
                 elseif is_meta_expr_head(head)
                     # meta expressions doesn't account for any usages
                     continue
@@ -671,7 +672,7 @@ function compute_frameinfo(ir::IRCode)
             if leave_block ≠ 0
                 @assert idx ≤ nstmts "try/catch inside new_nodes unsupported"
                 tryregions === nothing && (tryregions = UnitRange{Int}[])
-                leave_pc = first(ir.cfg.blocks[leave_block].stmts)
+                leave_pc = first(ir.cfg.blocks[leave_block-1].stmts)
                 push!(tryregions, idx:leave_pc)
             end
         end
@@ -715,10 +716,10 @@ end
 
 @inline function _propagate_escape_change!(@specialize(op),
     estate::EscapeState, xidx::Int, info::EscapeInfo)
-    old = estate.escapes[xidx]
+    old = estate.escapes[xidx-1]
     new = op(old, info)
     if old ≠ new
-        estate.escapes[xidx] = new
+        estate.escapes[xidx-1] = new
         return true
     end
     return false
@@ -727,7 +728,7 @@ end
 # propagate Liveness changes separately in order to avoid constructing too many BitSet
 @inline function propagate_liveness_change!(estate::EscapeState, change::LivenessChange)
     (; xidx, livepc) = change
-    info = estate.escapes[xidx]
+    info = estate.escapes[xidx-1]
     Liveness = info.Liveness
     Liveness === TOP_LIVENESS && return false
     livepc ∈ Liveness && return false
@@ -735,7 +736,7 @@ end
         # if this Liveness is a constant, we shouldn't modify it and propagate this change as a new EscapeInfo
         Liveness = copy(Liveness)
         push!(Liveness, livepc)
-        estate.escapes[xidx] = EscapeInfo(info; Liveness)
+        estate.escapes[xidx-1] = EscapeInfo(info; Liveness)
         return true
     else
         # directly modify Liveness property in order to avoid excessive copies
@@ -793,8 +794,8 @@ function add_alias_change!(astate::AnalysisState, @nospecialize(x), @nospecializ
             pushfirst!(astate.changes, AliasChange(xidx, yidx))
         end
         # add new escape change here so that it's shared among the expanded `aliasset` in `propagate_escape_change!`
-        xinfo = estate.escapes[xidx]
-        yinfo = estate.escapes[yidx]
+        xinfo = estate.escapes[xidx-1]
+        yinfo = estate.escapes[yidx-1]
         add_escape_change!(astate, x, xinfo ⊔ₑ yinfo, #=force=#true)
     end
     return nothing
@@ -817,7 +818,7 @@ function add_alias_escapes!(astate::AnalysisState, @nospecialize(v), ainfo::AInf
 end
 
 function add_thrown_escapes!(astate::AnalysisState, pc::Int, args::Vector{Any},
-    first_idx::Int = 1, last_idx::Int = length(args))
+    first_idx::Int = 0, last_idx::Int = length(args)-1)
     info = ThrownEscape(pc)
     for i in first_idx:last_idx
         add_escape_change!(astate, args[i], info)
@@ -825,7 +826,7 @@ function add_thrown_escapes!(astate::AnalysisState, pc::Int, args::Vector{Any},
 end
 
 function add_liveness_changes!(astate::AnalysisState, pc::Int, args::Vector{Any},
-    first_idx::Int = 1, last_idx::Int = length(args))
+    first_idx::Int = 0, last_idx::Int = length(args)-1)
     for i in first_idx:last_idx
         arg = args[i]
         add_liveness_change!(astate, arg, pc)
@@ -833,7 +834,7 @@ function add_liveness_changes!(astate::AnalysisState, pc::Int, args::Vector{Any}
 end
 
 function add_fallback_changes!(astate::AnalysisState, pc::Int, args::Vector{Any},
-    first_idx::Int = 1, last_idx::Int = length(args))
+    first_idx::Int = 0, last_idx::Int = length(args)-1)
     info = ThrownEscape(pc)
     for i in first_idx:last_idx
         arg = args[i]
@@ -843,7 +844,7 @@ function add_fallback_changes!(astate::AnalysisState, pc::Int, args::Vector{Any}
 end
 
 function add_conservative_changes!(astate::AnalysisState, pc::Int, args::Vector{Any},
-    first_idx::Int = 1, last_idx::Int = length(args))
+    first_idx::Int = 0, last_idx::Int = length(args)-1)
     for i in first_idx:last_idx
         add_escape_change!(astate, args[i], ⊤)
     end
@@ -853,7 +854,7 @@ end
 
 function escape_edges!(astate::AnalysisState, pc::Int, edges::Vector{Any})
     ret = SSAValue(pc)
-    for i in 1:length(edges)
+    for i in 0:length(edges)-1
         if isassigned(edges, i)
             v = edges[i]
             add_alias_change!(astate, ret, v)
@@ -929,7 +930,7 @@ function escape_exception!(astate::AnalysisState, tryregions::Vector{UnitRange{I
     # TODO? set up a special effect bit that checks the existence of `rethrow` and `current_exceptions` and use it here
     excinfo = ⊤
     escapes = estate.escapes
-    for i in 1:length(escapes)
+    for i in 0:length(escapes)-1
         x = escapes[i]
         xt = x.ThrownEscape
         xt === TOP_THROWN_ESCAPE && @goto propagate_exception_escape # fast path
@@ -940,7 +941,7 @@ function escape_exception!(astate::AnalysisState, tryregions::Vector{UnitRange{I
         end
         continue
         @label propagate_exception_escape
-        xval = irval(i, estate)
+        xval = irval(i+1, estate)
         add_escape_change!(astate, xval, excinfo)
     end
 end
@@ -953,7 +954,7 @@ function escape_invoke!(astate::AnalysisState, pc::Int, args::Vector{Any})
     else
         mi = (codeinst::CodeInstance).def
     end
-    first_idx, last_idx = 2, length(args)
+    first_idx, last_idx = 1, length(args)-1
     add_liveness_changes!(astate, pc, args, first_idx, last_idx)
     # TODO inspect `astate.ir.stmts[pc][:info]` and use const-prop'ed `InferenceResult` if available
     cache = astate.get_escape_cache(codeinst)
@@ -974,21 +975,23 @@ function escape_invoke!(astate::AnalysisState, pc::Int, args::Vector{Any})
             end
             return nothing
         else
-            return add_conservative_changes!(astate, pc, args, 2)
+            return add_conservative_changes!(astate, pc, args, 1)
         end
     end
     cache = cache::ArgEscapeCache
     retinfo = astate.estate[ret] # escape information imposed on the call statement
     method = mi.def::Method
     nargs = Int(method.nargs)
-    for (i, argidx) in enumerate(first_idx:last_idx)
+    for i0 in 0:(last_idx-first_idx)
+        i = i0 + 1
+        argidx = first_idx + i0
         arg = args[argidx]
         if i > nargs
             # handle isva signature
             # COMBAK will this be invalid once we take alias information into account?
             i = nargs
         end
-        argescape = cache.argescapes[i]
+        argescape = cache.argescapes[i-1]
         info = from_interprocedural(argescape, pc)
         # propagate the escape information imposed on this call argument by the callee
         add_escape_change!(astate, arg, info)
@@ -999,7 +1002,7 @@ function escape_invoke!(astate::AnalysisState, pc::Int, args::Vector{Any})
         end
     end
     for (; aidx, bidx) in cache.argaliases
-        add_alias_change!(astate, args[aidx+(first_idx-1)], args[bidx+(first_idx-1)])
+        add_alias_change!(astate, args[aidx+first_idx-1], args[bidx+first_idx-1])
     end
     # we should disable the alias analysis on this newly introduced object
     add_escape_change!(astate, ret, EscapeInfo(retinfo, true))
@@ -1032,7 +1035,7 @@ function escape_foreignglobal!(astate::AnalysisState, pc::Int, args::Vector{Any}
         # invalid foreignglobal, no escape
         return
     end
-    name = args[1]
+    name = args[0]
     nothrow = is_nothrow(astate.ir, pc)
     name_info = nothrow ? ⊥ : ThrownEscape(pc)
     if !isexpr(name, :tuple)
@@ -1041,7 +1044,7 @@ function escape_foreignglobal!(astate::AnalysisState, pc::Int, args::Vector{Any}
     end
 end
 
-# escape every argument `(args[6:5+length(args[3])])` and the name `args[1]`
+# escape every argument `(args[5:4+length(args[2])])` and the name `args[0]`
 # TODO: we can apply a similar strategy like builtin calls to specialize some foreigncalls
 function escape_foreigncall!(astate::AnalysisState, pc::Int, args::Vector{Any})
     nargs = length(args)
@@ -1050,9 +1053,9 @@ function escape_foreigncall!(astate::AnalysisState, pc::Int, args::Vector{Any})
         add_conservative_changes!(astate, pc, args)
         return
     end
-    argtypes = args[3]::SimpleVector
+    argtypes = args[2]::SimpleVector
     nargs = length(argtypes)
-    name = args[1]
+    name = args[0]
     # NOTE array allocations might have been proven as nothrow (https://github.com/JuliaLang/julia/pull/43565)
     nothrow = is_nothrow(astate.ir, pc)
     name_info = nothrow ? ⊥ : ThrownEscape(pc)
@@ -1063,15 +1066,15 @@ function escape_foreigncall!(astate::AnalysisState, pc::Int, args::Vector{Any})
     for i = 1:nargs
         # we should escape this argument if it is directly called,
         # otherwise just impose ThrownEscape if not nothrow
-        if argtypes[i] === Any
+        if argtypes[i-1] === Any
             arg_info = ⊤
         else
             arg_info = nothrow ? ⊥ : ThrownEscape(pc)
         end
-        add_escape_change!(astate, args[5+i], arg_info)
-        add_liveness_change!(astate, args[5+i], pc)
+        add_escape_change!(astate, args[4+i], arg_info)
+        add_liveness_change!(astate, args[4+i], pc)
     end
-    for i = (5+nargs):length(args)
+    for i = (4+nargs):length(args)-1
         arg = args[i]
         add_escape_change!(astate, arg, ⊥)
         add_liveness_change!(astate, arg, pc)
@@ -1080,7 +1083,7 @@ end
 
 function escape_gc_preserve!(astate::AnalysisState, pc::Int, args::Vector{Any})
     @assert length(args) == 1 "invalid :gc_preserve_end"
-    val = args[1]
+    val = args[0]
     @assert val isa SSAValue "invalid :gc_preserve_end"
     beginstmt = astate.ir[val][:stmt]
     @assert isexpr(beginstmt, :gc_preserve_begin) "invalid :gc_preserve_end"
@@ -1094,9 +1097,9 @@ function escape_call!(astate::AnalysisState, pc::Int, args::Vector{Any})
     f = singleton_type(ft)
     if f isa IntrinsicFunction
         if is_nothrow(astate.ir, pc)
-            add_liveness_changes!(astate, pc, args, 2)
+            add_liveness_changes!(astate, pc, args, 1)
         else
-            add_fallback_changes!(astate, pc, args, 2)
+            add_fallback_changes!(astate, pc, args, 1)
         end
         # TODO needs to account for pointer operations?
     elseif f isa Builtin
@@ -1105,11 +1108,11 @@ function escape_call!(astate::AnalysisState, pc::Int, args::Vector{Any})
             # if this call hasn't been handled by any of pre-defined handlers, escape it conservatively
             add_conservative_changes!(astate, pc, args)
         elseif result === true
-            add_liveness_changes!(astate, pc, args, 2)
+            add_liveness_changes!(astate, pc, args, 1)
         elseif is_nothrow(astate.ir, pc)
-            add_liveness_changes!(astate, pc, args, 2)
+            add_liveness_changes!(astate, pc, args, 1)
         else
-            add_fallback_changes!(astate, pc, args, 2)
+            add_fallback_changes!(astate, pc, args, 1)
         end
     else
         # escape this generic function or unknown function call conservatively
@@ -1180,8 +1183,8 @@ function escape_new!(astate::AnalysisState, pc::Int, args::Vector{Any})
         infos = AliasInfo.infos
         nf = length(infos)
         objinfo′ = ignore_aliasinfo(objinfo)
-        for i in 2:nargs
-            i-1 > nf && break # may happen when e.g. ϕ-node merges values with different types
+        for i in 1:nargs-1
+            i > nf && break # may happen when e.g. ϕ-node merges values with different types
             arg = args[i]
             add_alias_escapes!(astate, arg, infos[i-1])
             push!(infos[i-1], LocalDef(pc))
@@ -1196,7 +1199,7 @@ function escape_new!(astate::AnalysisState, pc::Int, args::Vector{Any})
         # fields are known partially: propagate escape information imposed on recorded possibilities to all field values
         info = AliasInfo.info
         objinfo′ = ignore_aliasinfo(objinfo)
-        for i in 2:nargs
+        for i in 1:nargs-1
             arg = args[i]
             add_alias_escapes!(astate, arg, info)
             push!(info, LocalDef(pc))
@@ -1212,7 +1215,7 @@ function escape_new!(astate::AnalysisState, pc::Int, args::Vector{Any})
         @label conservative_propagation
         # the fields couldn't be analyzed precisely: propagate the entire escape information
         # of this object to all its fields as the most conservative propagation
-        for i in 2:nargs
+        for i in 1:nargs-1
             arg = args[i]
             add_escape_change!(astate, arg, objinfo)
             add_liveness_change!(astate, arg, pc)
@@ -1273,7 +1276,7 @@ end
 function escape_builtin!(::typeof(getfield), astate::AnalysisState, pc::Int, args::Vector{Any})
     length(args) ≥ 3 || return false
     ir, estate = astate.ir, astate.estate
-    obj = args[2]
+    obj = args[1]
     typ = argextype_widened(obj, ir)
     if hasintersect(typ, Module) # global load
         add_escape_change!(astate, SSAValue(pc), ⊤)
@@ -1289,14 +1292,14 @@ function escape_builtin!(::typeof(getfield), astate::AnalysisState, pc::Int, arg
     if isa(AliasInfo, Bool)
         AliasInfo && @goto conservative_propagation
         # AliasInfo of this object hasn't been analyzed yet: set AliasInfo now
-        AliasInfo, fidx = analyze_fields(ir, typ, args[3])
+        AliasInfo, fidx = analyze_fields(ir, typ, args[2])
         if isa(AliasInfo, IndexableFields)
             @goto record_indexable_use
         else
             @goto record_unindexable_use
         end
     elseif isa(AliasInfo, IndexableFields)
-        AliasInfo, fidx = reanalyze_fields(AliasInfo, ir, typ, args[3])
+        AliasInfo, fidx = reanalyze_fields(AliasInfo, ir, typ, args[2])
         isa(AliasInfo, Unindexable) && @goto record_unindexable_use
         @label record_indexable_use
         push!(AliasInfo.infos[fidx], LocalUse(pc))
@@ -1321,8 +1324,8 @@ end
 function escape_builtin!(::typeof(setfield!), astate::AnalysisState, pc::Int, args::Vector{Any})
     length(args) ≥ 4 || return false
     ir, estate = astate.ir, astate.estate
-    obj = args[2]
-    val = args[4]
+    obj = args[1]
+    val = args[3]
     if isa(obj, SSAValue) || isa(obj, Argument)
         objinfo = estate[obj]
     else
@@ -1338,7 +1341,7 @@ function escape_builtin!(::typeof(setfield!), astate::AnalysisState, pc::Int, ar
         AliasInfo && @goto conservative_propagation
         # AliasInfo of this object hasn't been analyzed yet: set AliasInfo now
         typ = argextype_widened(obj, ir)
-        AliasInfo, fidx = analyze_fields(ir, typ, args[3])
+        AliasInfo, fidx = analyze_fields(ir, typ, args[2])
         if isa(AliasInfo, IndexableFields)
             @goto escape_indexable_def
         else
@@ -1346,7 +1349,7 @@ function escape_builtin!(::typeof(setfield!), astate::AnalysisState, pc::Int, ar
         end
     elseif isa(AliasInfo, IndexableFields)
         typ = argextype_widened(obj, ir)
-        AliasInfo, fidx = reanalyze_fields(AliasInfo, ir, typ, args[3])
+        AliasInfo, fidx = reanalyze_fields(AliasInfo, ir, typ, args[2])
         isa(AliasInfo, Unindexable) && @goto escape_unindexable_def
         @label escape_indexable_def
         add_alias_escapes!(astate, val, AliasInfo.infos[fidx])
@@ -1379,20 +1382,20 @@ function escape_builtin!(::typeof(setfield!), astate::AnalysisState, pc::Int, ar
     # compute the throwness of this setfield! call here since builtin_nothrow doesn't account for that
     @label add_thrown_escapes
     if length(args) == 4 && setfield!_nothrow(astate.𝕃ₒ,
-        argextype(args[2], ir), argextype(args[3], ir), argextype(args[4], ir))
+        argextype(args[1], ir), argextype(args[2], ir), argextype(args[3], ir))
         return true
     elseif length(args) == 3 && setfield!_nothrow(astate.𝕃ₒ,
-        argextype(args[2], ir), argextype(args[3], ir))
+        argextype(args[1], ir), argextype(args[2], ir))
         return true
     else
-        add_thrown_escapes!(astate, pc, args, 2)
+        add_thrown_escapes!(astate, pc, args, 1)
         return true
     end
 end
 
 function escape_builtin!(::typeof(Core.finalizer), astate::AnalysisState, pc::Int, args::Vector{Any})
     if length(args) ≥ 3
-        obj = args[3]
+        obj = args[2]
         add_liveness_change!(astate, obj, pc) # TODO setup a proper FinalizerEscape?
     end
     return false

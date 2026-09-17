@@ -137,6 +137,26 @@ julia-src-release julia-src-debug : julia-src-% : julia-deps julia_flisp.boot.in
 julia-cli-release julia-cli-debug: julia-cli-% : julia-deps
 	@$(MAKE) $(QUIET_MAKE) -C $(BUILDROOT)/cli $*
 
+.PHONY: test-core-bootstrap
+test-core-bootstrap: julia-src-$(JULIA_BUILD_MODE)
+	@$(MAKE) $(QUIET_MAKE) -C $(BUILDROOT)/test core-bootstrap
+
+.PHONY: test-base-foundation
+test-base-foundation: julia-src-$(JULIA_BUILD_MODE)
+	@$(MAKE) $(QUIET_MAKE) -C $(BUILDROOT)/test base-foundation
+
+.PHONY: test-compiler-foundation
+test-compiler-foundation: julia-src-$(JULIA_BUILD_MODE)
+	@$(MAKE) $(QUIET_MAKE) -C $(BUILDROOT)/test compiler-foundation
+
+.PHONY: test-strings-foundation
+test-strings-foundation: julia-src-$(JULIA_BUILD_MODE)
+	@$(MAKE) $(QUIET_MAKE) -C $(BUILDROOT)/test strings-foundation
+
+.PHONY: test-io-foundation
+test-io-foundation: julia-src-$(JULIA_BUILD_MODE)
+	@$(MAKE) $(QUIET_MAKE) -C $(BUILDROOT)/test io-foundation
+
 .PHONY: julia-sysimg-release julia-sysimg-debug
 julia-sysimg-release julia-sysimg-debug : julia-sysimg-% : julia-src-% $(TOP_LEVEL_PKG_LINK_TARGETS) julia-stdlib julia-base julia-cli-% | $(build_private_libdir)
 	@$(MAKE) $(QUIET_MAKE) -C $(BUILDROOT) -f sysimage.mk sysimg-$*
@@ -355,6 +375,7 @@ install: $(build_depsbindir)/stringreplace $(BUILDROOT)/doc/_build/html/en/index
 	done
 
 	$(INSTALL_M) $(JULIA_EXECUTABLE_$(JULIA_BUILD_MODE)) $(DESTDIR)$(bindir)/
+	$(INSTALL_M) $(JULIA_EXECUTABLE_$(JULIA_BUILD_MODE)) $(DESTDIR)$(bindir)/joolia$(if $(filter debug,$(JULIA_BUILD_MODE)),-debug)$(EXE)
 ifeq ($(OS),WINNT)
 	$(INSTALL_M) $(wildcard $(build_bindir)/*.dll) $(DESTDIR)$(bindir)/
 ifeq ($(JULIA_BUILD_MODE),release)
@@ -521,13 +542,13 @@ endif
 ifneq ($(private_libdir_rel),$(build_private_libdir_rel))
 ifeq ($(OS), Darwin)
 ifneq ($(DARWIN_FRAMEWORK),1)
-	for j in $(JL_TARGETS) ; do \
+	for j in $(JL_TARGETS) joolia$(if $(filter debug,$(JULIA_BUILD_MODE)),-debug)$(EXE) ; do \
 		install_name_tool -rpath @executable_path/$(build_private_libdir_rel) @executable_path/$(private_libdir_rel) $(DESTDIR)$(bindir)/$$j || exit 1; \
 		install_name_tool -rpath @executable_path/$(build_libdir_rel) @executable_path/$(libdir_rel) $(DESTDIR)$(bindir)/$$j || exit 1; \
 	done
 endif
 else ifneq (,$(findstring $(OS),Linux FreeBSD))
-	for j in $(JL_TARGETS) ; do \
+	for j in $(JL_TARGETS) joolia$(if $(filter debug,$(JULIA_BUILD_MODE)),-debug)$(EXE) ; do \
 		$(PATCHELF) $(PATCHELF_SET_RPATH_ARG) '$$ORIGIN/$(private_libdir_rel):$$ORIGIN/$(libdir_rel)' $(DESTDIR)$(bindir)/$$j || exit 1; \
 	done
 endif

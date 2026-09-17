@@ -170,8 +170,8 @@ function checked_add(x::T, y::T) where T<:Integer
     zb = add_with_overflow(x, y)
     # Avoid use of tuple destructuring, which uses arithmetic internally,
     # so that this can be used as a replacement for +
-    z = getfield(zb, 1)
-    b = getfield(zb, 2)
+    z = getfield(zb, 0)
+    b = getfield(zb, 1)
     b && throw_overflowerr_binaryop(:+, x, y)
     z
 end

@@ -318,7 +318,7 @@ User-defined plain-data types without `write` methods can be written when wrappe
 julia> struct MyStruct; x::Float64; end
 
 julia> io = IOBuffer()
-IOBuffer(data=UInt8[...], readable=true, writable=true, seekable=true, append=false, size=0, maxsize=Inf, ptr=1, mark=-1)
+IOBuffer(data=UInt8[...], readable=true, writable=true, seekable=true, append=false, size=0, maxsize=Inf, ptr=0, mark=-1)
 
 julia> write(io, Ref(MyStruct(42.0)))
 8
@@ -357,7 +357,9 @@ to provide more efficient implementations:
 """
 function unsafe_write(s::IO, p::Ptr{UInt8}, n::UInt)
     written::Int = 0
-    for i = 1:n
+    nint = Int(n)
+    nint == 0 && return written
+    for i = 0:nint-1
         written += write(s, unsafe_load(p, i))
     end
     return written
@@ -373,7 +375,9 @@ to provide more efficient implementations:
 `unsafe_read(s::T, p::Ptr{UInt8}, n::UInt)`
 """
 function unsafe_read(s::IO, p::Ptr{UInt8}, n::UInt)
-    for i = 1:n
+    nint = Int(n)
+    nint == 0 && return nothing
+    for i = 0:nint-1
         unsafe_store!(p, read(s, UInt8)::UInt8, i)
     end
     nothing
@@ -953,8 +957,8 @@ function write(s::IO, A::StridedArray; cancel::CancelTokenArg=DEFAULT_CANCEL)
         iter = CartesianIndices(sz′)
         for I in iter
             p = pointer(A)
-            for i in 1:length(sz′)
-                p += elsize(A) * st′[i] * (I[i] - 1)
+            for i in eachindex(sz′)
+                p += elsize(A) * st′[i] * I[i]
             end
             nb += unsafe_write(s, p, elsize(A) * msz)
         end
@@ -1072,8 +1076,8 @@ function read!(s::IO, A::StridedArray{T}; cancel::CancelTokenArg=DEFAULT_CANCEL)
             iter = CartesianIndices(sz′)
             for I in iter
                 p = pointer(A)
-                for i in 1:length(sz′)
-                    p += elsize(A) * st′[i] * (I[i] - 1)
+                for i in eachindex(sz′)
+                    p += elsize(A) * st′[i] * I[i]
                 end
                 unsafe_read(s, p, elsize(A) * msz)
             end
@@ -1202,8 +1206,8 @@ function readuntil_vector!(io::IO, target::AbstractVector{T}, keep::Bool, out) w
                 if !keep
                     # and add the removed prefix from the target to the output
                     # if not always keeping the match
-                    for b in 1:(pos - pos1)
-                        output!(out, target[b - 1 + first])
+                    for b in 0:(pos - pos1 - 1)
+                        output!(out, target[b + first])
                     end
                 end
                 pos = pos1
@@ -1218,8 +1222,8 @@ function readuntil_vector!(io::IO, target::AbstractVector{T}, keep::Bool, out) w
         # failed early without finishing the match,
         # add the partial match to the output
         # if not always keeping the match
-        for b in 1:pos
-            output!(out, target[b - 1 + first])
+        for b in 0:pos-1
+            output!(out, target[b + first])
         end
     end
     return false
@@ -1295,19 +1299,18 @@ and enough bytes could be read), but it will never be decreased.
 function readbytes!(s::IO, b::AbstractArray{UInt8}, nb=length(b); cancel::CancelTokenArg=DEFAULT_CANCEL)
     tok = resolve_cancel_token(cancel)
     @cancel_check tok
-    require_one_based_indexing(b)
     olb = lb = length(b)
     nr = 0
     while nr < nb && !eof(s)
         # token-gate between the reads (generic-IO cancel convention)
         @cancel_check tok
         a = read(s, UInt8)
-        nr += 1
-        if nr > lb
-            lb = nr * 2
+        if nr >= lb
+            lb = max(1, (nr + 1) * 2)
             resize!(b, lb)
         end
         b[nr] = a
+        nr += 1
     end
     if lb > olb
         resize!(b, nr) # shrink to just contain input data if was resized
@@ -1416,27 +1419,30 @@ function iterate(r::Iterators.Reverse{<:EachLine})
     p = position(r.itr.stream)
     # chunks = circular buffer of 4kiB blocks read from end of stream
     chunks = empty!(Vector{Vector{UInt8}}(undef, 2)) # allocate space for 2 buffers (common case)
-    inewline = jnewline = 0
-    while p > p0 && inewline == 0 # read chunks until we find a newline or we read whole file
+    inewline = jnewline = -1
+    while p > p0 && inewline == -1 # read chunks until we find a newline or we read whole file
         chunk = Vector{UInt8}(undef, min(4096, p-p0))
         p -= length(chunk)
         readbytes!(seek(r.itr.stream, p), chunk)
         pushfirst!(chunks, chunk)
-        inewline = something(findlast(==(UInt8('\n')), chunk), 0)
-        if length(chunks) == 1 && inewline == length(chunks[1])
+        inewline = something(findlast(==(UInt8('\n')), chunk), -1)
+        if length(chunks) == 1 && inewline == lastindex(chunk)
             # found newline at end of file … keep looking
             jnewline = inewline
-            inewline = something(findprev(==(UInt8('\n')), chunk, inewline-1), 0)
+            inewline = something(findprev(==(UInt8('\n')), chunk, inewline-1), -1)
         end
     end
-    return iterate(r, (; p0, p, chunks, ichunk=1, inewline, jchunk=length(chunks), jnewline = jnewline == 0 && !isempty(chunks) ? length(chunks[end]) : jnewline))
+    firstchunk = firstindex(chunks)
+    lastchunk = lastindex(chunks)
+    return iterate(r, (; p0, p, chunks, ichunk=firstchunk, inewline, jchunk=lastchunk,
+                       jnewline = jnewline == -1 && !isempty(chunks) ? lastindex(chunks[end]) : jnewline))
 end
 function iterate(r::Iterators.Reverse{<:EachLine}, state)
     function _stripnewline(keep, pos, data)
-        # strip \n or \r\n from data[pos] by decrementing pos
-        if !keep && pos > 0 && data[pos] == UInt8('\n')
+        # `pos` is the one-past-end position in the zero-origin buffer.
+        if !keep && pos > 0 && data[pos-1] == UInt8('\n')
             pos -= 1
-            pos -= pos > 0 && data[pos] == UInt8('\r')
+            pos -= pos > 0 && data[pos-1] == UInt8('\r')
         end
         return pos
     end
@@ -1444,15 +1450,17 @@ function iterate(r::Iterators.Reverse{<:EachLine}, state)
     #              chunks = circular array of chunk buffers,
     #              current line is from chunks[ichunk][inewline+1] to chunks[jchunk][jnewline]
     p0, p, chunks, ichunk, inewline, jchunk, jnewline = state
-    if inewline == 0 # no newline found, remaining line = rest of chunks (if any)
+    firstchunk = firstindex(chunks)
+    lastchunk = lastindex(chunks)
+    if inewline == -1 # no newline found, remaining line = rest of chunks (if any)
         isempty(chunks) && return (r.itr.ondone(); nothing)
-        buf = IOBuffer(sizehint = ichunk==jchunk ? jnewline : 4096)
+        buf = IOBuffer(sizehint = ichunk==jchunk ? jnewline + 1 : 4096)
         while ichunk != jchunk
             write(buf, chunks[ichunk])
-            ichunk = ichunk == length(chunks) ? 1 : ichunk + 1
+            ichunk = ichunk == lastchunk ? firstchunk : ichunk + 1
         end
         chunk = chunks[jchunk]
-        write(buf, view(chunk, 1:jnewline))
+        jnewline >= 0 && write(buf, view(chunk, 0:jnewline))
         buf.size = _stripnewline(r.itr.keep, buf.size, buf.data)
         empty!(chunks) # will cause next iteration to terminate
         seekend(r.itr.stream) # reposition to end of stream for isdone
@@ -1461,17 +1469,19 @@ function iterate(r::Iterators.Reverse{<:EachLine}, state)
         # extract the string from chunks[ichunk][inewline+1] to chunks[jchunk][jnewline]
         if ichunk == jchunk # common case: current and previous newline in same chunk
             chunk = chunks[ichunk]
-            s = String(view(chunk, inewline+1:_stripnewline(r.itr.keep, jnewline, chunk)))
+            last = _stripnewline(r.itr.keep, jnewline + 1, chunk)
+            first = inewline + 1
+            s = first < last ? String(view(chunk, first:last-1)) : ""
         else
             buf = IOBuffer(sizehint=max(128, length(chunks[ichunk])-inewline+jnewline))
-            write(buf, view(chunks[ichunk], inewline+1:length(chunks[ichunk])))
+            write(buf, view(chunks[ichunk], inewline+1:lastindex(chunks[ichunk])))
             i = ichunk
             while true
-                i = i == length(chunks) ? 1 : i + 1
+                i = i == lastchunk ? firstchunk : i + 1
                 i == jchunk && break
                 write(buf, chunks[i])
             end
-            write(buf, view(chunks[jchunk], 1:jnewline))
+            write(buf, view(chunks[jchunk], 0:jnewline))
             buf.size = _stripnewline(r.itr.keep, buf.size, buf.data)
             s = unsafe_takestring!(buf)
 
@@ -1481,7 +1491,7 @@ function iterate(r::Iterators.Reverse{<:EachLine}, state)
                 chunk = chunks[i]
                 p -= length(resize!(chunk, min(4096, p-p0)))
                 readbytes!(seek(r.itr.stream, p), chunk)
-                i = i == 1 ? length(chunks) : i - 1
+                i = i == firstchunk ? lastchunk : i - 1
             end
         end
 
@@ -1489,23 +1499,24 @@ function iterate(r::Iterators.Reverse{<:EachLine}, state)
         jchunk = ichunk
         jnewline = inewline
         while true
-            inewline = something(findprev(==(UInt8('\n')), chunks[ichunk], inewline-1), 0)
-            inewline > 0 && break
-            ichunk = ichunk == 1 ? length(chunks) : ichunk - 1
+            inewline = something(findprev(==(UInt8('\n')), chunks[ichunk], inewline-1), -1)
+            inewline >= 0 && break
+            ichunk = ichunk == firstchunk ? lastchunk : ichunk - 1
             ichunk == jchunk && break # found nothing — may need to read more chunks
-            inewline = length(chunks[ichunk])+1 # start for next findprev
+            inewline = lastindex(chunks[ichunk])
         end
 
         # read more chunks to look for a newline (should rarely happen)
-        if inewline == 0 && p > p0
+        if inewline == -1 && p > p0
             ichunk = jchunk + 1
             while true
                 chunk = Vector{UInt8}(undef, min(4096, p-p0))
                 p -= length(chunk)
                 readbytes!(seek(r.itr.stream, p), chunk)
                 insert!(chunks, ichunk, chunk)
-                inewline = something(findlast(==(UInt8('\n')), chunk), 0)
-                (p == p0 || inewline > 0) && break
+                lastchunk = lastindex(chunks)
+                inewline = something(findlast(==(UInt8('\n')), chunk), -1)
+                (p == p0 || inewline >= 0) && break
             end
         end
     end
@@ -1623,10 +1634,10 @@ characters from that character until the start of the next line are ignored.
 # Examples
 ```jldoctest
 julia> buf = IOBuffer("    text")
-IOBuffer(data=UInt8[...], readable=true, writable=false, seekable=true, append=false, size=8, maxsize=Inf, ptr=1, mark=-1)
+IOBuffer(data=UInt8[...], readable=true, writable=false, seekable=true, append=false, size=8, maxsize=Inf, ptr=0, mark=-1)
 
 julia> skipchars(isspace, buf)
-IOBuffer(data=UInt8[...], readable=true, writable=false, seekable=true, append=false, size=8, maxsize=Inf, ptr=5, mark=-1)
+IOBuffer(data=UInt8[...], readable=true, writable=false, seekable=true, append=false, size=8, maxsize=Inf, ptr=4, mark=-1)
 
 julia> String(readavailable(buf))
 "text"
@@ -1696,11 +1707,13 @@ function countlines(io::IO; eol::AbstractChar='\n')
     nl = nb = 0
     while !eof(io)
         nb = readbytes!(io, a)
-        @simd for i=1:nb
-            @inbounds nl += a[i] == aeol
+        if nb > 0
+            @simd for i=0:nb-1
+                @inbounds nl += a[i] == aeol
+            end
         end
     end
-    if nb > 0 && a[nb] != aeol
+    if nb > 0 && a[nb-1] != aeol
         nl += 1 # final line is not terminated with eol
     end
     nl

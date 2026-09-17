@@ -11,8 +11,8 @@ struct PermutedDimsArray{T,N,perm,iperm,AA<:AbstractArray} <: AbstractArray{T,N}
 
     function PermutedDimsArray{T,N,perm,iperm,AA}(data::AA) where {T,N,perm,iperm,AA<:AbstractArray}
         (isa(perm, NTuple{N,Int}) && isa(iperm, NTuple{N,Int})) || error("perm and iperm must both be NTuple{$N,Int}")
-        isperm(perm) || throw(ArgumentError(string(perm, " is not a valid permutation of dimensions 1:", N)))
-        all(d->iperm[perm[d]]==d, 1:N) || throw(ArgumentError(string(perm, " and ", iperm, " must be inverses")))
+        isperm(perm) || throw(ArgumentError(string(perm, " is not a valid permutation of dimensions 0:", N - 1)))
+        all(d->iperm[perm[d]]==d, 0:N-1) || throw(ArgumentError(string(perm, " and ", iperm, " must be inverses")))
         new(data)
     end
 end
@@ -30,17 +30,17 @@ See also [`permutedims`](@ref), [`invperm`](@ref).
 ```jldoctest
 julia> A = rand(3,5,4);
 
-julia> B = PermutedDimsArray(A, (3,1,2));
+julia> B = PermutedDimsArray(A, (2,0,1));
 
 julia> size(B)
 (4, 3, 5)
 
-julia> B[3,1,2] == A[1,2,3]
+julia> B[2,0,1] == A[0,1,2]
 true
 ```
 """
 Base.@constprop :aggressive function PermutedDimsArray(data::AbstractArray{T,N}, perm) where {T,N}
-    length(perm) == N || throw(ArgumentError(string(perm, " is not a valid permutation of dimensions 1:", N)))
+    length(perm) == N || throw(ArgumentError(string(perm, " is not a valid permutation of dimensions 0:", N - 1)))
     iperm = invperm(perm)
     PermutedDimsArray{T,N,(perm...,),(iperm...,),typeof(data)}(data)
 end
@@ -244,7 +244,7 @@ true
 julia> typeof(r)
 Transpose{Int64, Vector{Int64}}
 
-julia> p[1] = 5; r[2] = 6; # mutating p or r also changes v
+julia> p[0] = 5; r[1] = 6; # mutating p or r also changes v
 
 julia> v # shares memory with both p and r
 4-element Vector{Int64}:
@@ -300,18 +300,18 @@ end
 function _copy!(P::PermutedDimsArray{T,N,perm}, src) where {T,N,perm}
     # If dest/src are "close to dense," then it pays to be cache-friendly.
     # Determine the first permuted dimension
-    d = 0  # d+1 will hold the first permuted dimension of src
-    while d < ndims(src) && perm[d+1] == d+1
+    d = 0  # d will hold the first permuted dimension of src
+    while d < ndims(src) && perm[d] == d
         d += 1
     end
     if d == ndims(src)
         copyto!(parent(P), src) # it's not permuted
     else
-        R1 = CartesianIndices(axes(src)[1:d])
-        d1 = findfirst(isequal(d+1), perm)::Int  # first permuted dim of dest
-        R2 = CartesianIndices(axes(src)[d+2:d1-1])
+        R1 = CartesianIndices(axes(src)[0:d-1])
+        d1 = findfirst(isequal(d), perm)::Int  # first permuted dim of dest
+        R2 = CartesianIndices(axes(src)[d+1:d1-1])
         R3 = CartesianIndices(axes(src)[d1+1:end])
-        _permutedims!(P, src, R1, R2, R3, d+1, d1)
+        _permutedims!(P, src, R1, R2, R3, d, d1)
     end
     return P
 end

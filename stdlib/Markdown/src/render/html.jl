@@ -95,7 +95,7 @@ function html(io::IO, md::Paragraph)
 end
 
 function html(io::IO, md::HTMLBlock)
-    for line in md.content[1:end-1]
+    for line in md.content[0:end-1]
         println(io, line)
     end
     print(io, md.content[end])

@@ -141,10 +141,10 @@ struct CompoundPeriod <: AbstractTime
             # tons(Week(1)) ≈ 6.0e14, which is less than (tons ∘ oneunit)(Month(-2)) ≈ 2.6e15
             sort!(p, rev = true, by = tons ∘ oneunit)
             # canonicalize p by merging equal period types and removing zeros
-            i = j = 1
-            while j <= n
+            i = j = 0
+            while j < n
                 k = j + 1
-                while k <= n && typeof(p[j]) == typeof(p[k])
+                while k < n && typeof(p[j]) == typeof(p[k])
                     p[j] += p[k]
                     k += 1
                 end
@@ -154,9 +154,9 @@ struct CompoundPeriod <: AbstractTime
                 end
                 j = k
             end
-            n = i - 1 # new length
+            n = i # new length
             p = resize!(p, n)
-        elseif n == 1 && value(p[1]) == 0
+        elseif n == 1 && value(p[0]) == 0
             p = Period[]
         end
 
@@ -238,12 +238,12 @@ function canonicalize(x::CompoundPeriod)
     n = length(p)
     if n > 0
         pc = sizehint!(Period[], n)
-        P = typeof(p[n])
-        v = value(p[n])
-        i = n - 1
+        P = typeof(p[n - 1])
+        v = value(p[n - 1])
+        i = n - 2
         while true
             Pc, f = coarserperiod(P)
-            if i > 0 && typeof(p[i]) == P
+            if i >= 0 && typeof(p[i]) == P
                 v += value(p[i])
                 i -= 1
             end
@@ -252,7 +252,7 @@ function canonicalize(x::CompoundPeriod)
             if v != v0
                 P = Pc
                 v = div(v - v0, f)
-            elseif i > 0
+            elseif i >= 0
                 P = typeof(p[i])
                 v = value(p[i])
                 i -= 1
@@ -269,19 +269,19 @@ function canonicalize(x::CompoundPeriod)
     # reduce the amount of mixed positive/negative Periods.
     if n > 0
         pc = sizehint!(Period[], n)
-        i = n
-        while i > 0
+        i = n - 1
+        while i >= 0
             j = i
 
             # Determine sign of the largest period in this group which
             # can be converted into via coarserperiod.
             last = Union{}
             current = typeof(p[i])
-            while i > 0 && current != last
+            while i >= 0 && current != last
                 if typeof(p[i]) == current
                     i -= 1
                 end
-                last, current = current, coarserperiod(current)[1]
+                last, current = current, coarserperiod(current)[0]
             end
             s = sign(value(p[i + 1]))
 
@@ -291,7 +291,7 @@ function canonicalize(x::CompoundPeriod)
             v = 0
             while j > i
                 Pc, f = coarserperiod(P)
-                if j > 0 && typeof(p[j]) == P
+                if j >= 0 && typeof(p[j]) == P
                     v += value(p[j])
                     j -= 1
                 end
@@ -300,7 +300,7 @@ function canonicalize(x::CompoundPeriod)
                 if v != v0
                     P = Pc
                     v = div(v - v0, f)
-                elseif j > 0
+                elseif j >= 0
                     P = typeof(p[j])
                     v = 0
                 else
@@ -323,7 +323,7 @@ function Base.string(x::CompoundPeriod)
         for p in x.periods
             s *= ", " * string(p)
         end
-        return s[3:end]
+        return s[2:end]
     end
 end
 Base.show(io::IO,x::CompoundPeriod) = print(io, string(x))

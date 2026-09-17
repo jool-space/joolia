@@ -35,13 +35,13 @@ annotate!(io::AnnotatedIOBuffer, range::UnitRange{Int}, label::Symbol, @nospecia
 function write(io::AnnotatedIOBuffer, astr::Union{AnnotatedString, SubString{<:AnnotatedString}})
     astr = AnnotatedString(astr)
     offset = position(io.io)
-    eof(io) || _clear_annotations_in_region!(io.annotations, offset+1:offset+ncodeunits(astr))
+    eof(io) || _clear_annotations_in_region!(io.annotations, offset:offset+ncodeunits(astr)-1)
     _insert_annotations!(io, astr.annotations)
     write(io.io, String(astr))
 end
 
 write(io::AnnotatedIOBuffer, c::AnnotatedChar) =
-    write(io, AnnotatedString(string(c), [(region=1:ncodeunits(c), a...) for a in c.annotations]))
+    write(io, AnnotatedString(string(c), [(region=0:ncodeunits(c)-1, a...) for a in c.annotations]))
 write(io::AnnotatedIOBuffer, x::AbstractString) = write(io.io, x)::Int
 write(io::AnnotatedIOBuffer, s::Union{SubString{String}, String}) = write(io.io, s)
 write(io::AnnotatedIOBuffer, s::StringViewAndSub) = write(io.io, s)::Int
@@ -52,8 +52,8 @@ function write(dest::AnnotatedIOBuffer, src::AnnotatedIOBuffer)
     isappending = eof(dest)
     srcpos = position(src)
     nb = write(dest.io, src.io)
-    isappending || _clear_annotations_in_region!(dest.annotations, destpos:destpos+nb)
-    srcannots = [@inline(setindex(annot, max(1 + srcpos, first(annot.region)):last(annot.region), :region))
+    isappending || _clear_annotations_in_region!(dest.annotations, destpos:destpos+nb-1)
+    srcannots = [@inline(setindex(annot, max(srcpos, first(annot.region)):last(annot.region), :region))
                  for annot in src.annotations if first(annot.region) >= srcpos]
     _insert_annotations!(dest, srcannots, destpos - srcpos)
     nb
@@ -83,7 +83,7 @@ function read(io::AnnotatedIOBuffer, ::Type{AnnotatedString{T}}) where {T <: Abs
     if start == 0
         AnnotatedString(read(io.io, T), copy(io.annotations))
     else
-        annots = [@inline(setindex(annot, UnitRange{Int}(max(1, first(annot.region) - start), last(annot.region)-start), :region))
+        annots = [@inline(setindex(annot, UnitRange{Int}(max(0, first(annot.region) - start), last(annot.region)-start), :region))
                   for annot in io.annotations if last(annot.region) > start]
         AnnotatedString(read(io.io, T), annots)
     end
@@ -94,7 +94,7 @@ read(io::AnnotatedIOBuffer, ::Type{AnnotatedString}) = read(io, AnnotatedString{
 function read(io::AnnotatedIOBuffer, ::Type{AnnotatedChar{T}}) where {T <: AbstractChar}
     pos = position(io)
     char = read(io.io, T)
-    annots = [NamedTuple{(:label, :value)}(annot) for annot in io.annotations if pos+1 in annot.region]
+    annots = [NamedTuple{(:label, :value)}(annot) for annot in io.annotations if pos in annot.region]
     AnnotatedChar(char, annots)
 end
 read(io::AnnotatedIOBuffer, ::Type{AnnotatedChar{AbstractChar}}) = read(io, AnnotatedChar{Char})
@@ -102,8 +102,8 @@ read(io::AnnotatedIOBuffer, ::Type{AnnotatedChar}) = read(io, AnnotatedChar{Char
 
 function truncate(io::AnnotatedIOBuffer, size::Integer)
     truncate(io.io, size)
-    filter!(ann -> first(ann.region) <= size, io.annotations)
-    map!(ann -> @inline(setindex(ann, first(ann.region):min(size, last(ann.region)), :region)),
+    filter!(ann -> first(ann.region) < size, io.annotations)
+    map!(ann -> @inline(setindex(ann, first(ann.region):min(size-1, last(ann.region)), :region)),
          io.annotations, io.annotations)
     io
 end
@@ -143,7 +143,7 @@ function _clear_annotations_in_region!(annotations::Vector{RegionAnnotation}, sp
     end
     # Insert any extra entries in the appropriate position
     for (offset, (i, entry)) in enumerate(extras)
-        insert!(annotations, i + offset, entry)
+        insert!(annotations, i + offset + 1, entry)
     end
     annotations
 end
@@ -167,22 +167,22 @@ new annotation for each character.
 """
 function _insert_annotations!(annots::Vector{RegionAnnotation}, newannots::Vector{RegionAnnotation}, offset::Int = 0)
     run = @label search begin
-        if !isempty(annots) && last(last(annots).region) == offset
-            for i in reverse(axes(newannots, 1))
+        if !isempty(annots) && last(last(annots).region) + 1 == offset
+            for i in reverse(eachindex(newannots))
                 annot = newannots[i]
-                first(annot.region) == 1 || continue
-                i <= length(annots) || continue
+                first(annot.region) == 0 || continue
+                i < length(annots) || continue
                 annot.label == last(annots).label || continue
                 annot.value == last(annots).value || continue
-                all(1:i) do runlen
-                    new = newannots[begin+runlen-1]
+                all(0:i) do runlen
+                    new = newannots[begin+runlen]
                     old = annots[end-i+runlen]
-                    !(last(old.region) != offset ||
-                    first(new.region) != 1 ||
+                    !(last(old.region) + 1 != offset ||
+                    first(new.region) != 0 ||
                     old.label != new.label ||
                     old.value != new.value)
                 end || continue
-                break search i
+                break search i + 1
             end
         end
         0
@@ -196,7 +196,7 @@ function _insert_annotations!(annots::Vector{RegionAnnotation}, newannots::Vecto
                     value = old.value)
         annots[old_index] = extannot
     end
-    for index in run+1:lastindex(newannots)
+    for index in run:lastindex(newannots)
         annot = newannots[index]
         start, stop = first(annot.region), last(annot.region)
         # REVIEW: For some reason, construction of `newannot`
@@ -253,7 +253,7 @@ function replace(out::AnnotatedIOBuffer, str::AnnotatedString, pat_f::Pair...; c
     isappending = eof(out)
     newannots = empty(out.annotations)
     bytepos = bytestart = firstindex(str.string)
-    replacements = [(region = (bytestart - 1):(bytestart - 1), offset = position(out))]
+    replacements = [(region = bytestart:(bytestart - 1), offset = position(out))]
     nrep = 1
     while nrep <= count
         repspans, ridx, xspan, newbytes, bytepos = @inline _replace_once(
@@ -269,13 +269,13 @@ function replace(out::AnnotatedIOBuffer, str::AnnotatedString, pat_f::Pair...; c
         end
         drift = last(replacements).offset
         thisrep = (region = xspan, offset = drift + newbytes - length(xspan))
-        destoff = first(xspan) - 1 + drift
+        destoff = first(xspan) + drift
         push!(replacements, thisrep)
         replacement = replacers[ridx]
         _isannotated(replacement) || continue
         annots = annotations(replacement)
         annots′ = if eltype(annots) == Annotation # When it's a char not a string
-            region = 1:newbytes
+            region = 0:newbytes-1
             [@NamedTuple{region::UnitRange{Int}, label::Symbol, value}((region, label, value))
              for (; label, value) in annots]
         else

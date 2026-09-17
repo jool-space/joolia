@@ -12,7 +12,7 @@ end
 
 function first_error_cursor(stream::ParseStream)
     output = stream.output
-    for i = 2:length(output)
+    for i = 1:lastindex(output)
         is_error(output[i]) && return GreenTreeCursor(output, i)
     end
 end
@@ -185,7 +185,7 @@ function core_parser_hook(code, filename::String, lineno::Int, offset::Int, opti
             write(_debug_log[], code)
         end
 
-        stream = ParseStream(code, offset+1; version = syntax_version)
+        stream = ParseStream(code, offset; version = syntax_version)
         if options === :statement || options === :atom
             # To copy the flisp parser driver:
             # * Parsing atoms      consumes leading trivia
@@ -195,7 +195,7 @@ function core_parser_hook(code, filename::String, lineno::Int, offset::Int, opti
                 # If we're at the end of stream after skipping whitespace, just
                 # return `nothing` to indicate this rather than attempting to
                 # parse a statement or atom and failing.
-                return Core.svec(nothing, last_byte(stream))
+                return Core.svec(nothing, last_byte(stream) + 1)
             end
         end
         parse!(stream; rule=options)
@@ -242,10 +242,10 @@ function core_parser_hook(code, filename::String, lineno::Int, offset::Int, opti
                 topex = build_tree(Expr, stream, source)
                 @assert topex.head == :toplevel
                 i = findfirst(_has_nested_error, topex.args)
-                if i > 1 && topex.args[i-1] isa LineNumberNode
+                if i > 0 && topex.args[i-1] isa LineNumberNode
                     i -= 1
                 end
-                resize!(topex.args, i-1)
+                resize!(topex.args, i)
                 push!(topex.args, LineNumberNode(source_line(source, first_byte(errspec.node)), filename))
                 push!(topex.args, error_ex)
                 topex
@@ -263,10 +263,8 @@ function core_parser_hook(code, filename::String, lineno::Int, offset::Int, opti
             ex = build_tree(Expr, stream; filename=filename, first_line=lineno)
         end
 
-        # Note the next byte in 1-based indexing is `last_byte(stream) + 1` but
-        # the Core hook must return an offset (ie, it's 0-based) so the factors
-        # of one cancel here.
-        last_offset = last_byte(stream)
+        # Byte positions and Core parser offsets are zero-origin.
+        last_offset = last_byte(stream) + 1
 
         if !isnothing(_debug_log[])
             println(_debug_log[], """
@@ -404,7 +402,7 @@ function fl_parse(str::AbstractString, pos::Integer; greedy::Bool=true, raise::B
                   depwarn::Bool=true)
     ex, pos = _fl_parse_string(str, "none", 1, pos, greedy ? :statement : :atom)
     if raise && isa(ex,Expr) && ex.head === :error
-        throw(Meta.ParseError(ex.args[1]))
+        throw(Meta.ParseError(ex.args[0]))
     end
     return ex, pos
 end

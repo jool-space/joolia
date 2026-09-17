@@ -81,8 +81,8 @@ const HISTORY_SAMPLE_INCOMPLETE = """
             hist = HistoryFile(hpath)
             update!(hist)
             @test length(hist) == 5
-            @test hist[1] == HistEntry(:julia, DateTime("2020-10-31T05:16:39"), "cos", 1)
-            @test hist[2] == HistEntry(:help, DateTime("2020-10-31T05:16:40"), "cos", 2)
+            @test hist[0] == HistEntry(:julia, DateTime("2020-10-31T05:16:39"), "cos", 1)
+            @test hist[1] == HistEntry(:help, DateTime("2020-10-31T05:16:40"), "cos", 2)
             funccontent = """
         function is_leap_year(year)
             if year % 4 == 0 && (! year % 100 == 0 || year % 400 == 0)
@@ -91,9 +91,9 @@ const HISTORY_SAMPLE_INCOMPLETE = """
                 return false
             end
         end"""
-            @test hist[3] == HistEntry(:julia, DateTime("2021-03-12T09:03:06"), funccontent, 3)
-            @test hist[4] == HistEntry(:julia, DateTime("2021-03-23T16:48:55"), "L²norm(x -> x^2, ℐ)", 4)
-            @test hist[5] == HistEntry(:julia, DateTime("2021-03-23T16:49:06"), "L²norm(x -> 9x, ℐ)", 5)
+            @test hist[2] == HistEntry(:julia, DateTime("2021-03-12T09:03:06"), funccontent, 3)
+            @test hist[3] == HistEntry(:julia, DateTime("2021-03-23T16:48:55"), "L²norm(x -> x^2, ℐ)", 4)
+            @test hist[4] == HistEntry(:julia, DateTime("2021-03-23T16:49:06"), "L²norm(x -> 9x, ℐ)", 5)
             close(hist)
         end
         @testset "Format 2" begin
@@ -101,9 +101,9 @@ const HISTORY_SAMPLE_INCOMPLETE = """
             hist = HistoryFile(hpath)
             update!(hist)
             @test length(hist) == 3
-            @test hist[1] == HistEntry(:julia, DateTime("2025-10-18T18:21:03"), "Iterators.partition([1,2,3,4,5,6,7], 2) |> eltype", 1)
-            @test hist[2] == HistEntry(:julia, DateTime("2025-10-19T06:27:10"), "using Chairmarks", 2)
-            @test hist[3] == HistEntry(:julia, DateTime("2025-10-19T06:27:18"), "@b REPL.History.HistoryFile(\"/home/tec/.julia/logs/repl_history.jl\") REPL.History.update!", 3)
+            @test hist[0] == HistEntry(:julia, DateTime("2025-10-18T18:21:03"), "Iterators.partition([1,2,3,4,5,6,7], 2) |> eltype", 1)
+            @test hist[1] == HistEntry(:julia, DateTime("2025-10-19T06:27:10"), "using Chairmarks", 2)
+            @test hist[2] == HistEntry(:julia, DateTime("2025-10-19T06:27:18"), "@b REPL.History.HistoryFile(\"/home/tec/.julia/logs/repl_history.jl\") REPL.History.update!", 3)
             close(hist)
         end
         @testset "Malformed" begin
@@ -125,7 +125,7 @@ const HISTORY_SAMPLE_INCOMPLETE = """
             hist = HistoryFile(hpath)
             @test_nowarn update!(hist)
             @test length(hist) == 1
-            @test hist[1] == HistEntry(:julia, DateTime("2025-05-10T12:34:56"), "foo()", 1)
+            @test hist[0] == HistEntry(:julia, DateTime("2025-05-10T12:34:56"), "foo()", 1)
             close(hist)
         end
     end
@@ -149,7 +149,7 @@ const HISTORY_SAMPLE_INCOMPLETE = """
             @test hist[i].mode == entry.mode
             @test hist[i].date == entry.date
             @test hist[i].content == entry.content
-            @test hist[i].index == i
+            @test hist[i].index == i + 1
         end
         close(hist)
     end
@@ -283,19 +283,19 @@ end
                 spec = FilterSpec(cset)
                 seen = Set{Tuple{Symbol,String}}()
                 @test filterchunkrev!(results, entries, spec, seen) == 0
-                @test results == [entries[1], entries[7]]
+                @test results == [entries[0], entries[6]]
                 empty!(results)
                 cset2 = ConditionSet("world")
                 spec2 = FilterSpec(cset2)
                 empty!(seen)
                 @test filterchunkrev!(results, entries, spec2, seen) == 0
-                @test results == [entries[1], entries[7]]
+                @test results == [entries[0], entries[6]]
                 empty!(results)
                 cset3 = ConditionSet("World")
                 spec3 = FilterSpec(cset3)
                 empty!(seen)
                 @test filterchunkrev!(results, entries, spec3, seen) == 0
-                @test results == [entries[7]]
+                @test results == [entries[6]]
             end
             @testset "Exact" begin
                 empty!(results)
@@ -303,13 +303,13 @@ end
                 spec = FilterSpec(cset)
                 seen = Set{Tuple{Symbol,String}}()
                 @test filterchunkrev!(results, entries, spec, seen; maxresults = 2) == 5
-                @test results == [entries[6], entries[9]]
+                @test results == [entries[5], entries[8]]
                 empty!(results)
                 cset2 = ConditionSet("=test case")
                 spec2 = FilterSpec(cset2)
                 empty!(seen)
                 @test filterchunkrev!(results, entries, spec2, seen) == 0
-                @test results == [entries[3]]
+                @test results == [entries[2]]
             end
             @testset "Negative" begin
                 empty!(results)
@@ -317,7 +317,7 @@ end
                 spec = FilterSpec(cset)
                 seen = Set{Tuple{Symbol,String}}()
                 @test filterchunkrev!(results, entries, spec, seen) == 0
-                @test results == [entries[2], entries[7], entries[8]]
+                @test results == [entries[1], entries[6], entries[7]]
             end
             @testset "Initialism" begin
                 empty!(results)
@@ -325,13 +325,13 @@ end
                 spec = FilterSpec(cset)
                 seen = Set{Tuple{Symbol,String}}()
                 @test filterchunkrev!(results, entries, spec, seen) == 0
-                @test results == [entries[3]]
+                @test results == [entries[2]]
                 empty!(results)
                 cset2 = ConditionSet("`fb")
                 spec2 = FilterSpec(cset2)
                 empty!(seen)
                 @test filterchunkrev!(results, entries, spec2, seen) == 0
-                @test results == [entries[8]]
+                @test results == [entries[7]]
             end
             @testset "Regexp" begin
                 empty!(results)
@@ -339,7 +339,7 @@ end
                 spec = FilterSpec(cset)
                 seen = Set{Tuple{Symbol,String}}()
                 @test filterchunkrev!(results, entries, spec, seen) == 0
-                @test results == [entries[4], entries[5]]
+                @test results == [entries[3], entries[4]]
             end
             @testset "Mode" begin
                 empty!(results)
@@ -347,7 +347,7 @@ end
                 spec = FilterSpec(cset)
                 seen = Set{Tuple{Symbol,String}}()
                 @test filterchunkrev!(results, entries, spec, seen) == 0
-                @test results == [entries[7]]
+                @test results == [entries[6]]
             end
             @testset "Fuzzy" begin
                 empty!(results)
@@ -355,7 +355,7 @@ end
                 spec = FilterSpec(cset)
                 seen = Set{Tuple{Symbol,String}}()
                 @test filterchunkrev!(results, entries, spec, seen) == 0
-                @test results == entries[3:6]
+                @test results == entries[2:5]
             end
             @testset "Uniqueness" begin
                 empty!(results)
@@ -377,7 +377,7 @@ end
                 # Should only get unique entries matching the filter
                 # Since we iterate in reverse (7->1), we keep the most recent occurrence of each unique content
                 @test length(results) == 1
-                @test results[1] == dup_entries[5]  # cos(2π) - most recent
+                @test results[0] == dup_entries[4]  # cos(2π) - most recent
                 # When browsing without filtering, duplicates are kept
                 empty!(results)
                 append!(results, dup_entries)
@@ -396,33 +396,33 @@ end
                 spec3 = FilterSpec(cset3)
                 @test filterchunkrev!(results, mode_entries, spec3, seen) == 0
                 @test length(results) == 2  # "ls" from :julia and "ls" from :shell
-                @test results[1] == mode_entries[2]  # :shell ls
-                @test results[2] == mode_entries[3]  # :julia ls (most recent)
+                @test results[0] == mode_entries[1]  # :shell ls
+                @test results[1] == mode_entries[2]  # :julia ls (most recent)
             end
         end
         @testset "matchregions with multibyte characters" begin
             # Handle search for multi-byte characters (issue 61653)
             spec_ab = FilterSpec(ConditionSet("=αβ"))
-            @test matchregions(spec_ab, "αβ") == [1:3]
+            @test matchregions(spec_ab, "αβ") == [0:2]
             # Two exact matches separated by a single space should merge, even when
             # the boundary characters are multibyte
             spec_two = FilterSpec(ConditionSet("=αβ;=γδ"))
-            @test matchregions(spec_two, "αβ γδ") == [1:8]
+            @test matchregions(spec_two, "αβ γδ") == [0:7]
             # Adjacent multibyte matches (no space) must not merge
-            @test matchregions(spec_two, "αβγδ") == [1:3, 5:7]
+            @test matchregions(spec_two, "αβγδ") == [0:2, 4:6]
             # Multi-character gap must not merge
-            @test matchregions(spec_two, "αβ  γδ") == [1:3, 7:9]
+            @test matchregions(spec_two, "αβ  γδ") == [0:2, 6:8]
             # ASCII sanity: single-space-separated matches still merge
             spec_ascii = FilterSpec(ConditionSet("=foo;=bar"))
-            @test matchregions(spec_ascii, "foo bar") == [1:7]
+            @test matchregions(spec_ascii, "foo bar") == [0:6]
         end
         @testset "matchregions at end of string" begin
             # Duplicate terms matching at the end of the string (issue 62341)
             spec_dup = FilterSpec(ConditionSet("test\\; test\\;"))
-            @test matchregions(spec_dup, "test test;") == [6:10, 6:10]
+            @test matchregions(spec_dup, "test test;") == [5:9, 5:9]
             # Overlapping matches extending to the end of the string
             spec_overlap = FilterSpec(ConditionSet("=st;=test"))
-            @test matchregions(spec_overlap, "test") == [1:4, 3:4]
+            @test matchregions(spec_overlap, "test") == [0:3, 2:3]
         end
         @testset "Strictness comparison" begin
             c1 = ConditionSet("hello world")
@@ -458,7 +458,7 @@ end
         end
         @testset "Preview clamping" begin
             multiline = join(["line$i" for i in 1:20], '\n')
-            state = SelectorState((30, 80), "", FilterSpec(), [HistEntry(:julia, now(UTC), multiline, 1)], 0, (active = [1], gathered = HistEntry[]), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), [HistEntry(:julia, now(UTC), multiline, 1)], 0, (active = [0], gathered = HistEntry[]), 1)
             @test componentrows(state) == (candidates = 7, preview = 12)
         end
     end
@@ -466,34 +466,34 @@ end
         @testset "Basic counting" begin
             state = SelectorState((30, 80), "", FilterSpec(), entries)
             @test countlines_selected(state) == 0
-            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [1], gathered = HistEntry[]), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [0], gathered = HistEntry[]), 1)
             @test countlines_selected(state) == 1
         end
         @testset "Multi-line entries" begin
             code = "begin\n    x = 10\n    y = 20\n    x + y\nend"
-            state = SelectorState((30, 80), "", FilterSpec(), [HistEntry(:julia, now(UTC), code, 1)], 0, (active = [1], gathered = HistEntry[]), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), [HistEntry(:julia, now(UTC), code, 1)], 0, (active = [0], gathered = HistEntry[]), 1)
             @test countlines_selected(state) == 5
             huge = join(["line" for _ in 1:1000], '\n')
-            state = SelectorState((30, 80), "", FilterSpec(), [HistEntry(:julia, now(UTC), huge, 1)], 0, (active = [1], gathered = HistEntry[]), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), [HistEntry(:julia, now(UTC), huge, 1)], 0, (active = [0], gathered = HistEntry[]), 1)
             @test countlines_selected(state) == 1000
         end
         @testset "With gathered entries" begin
             gathered = [HistEntry(:julia, now(UTC), "old", i) for i in 21:22]
-            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [1], gathered), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [0], gathered), 1)
             @test countlines_selected(state) == 4
         end
     end
     @testset "gethover" begin
         @testset "Basic retrieval" begin
             state = SelectorState((30, 80), "", FilterSpec(), entries)
-            @test gethover(state) == entries[20]
+            @test gethover(state) == entries[19]
             state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = Int[], gathered = HistEntry[]), 3)
-            @test gethover(state) == entries[18]
+            @test gethover(state) == entries[17]
         end
         @testset "With gathered entries" begin
             gathered = [HistEntry(:julia, now(UTC), "old_$i", i) for i in 21:22]
             state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = Int[], gathered), -2)
-            @test gethover(state) == gathered[2]
+            @test gethover(state) == gathered[1]
         end
         @testset "Invalid hover positions" begin
             state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = Int[], gathered = HistEntry[]), 0)
@@ -508,14 +508,14 @@ end
             cands = candidates(state, 10)
             @test cands.active.rows == 10
             @test cands.active.width == 80
-            @test cands.active.entries == entries[11:20]
+            @test cands.active.entries == entries[10:19]
             @test cands.active.selected == Int[]
             @test cands.gathered.rows == 0
         end
         @testset "With selections" begin
-            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [5, 15, 18], gathered = HistEntry[]), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [4, 14, 17], gathered = HistEntry[]), 1)
             cands = candidates(state, 10)
-            @test cands.active.selected == [-5, 5, 8]
+            @test cands.active.selected == [-6, 4, 7]
         end
         @testset "With gathered entries" begin
             gathered = [HistEntry(:julia, now(UTC), "gathered_$i", 20+i) for i in 1:2]
@@ -524,13 +524,13 @@ end
             cands = candidates(state, 10)
             @test cands.gathered.rows == 2
             @test cands.gathered.entries == gathered
-            @test cands.gathered.selected == [1, 2]
+            @test cands.gathered.selected == [0, 1]
         end
         @testset "Scrolling" begin
             state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = Int[], gathered = HistEntry[]), 6)
             state = SelectorState(state.area, state.query, state.filter, state.candidates, 5, state.selection, 6)
             cands = candidates(state, 10)
-            @test cands.active.entries[1] == entries[6]
+            @test cands.active.entries[0] == entries[5]
             @test cands.active.entries[end] == entries[15]
         end
         @testset "Edge cases" begin
@@ -603,7 +603,7 @@ end
         @testset "Basic toggle" begin
             state = SelectorState((30, 80), "", FilterSpec(), entries)
             state = toggleselection(state)
-            @test state.selection.active == [20]
+            @test state.selection.active == [19]
             state = toggleselection(state)
             @test state.selection.active == Int[]
         end
@@ -613,27 +613,27 @@ end
             state = movehover(state, true, false)
             state = movehover(state, true, false)
             state = toggleselection(state)
-            @test state.selection.active == [18, 20]
+            @test state.selection.active == [17, 19]
         end
         @testset "Gathered entries" begin
             gathered = [HistEntry(:julia, now(UTC), "old_$i", 20+i) for i in 1:2]
             state = SelectorState((30, 80), "", FilterSpec(), entries, -1, (active = Int[], gathered), -1)
-            @test toggleselection(state).selection.gathered == [gathered[2]]
+            @test toggleselection(state).selection.gathered == [gathered[1]]
         end
         @testset "Edge cases" begin
             invalid = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = Int[], gathered = HistEntry[]), 0)
             @test toggleselection(invalid) === invalid
-            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], gathered = HistEntry[]), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], gathered = HistEntry[]), 1)
             result = toggleselection(state)
-            @test 20 ∉ result.selection.active
+            @test 19 ∉ result.selection.active
             state = SelectorState((30, 80), "", FilterSpec(), HistEntry[])
             @test toggleselection(state) === state
             state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = Int[], gathered = HistEntry[]), 100)
             @test toggleselection(state) === state
             state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = Int[], gathered = HistEntry[]), 20)
-            @test 1 in toggleselection(state).selection.active
+            @test 0 in toggleselection(state).selection.active
             state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = Int[], gathered = HistEntry[]), 1)
-            @test 20 in toggleselection(state).selection.active
+            @test 19 in toggleselection(state).selection.active
         end
     end
     @testset "fullselection" begin
@@ -648,16 +648,16 @@ end
             @test fullselection(state) == (mode = :julia, text = "describe(df)")
         end
         @testset "Single selection" begin
-            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [2], gathered = HistEntry[]), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [1], gathered = HistEntry[]), 1)
             @test fullselection(state) == (mode = :julia, text = "df = load_data()")
         end
         @testset "Multiple selections" begin
-            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [4, 1, 3], gathered = HistEntry[]), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [3, 0, 2], gathered = HistEntry[]), 1)
             @test fullselection(state) == (mode = :julia, text = "using DataFrames\ncat data.csv\ndescribe(df)")
         end
         @testset "With gathered entries" begin
             gathered = [HistEntry(:julia, now(UTC), "ENV[\"COLUMNS\"] = 120", 0)]
-            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [2], gathered), 1)
+            state = SelectorState((30, 80), "", FilterSpec(), entries, 0, (active = [1], gathered), 1)
             @test fullselection(state) == (mode = :julia, text = "ENV[\"COLUMNS\"] = 120\ndf = load_data()")
         end
         @testset "Edge cases" begin

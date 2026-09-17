@@ -141,7 +141,7 @@ _oidd_nextind(a, i) = reinterpret(Int, ccall(:jl_eqtable_nextind, Csize_t, (Any,
 function iterate(d::IdDict{K,V}, idx=0) where {K, V}
     idx = _oidd_nextind(d.ht, idx%UInt)
     idx == -1 && return nothing
-    return (Pair{K, V}(d.ht[idx + 1]::K, d.ht[idx + 2]::V), idx + 2)
+    return (Pair{K, V}(d.ht[idx]::K, d.ht[idx + 1]::V), idx + 2)
 end
 
 length(d::IdDict) = d.count

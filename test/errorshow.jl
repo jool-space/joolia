@@ -1761,19 +1761,19 @@ end
 
 @testset "MemoryRef BoundsError summary" begin
     mem = Memory{Int}(undef, 10)
-    ref = memoryref(mem, 9)
+    ref = memoryref(mem, 8)
     err_str = @except_str memoryref(ref, 3) BoundsError
     @test occursin("MemoryRef", err_str)
     @test occursin("2-element", err_str)
     @test occursin(" at index [3]", err_str)
 
-    ref2 = memoryref(mem, 10)
+    ref2 = memoryref(mem, 9)
     err_str2 = @except_str memoryref(ref2, 2) BoundsError
     @test occursin("MemoryRef", err_str2)
     @test occursin("1-element", err_str2)
 
     memA = AtomicMemory{Int}(undef, 4)
-    refA = memoryref(memA, 4)
+    refA = memoryref(memA, 3)
     err_strA = @except_str memoryref(refA, 2) BoundsError
     @test occursin("AtomicMemoryRef", err_strA)
     @test occursin("1-element", err_strA)
@@ -1792,4 +1792,43 @@ end
     @test !occursin("Hint:", sprint(showerror, try typeassert(Int64, UnionAll) catch e; e end))
     @test_throws ErrorException("too many parameters for type `Array`: expected 2, got 4") Array{1,2,3,4}
     @test_throws ErrorException("too many parameters for type `BitArray`: expected 1, got 2") BitArray{1,2}
+end
+
+# Error arguments and stored stack frames use zero-origin positions; displayed frame numbers remain ordinals.
+@testset "zero-origin error and backtrace display" begin
+    @test sprint(showerror, BoundsError([1, 2], (-1,))) ==
+        "BoundsError: attempt to access 2-element Vector{$Int} at index [-1]"
+    @test sprint(showerror, BoundsError(reshape([1, 2], 1, 2), (1, 0))) ==
+        "BoundsError: attempt to access 1×2 Matrix{$Int} at index [1, 0]"
+    @test occursin("[0:1]", sprint(showerror, BoundsError([1, 2], (Base.ZeroTo(2),))))
+    @test sprint(showerror, InexactError(:test, Int8, 0, 256)) == "InexactError: test(Int8, 0, 256)"
+    f(x::Int) = x
+    kwf(x::Int; required) = x
+    @test occursin("!Matched::$Int", sprint(Base.show_method_candidates, MethodError(f, ())))
+    @test occursin("kwf(::String; required::$Int)",
+        sprint(showerror, MethodError(Core.kwcall, ((required=1,), kwf, "x"))))
+    @test occursin("Closest candidates", sprint(Base.show_method_candidates, MethodError(convert, (Int, "x"))))
+
+    frame = Base.StackTraces.StackFrame(:alpha, :probe, 10)
+    other = Base.StackTraces.StackFrame(:beta, :probe, 20)
+    @test sprint(Base.show_backtrace, Any[]) == ""
+    text = sprint(Base.show_backtrace, Any[(frame, 1), (other, 1)])
+    @test occursin("[1] alpha", text) && occursin("[2] beta", text)
+    text = sprint(Base.show_backtrace, [frame, other])
+    @test occursin("alpha", text) && occursin("beta", text)
+    text = sprint(Base.show_backtrace, Any[(frame, 3), (other, 1)])
+    @test occursin("repeated 3 times", text) && occursin("[4] beta", text)
+    trace = Any[]
+    for _ in 0:29
+        push!(trace, (frame, 1), (other, 1))
+    end
+    push!(trace, (Base.StackTraces.StackFrame(:omega, :probe, 30), 1))
+    text = sprint(Base.show_backtrace, trace)
+    @test occursin("repeated 30 times", text) && occursin("[61] omega", text)
+    stack = Base.ExceptionStack(NamedTuple{(:exception, :backtrace)}[
+        (exception=ArgumentError("inner"), backtrace=nothing),
+        (exception=ErrorException("outer"), backtrace=nothing)])
+    @test sprint(Base.show_exception_stack, stack) == "outer\n\ncaused by: ArgumentError: inner"
+    @test sprint(Base.show_exception_stack,
+        Base.ExceptionStack(NamedTuple{(:exception, :backtrace)}[])) == ""
 end

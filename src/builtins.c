@@ -1174,7 +1174,7 @@ static inline size_t get_checked_fieldindex(const char *name, jl_datatype_t *st,
     }
     size_t idx;
     if (jl_is_long(arg)) {
-        idx = jl_unbox_long(arg) - 1;
+        idx = jl_unbox_long(arg);
         if (idx >= jl_datatype_nfields(st))
             jl_bounds_error(v, arg);
     }
@@ -1380,9 +1380,9 @@ static jl_value_t *get_fieldtype(jl_value_t *t, jl_value_t *f, int dothrow) JL_C
         jl_type_error("fieldtype", (jl_value_t*)jl_datatype_type, t);
     }
     jl_datatype_t *st = (jl_datatype_t*)t;
-    int field_index;
+    ssize_t field_index;
     if (jl_is_long(f)) {
-        field_index = jl_unbox_long(f) - 1;
+        field_index = jl_unbox_long(f);
     }
     else {
         JL_TYPECHK(fieldtype, symbol, f);
@@ -1410,7 +1410,7 @@ static jl_value_t *get_fieldtype(jl_value_t *t, jl_value_t *f, int dothrow) JL_C
             return (jl_value_t*)jl_bottom_type;
         JL_GC_PUSH1(&f);
         if (jl_is_symbol(f))
-            f = jl_box_long(field_index+1);
+            f = jl_box_long(field_index);
         jl_value_t *ft = get_fieldtype(tt, f, dothrow);
         JL_GC_POP();
         return ft;
@@ -1472,7 +1472,7 @@ JL_CALLABLE(jl_f_isdefined)
     assert(jl_is_datatype(vt));
     size_t idx;
     if (jl_is_long(args[1])) {
-        idx = jl_unbox_long(args[1]) - 1;
+        idx = jl_unbox_long(args[1]);
         if (idx >= jl_datatype_nfields(vt)) {
             if (order != jl_memory_order_unspecified)
                 jl_atomic_error("isdefined: atomic ordering cannot be specified for nonexistent field");
@@ -2040,7 +2040,7 @@ JL_CALLABLE(jl_f_memoryrefnew)
         JL_TYPECHK(memoryrefnew, long, args[1]);
         if (nargs == 3)
             JL_TYPECHK(memoryrefnew, bool, args[2]);
-        size_t i = (size_t) jl_unbox_long(args[1]) - 1;
+        size_t i = (size_t) jl_unbox_long(args[1]);
         char *data;
         if (jl_is_genericmemory(args[0])) {
             jl_genericmemory_t *m = (jl_genericmemory_t*)args[0];
@@ -2095,7 +2095,7 @@ JL_CALLABLE(jl_f_memoryrefoffset)
     else {
         offset = ((char*)m.ptr_or_offset - (char*)m.mem->ptr) / layout->size;
     }
-    return (jl_value_t*)jl_box_long(offset + 1);
+    return (jl_value_t*)jl_box_long(offset);
 }
 
 JL_CALLABLE(jl_f_memoryrefget)
@@ -2461,10 +2461,10 @@ JL_CALLABLE(jl_f__svec_ref)
     JL_TYPECHK(_svec_ref, long, i);
     size_t len = jl_svec_len(s);
     ssize_t idx = jl_unbox_long(i);
-    if (idx < 1 || idx > len) {
+    if ((size_t)idx >= len) {
         jl_bounds_error_int((jl_value_t*)s, idx);
     }
-    return jl_svecref(s, idx-1);
+    return jl_svecref(s, idx);
 }
 
 JL_CALLABLE(jl_f__task)

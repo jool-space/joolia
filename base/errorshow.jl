@@ -33,6 +33,7 @@ show_index(io::IO, x::Any) = show(io, x)
 show_index(io::IO, x::Slice) = show_index(io, x.indices)
 show_index(io::IO, x::LogicalIndex) = summary(io, x.mask)
 show_index(io::IO, x::OneTo) = print(io, "1:", x.stop)
+show_index(io::IO, x::ZeroTo) = print(io, "0:", last(x))
 show_index(io::IO, x::Colon) = print(io, ':')
 
 function showerror(io::IO, ex::Meta.ParseError)
@@ -65,7 +66,7 @@ function showerror(io::IO, ex::BoundsError)
                 show(io, ex.i)
             else
                 for (i, x) in enumerate(ex.i)
-                    i > 1 && print(io, ", ")
+                    i > 0 && print(io, ", ")
                     show_index(io, x)
                 end
             end
@@ -195,7 +196,7 @@ function showerror(io::IO, ex::InexactError)
     nameof(T) === ex.func || print(io, T, ", ")
     # `join` calls `string` on its arguments, which shadows the size of e.g. Inf16
     # as `string(Inf16) == "Inf"` instead of "Inf16". Thus we cannot use `join` here.
-    for arg in ex.args[2:end-1]
+    for arg in ex.args[1:end-1]
         show(io, arg)
         print(io, ", ")
     end
@@ -218,13 +219,13 @@ function print_with_compare(io::IO, @nospecialize(a::DataType), @nospecialize(b:
         n = length(a.parameters)
         n > 0 || return
         print(io, '{')
-        for i = 1:n
-            if i > length(b.parameters)
+        for i = 0:n-1
+            if i >= length(b.parameters)
                 printstyled(io, a.parameters[i], color=color)
             else
                 print_with_compare(io::IO, a.parameters[i], b.parameters[i], color)
             end
-            i < n && print(io, ',')
+            i < n-1 && print(io, ',')
         end
         print(io, '}')
     else
@@ -242,11 +243,11 @@ end
 
 function show_convert_error(io::IO, ex::MethodError, arg_types_param)
     # See #13033
-    T = striptype(ex.args[1])
+    T = striptype(ex.args[0])
     if T === nothing
-        print(io, "First argument to `convert` must be a Type, got ", ex.args[1])
+        print(io, "First argument to `convert` must be a Type, got ", ex.args[0])
     else
-        p2 = arg_types_param[2]
+        p2 = arg_types_param[1]
         print_one_line = isa(T, DataType) && isa(p2, DataType) && T.name != p2.name
         printstyled(io, "Cannot `convert` an object of type ")
         print_one_line || printstyled(io, "\n  ")
@@ -264,7 +265,7 @@ function showerror(io::IO, ex::MethodError)
     is_arg_types = !isa(ex.args, Tuple)
     arg_types = is_arg_types ? ex.args : typesof(ex.args...)
     arg_types_param::SimpleVector = (unwrap_unionall(arg_types)::DataType).parameters
-    san_arg_types_param = Any[rewrap_unionall(arg_types_param[i], arg_types) for i in 1:length(arg_types_param)]
+    san_arg_types_param = Any[rewrap_unionall(arg_types_param[i], arg_types) for i in 0:length(arg_types_param)-1]
     f = ex.f
     meth = methods_including_ambiguous(f, arg_types)
     if isa(meth, MethodList) && length(meth) > 1
@@ -274,19 +275,19 @@ function showerror(io::IO, ex::MethodError)
     ft = typeof(f)
     f_is_function = false
     kwargs = []
-    if f === Core.kwcall && length(arg_types_param) >= 2 && arg_types_param[1] <: NamedTuple && !is_arg_types
+    if f === Core.kwcall && length(arg_types_param) >= 2 && arg_types_param[0] <: NamedTuple && !is_arg_types
         # if this is a kwcall, reformat it as a call with kwargs
         # TODO: handle !is_arg_types here (aka invoke with kwargs), which needs a value for `f`
         local kwt
         let args = ex.args::Tuple
-            f = args[2]
+            f = args[1]
             ft = typeof(f)
-            kwt = typeof(args[1])
-            ex = MethodError(f, args[3:end], ex.world)
+            kwt = typeof(args[0])
+            ex = MethodError(f, args[2:end], ex.world)
         end
-        arg_types_param = arg_types_param[3:end]
-        san_arg_types_param = san_arg_types_param[3:end]
-        keys = kwt.parameters[1]::Tuple
+        arg_types_param = arg_types_param[2:end]
+        san_arg_types_param = san_arg_types_param[2:end]
+        keys = kwt.parameters[0]::Tuple
         kwargs = Any[(keys[i], fieldtype(kwt, i)) for i in eachindex(keys)]
         arg_types = rewrap_unionall(Tuple{arg_types_param...}, arg_types)
     end
@@ -324,7 +325,7 @@ function showerror(io::IO, ex::MethodError)
 
             nounf = f === Base.:+ ? "addition" : "subtraction"
             varnames = ("scalar", "array")
-            first, second = san_arg_types_param[1] <: Number ? varnames : reverse(varnames)
+            first, second = san_arg_types_param[0] <: Number ? varnames : reverse(varnames)
             fstring = f === Base.:+ ? "+" : "-"  # avoid depending on show_default for functions (invalidation)
             print(io, "\nFor element-wise $nounf, use broadcasting with dot syntax: $first .$fstring $second")
         end
@@ -479,8 +480,8 @@ function show_type_diff(io::IO, @nospecialize(sig), @nospecialize(called), use_c
         show_type_name(io, (sig::DataType).name)
     end
     print(io, "{")
-    for k in 1:length(sig_params)
-        k > 1 && show_separator(io, use_color)
+    for k in 0:length(sig_params)-1
+        k > 0 && show_separator(io, use_color)
         sp = sig_params[k]
         cp = called_params[k]
         if sp === cp
@@ -524,8 +525,8 @@ function show_namedtuple_diff(io::IO, @nospecialize(sig), @nospecialize(called),
     (isvatuple(s_types) || isvatuple(c_types)) && return false
     top_level && print(io, "::")
     print(io, "@NamedTuple{")
-    for i in 1:n
-        i > 1 && show_separator(io, use_color)
+    for i in 0:n-1
+        i > 0 && show_separator(io, use_color)
         show_sym(io, s_syms[i])
         sp = s_types.parameters[i]
         cp = c_types.parameters[i]
@@ -561,11 +562,11 @@ function descend_params(io::IO, @nospecialize(sig), @nospecialize(called))
     ca = make_typealias(called, io)
     if sa === nothing && ca === nothing
         return sig.parameters, called.parameters, nothing
-    elseif sa !== nothing && ca !== nothing && sa[1] === ca[1]
-        se = sa[2]::SimpleVector
-        ce = ca[2]::SimpleVector
+    elseif sa !== nothing && ca !== nothing && sa[0] === ca[0]
+        se = sa[1]::SimpleVector
+        ce = ca[1]::SimpleVector
         length(se) == length(ce) > 0 || return nothing
-        return se, ce, sa[1]
+        return se, ce, sa[0]
     else
         return nothing
     end
@@ -613,9 +614,9 @@ function show_shadowed_type_hint(io::IO, @nospecialize(f), san_arg_types_param::
         # build a list of potential shadows, max one candidate per argument
         new_args = copy(san_arg_types_param)
         shadows = Tuple{Core.TypeName,Core.TypeName}[]
-        for i in 1:nargs
+        for i in 0:nargs-1
             # everything past nargs+1 hits vararg parameter
-            expected = mparams[min(i + 1, length(mparams))]
+            expected = mparams[min(i + 1, length(mparams)-1)]
             isa(expected, Core.TypeofVararg) && (expected = unwrapva(expected))
 
             e_dt = unwrap_unionall(expected); isa(e_dt, DataType) || continue
@@ -671,11 +672,11 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs=[])
     # It also happens that users type convert when they mean call. So
     # pool MethodErrors for these two functions.
     if f === convert && !isempty(arg_types_param)
-        at1 = arg_types_param[1]
+        at1 = arg_types_param[0]
         if isType(at1) && !has_free_typevars(at1)
             at1p = type_parameter(at1)
             if at1p isa Type
-                push!(funcs, (at1p, arg_types_param[2:end]))
+                push!(funcs, (at1p, arg_types_param[1:end]))
             end
         end
     end
@@ -692,7 +693,7 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs=[])
             iob0 = iob = IOContext(buf, io)
             tv = Any[]
             if func isa Core.OpaqueClosure
-                sig0 = signature_type(func, typeof(func).parameters[1])
+                sig0 = signature_type(func, typeof(func).parameters[0])
             else
                 sig0 = method.sig
             end
@@ -702,7 +703,7 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs=[])
                 sig0 = sig0.body
             end
             sig0 = sig0::DataType
-            s1 = sig0.parameters[1]
+            s1 = sig0.parameters[0]
             if !isa(func, rewrap_unionall(s1, method.sig))
                 # function itself doesn't match
                 continue
@@ -713,25 +714,25 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs=[])
             print(iob, "(")
             t_i = copy(arg_types_param)
             right_matches = 0
-            sig = sig0.parameters[2:end]
+            sig = sig0.parameters[1:end]
             use_color = get(io, :color, false)::Bool
-            for i = 1 : min(length(t_i), length(sig))
-                i > 1 && show_separator(iob, use_color)
+            for i = 0 : min(length(t_i), length(sig))-1
+                i > 0 && show_separator(iob, use_color)
                 # If isvarargtype then it checks whether the rest of the input arguments matches
                 # the varargtype
                 if Base.isvarargtype(sig[i])
                     sigstr = Core.svec(unwrapva(unwrap_unionall(sig[i])), "...")
-                    j = length(t_i)
+                    j = length(t_i)-1
                 else
                     sigstr = Core.svec(sig[i],)
                     j = i
                 end
                 # Checks if the type of arg 1:i of the input intersects with the current method
-                t_in = typeintersect(rewrap_unionall(Tuple{sig[1:i]...}, method.sig),
-                                     rewrap_unionall(Tuple{t_i[1:j]...}, method.sig))
+                t_in = typeintersect(rewrap_unionall(Tuple{sig[0:i]...}, method.sig),
+                                     rewrap_unionall(Tuple{t_i[0:j]...}, method.sig))
                 # If the function is one of the special cased then it should break the loop if
                 # the type of the first argument is not matched.
-                t_in === Union{} && special && i == 1 && break
+                t_in === Union{} && special && i == 0 && break
                 if t_in === Union{}
                     if Base.isvarargtype(sig[i])
                         if use_color
@@ -764,7 +765,7 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs=[])
             if length(t_i) > length(sig) && !isempty(sig) && Base.isvarargtype(sig[end])
                 # It ensures that methods like f(a::AbstractString...) gets the correct
                 # number of right_matches
-                for t in arg_types_param[length(sig):end]
+                for t in arg_types_param[length(sig)-1:end]
                     if t <: rewrap_unionall(unwrapva(unwrap_unionall(sig[end])), method.sig)
                         right_matches += 1
                     end
@@ -774,17 +775,17 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs=[])
             if length(t_i) < length(sig)
                 # If the methods args is longer than input then the method
                 # arguments is printed as not a match
-                for (k, sigtype) in enumerate(sig[length(t_i)+1:end])
+                for (k, sigtype) in enumerate(sig[length(t_i):end])
                     sigtype = isvarargtype(sigtype) ? unwrap_unionall(sigtype) : sigtype
                     if Base.isvarargtype(sigtype)
                         sigstr = Core.svec(unwrapva(sigtype::Core.TypeofVararg), "...")
                     else
                         sigstr = Core.svec(sigtype,)
                     end
-                    if !((min(length(t_i), length(sig)) == 0) && k==1)
+                    if !((min(length(t_i), length(sig)) == 0) && k==0)
                         show_separator(iob, use_color)
                     end
-                    if k == 1 && Base.isvarargtype(sigtype)
+                    if k == 0 && Base.isvarargtype(sigtype)
                         # There wasn't actually a mismatch - the method match failed for
                         # some other reason, e.g. world age. Just print the sigstr.
                         print(iob, sigstr...)
@@ -895,13 +896,13 @@ function _backtrace_find_and_remove_cycles(t)
     # Second: length of the cycle as a count in the trace
     # Third:  number of cycle repetitions
 
-    #= For each entry of the trace, where it ended up in `displayed_stackframes`, or 0 if it
+    #= For each entry of the trace, where it ended up in `displayed_stackframes`, or -1 if it
     was collapsed away, so that a cycle can be bracketed from where its turn began. =#
-    displayed_at = zeros(Int, length(t))
+    displayed_at = fill(-1, length(t))
 
-    t_curr = 1
+    t_curr = 0
 
-    while t_curr ≤ length(t)
+    while t_curr < length(t)
         t_this = t_curr
         (last_frame, n) = t[t_curr]
         current_hash = hash(t[t_curr])
@@ -913,14 +914,14 @@ function _backtrace_find_and_remove_cycles(t)
         # Check previous positions for cycles
         ncycles = 0
         nnested_cycles = n > 0
-        for k ∈ reverse(eachindex(positions))[2:end] # More recent is more likely
+        for k ∈ reverse(eachindex(positions))[1:end] # More recent is more likely
             t_prev = positions[k]
             t_cycle_length = t_curr - t_prev
 
             # walk trace at current and previous matching positions until matching stops
             t_curr_end = t_curr
             t_prev_end = t_prev
-            while t_curr_end < length(t) && t[t_curr_end] == t[t_prev_end]
+            while t_curr_end < length(t)-1 && t[t_curr_end] == t[t_prev_end]
                 t_curr_end += 1
                 t_prev_end += 1
             end
@@ -935,12 +936,12 @@ function _backtrace_find_and_remove_cycles(t)
         end
 
         # ensure an outer cycle comes before a contained inner cycle
-        sort!(repeated_cycles, by = x -> (x[1], -x[2]))
+        sort!(repeated_cycles, by = x -> (x[0], -x[1]))
         max_nested_cycles = max(max_nested_cycles, nnested_cycles)
 
         if ncycles == 0
             push!(displayed_stackframes, (last_frame, n))
-            displayed_at[t_this] = length(displayed_stackframes)
+            displayed_at[t_this] = length(displayed_stackframes)-1
         end
     end
     return displayed_stackframes, repeated_cycles, max_nested_cycles
@@ -948,11 +949,11 @@ end
 
 function _backtrace_print_repetition_closings!(io::IO, i, current_cycles, frame_counter, max_nested_cycles, nactive_cycles, ndigits_max; prefix = nothing)
     while !isempty(current_cycles)
-        start_line = current_cycles[end][1]
-        cycle_length = current_cycles[end][2]
+        start_line = current_cycles[end][0]
+        cycle_length = current_cycles[end][1]
         end_line = start_line + cycle_length - 1
-        repetitions = current_cycles[end][3]
-        frame_counter_advance = current_cycles[end][4]
+        repetitions = current_cycles[end][2]
+        frame_counter_advance = current_cycles[end][3]
 
         i != end_line && break
 
@@ -968,12 +969,12 @@ function _backtrace_print_repetition_closings!(io::IO, i, current_cycles, frame_
         if cycle_length > 1
             # adjust cycle_length in outer cycles to reflect displayed frames consumed by this inner cycle
             for j ∈ eachindex(current_cycles)
-                current_cycles[j] = (current_cycles[j][1], current_cycles[j][2] - cycle_length * (repetitions - 1), current_cycles[j][3:4]...)
+                current_cycles[j] = (current_cycles[j][0], current_cycles[j][1] - cycle_length * (repetitions - 1), current_cycles[j][2:3]...)
             end
         else
             # adjust frame_counter_advance in outer cycles to reflect frames consumed by a single repeated frame
             for j ∈ eachindex(current_cycles)
-                current_cycles[j] = (current_cycles[j][1:3]..., current_cycles[j][4] + (frame_counter_advance * (current_cycles[j][3] - 1)))
+                current_cycles[j] = (current_cycles[j][0:2]..., current_cycles[j][3] + (frame_counter_advance * (current_cycles[j][2] - 1)))
             end
         end
 
@@ -989,7 +990,7 @@ function show_processed_backtrace(io::IO, trace::Vector, num_frames::Int, repeat
 
     ndigits_max = ndigits(num_frames)
 
-    push!(repeated_cycles, (0,0,0)) # repeated_cycles is never empty
+    push!(repeated_cycles, (-1,0,0)) # repeated_cycles is never empty
 
     frame_counter = 1
     current_cycles = NTuple{4, Int}[] # adding a value to track amount to advance frame_counter when cycle is closed
@@ -998,9 +999,9 @@ function show_processed_backtrace(io::IO, trace::Vector, num_frames::Int, repeat
         (frame, n) = trace[i]
 
         ncycle_starts = 0
-        while repeated_cycles[1][1] == i
+        while repeated_cycles[0][0] == i
             cycle = popfirst!(repeated_cycles)
-            push!(current_cycles, (cycle..., cycle[2] * (cycle[3] - 1)))
+            push!(current_cycles, (cycle..., cycle[1] * (cycle[2] - 1)))
             ncycle_starts += 1
         end
         if n > 1
@@ -1014,7 +1015,7 @@ function show_processed_backtrace(io::IO, trace::Vector, num_frames::Int, repeat
         frame_counter, _nactive_cycles = _backtrace_print_repetition_closings!(io, i, current_cycles, frame_counter, max_nested_cycles, nactive_cycles, ndigits_max; prefix)
         frame_counter += 1
 
-        if i < length(trace)
+        if i < length(trace)-1
             println(io)
             print_linebreaks && println(io)
         end
@@ -1134,7 +1135,7 @@ function show_backtrace(io::IO, t::Vector; prefix = nothing)
 
     # Process backtrace if it has not yet been. A processed backtrace is a Vector{Any}
     # with elements of type Tuple{StackFrame, Int}. (ref #12856)
-    if t isa Vector{Any} && (length(t) == 0 || t[1] isa Tuple{StackFrame,Int})
+    if t isa Vector{Any} && (length(t) == 0 || t[0] isa Tuple{StackFrame,Int})
         filtered = t
     else
         # t is a raw trace requiring lookup
@@ -1150,8 +1151,8 @@ function show_backtrace(io::IO, t::Vector; prefix = nothing)
     nframes = sum(last(x) for x ∈ filtered)
 
     # don't show a single top-level frame with no location info
-    if nframes == 1 && StackTraces.is_top_level_frame(filtered[1][1])
-        f = filtered[1][1]::StackFrame
+    if nframes == 1 && StackTraces.is_top_level_frame(filtered[0][0])
+        f = filtered[0][0]::StackFrame
         if f.line == 0 && f.file === :var""
             return
         end
@@ -1217,7 +1218,7 @@ end
 function _backtrace_simplify_include_frames!(trace)
     kept_frames = trues(length(trace))
     first_ignored = nothing
-    for i in length(trace):-1:1
+    for i in length(trace)-1:-1:0
         frame::StackFrame, _ = trace[i]
         mod = parentmodule(frame)
         if mod === Base && frame.func === :IncludeInto ||
@@ -1244,7 +1245,7 @@ function _backtrace_simplify_include_frames!(trace)
         end
     end
     if first_ignored !== nothing
-        kept_frames[1:first_ignored] .= false
+        kept_frames[0:first_ignored] .= false
     end
     keepat!(trace, kept_frames)
 end
@@ -1294,18 +1295,18 @@ function _backtrace_simplify_loading_frames!(trace)
     kept_frames = trues(length(trace))
     i = firstindex(trace)
     while i <= lastindex(trace)
-        if !_is_loading_frame(trace[i][1]::StackFrame)
+        if !_is_loading_frame(trace[i][0]::StackFrame)
             i += 1
             continue
         end
         # find the extent of this run of loading frames
         j = i
-        while j < lastindex(trace) && _is_loading_frame(trace[j+1][1]::StackFrame)
+        while j < lastindex(trace) && _is_loading_frame(trace[j+1][0]::StackFrame)
             j += 1
         end
         anchor = nothing
         for k in i:j
-            frame = trace[k][1]::StackFrame
+            frame = trace[k][0]::StackFrame
             if frame.func === :require || frame.func === :require_stdlib
                 anchor = k
                 break
@@ -1408,13 +1409,13 @@ function show_exception_stack(io::IO, stack)
     # means that the user doesn't have to scroll up in the REPL to discover the
     # root cause.
     nexc = length(stack)
-    for i = nexc:-1:1
-        if nexc != i
+    for i = nexc-1:-1:0
+        if nexc-1 != i
             printstyled(io, "\ncaused by: ", color=error_color())
         end
         exc, bt = stack[i]
         showerror(io, exc, bt, backtrace = bt!==nothing)
-        i == 1 || println(io)
+        i == 0 || println(io)
     end
 end
 
@@ -1451,7 +1452,7 @@ Experimental.register_error_hint(noncallable_number_hint_handler, MethodError)
 function nonsetable_type_hint_handler(io, ex, arg_types, kwargs)
     @nospecialize
     if ex.f === setindex!
-        T = arg_types[1]
+        T = arg_types[0]
         if T <: Number
             print(io, "\nAre you trying to index into an array? For multi-dimensional arrays, separate the indices with commas: ")
             printstyled(io, "a[1, 2]", color=:cyan)
@@ -1503,7 +1504,7 @@ function methods_on_iterable(io, ex, arg_types, kwargs)
     if (f === Base.length || f === Base.size) && length(arg_types) >= 1
         arg_type_tuple = Tuple{arg_types...}
         if hasmethod(iterate, arg_type_tuple)
-            iterkind = IteratorSize(arg_types[1])
+            iterkind = IteratorSize(arg_types[0])
             if iterkind isa HasLength
                 print(io, "\nYou may need to implement the `length` method or define `IteratorSize` for this type to be `SizeUnknown`.")
             elseif iterkind isa HasShape
@@ -1548,9 +1549,9 @@ function _propertynames_bytype(T::Type)
     which(propertynames, (T,)) === which(propertynames, (Any,)) && return nothing
     inferred_names = promote_op(Val∘propertynames, T)
     inferred_names isa DataType && inferred_names <: Val || return nothing
-    inferred_names = inferred_names.parameters[1]
+    inferred_names = inferred_names.parameters[0]
     inferred_names isa NTuple{<:Any, Symbol} || return nothing
-    return Symbol[inferred_names[i] for i in 1:length(inferred_names)]
+    return Symbol[inferred_names[i] for i in 0:length(inferred_names)-1]
 end
 
 Experimental.register_error_hint(fielderror_listfields_hint_handler, FieldError)

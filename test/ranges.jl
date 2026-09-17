@@ -2888,3 +2888,61 @@ const EXAMPLE_RANGES = AbstractRange[
         @test try cmp(a, b) catch e; e end == try cmp(collect(a), collect(b)) catch e; e end
     end
 end
+
+@testset "zero-origin TwicePrecision ranges" begin
+    r = 0.1:0.1:0.3
+    @test firstindex(r) == 0 && lastindex(r) == 2
+    @test r[0] === 0.1 && r[1] === 0.2 && r[2] === 0.3
+
+    rd = 0.3:-0.1:0.1
+    @test rd[0] === 0.3 && rd[2] === 0.1
+    @test range(0.1, stop=0.3, length=3)[2] === 0.3
+
+    rf = Base.floatrange(Float64, -10, 2, 11, 1)
+    @test rf.offset == 5 && rf[0] == -10 && rf[10] == 10
+    rf = Base.floatrange(Float64, 10, -2, 11, 1)
+    @test rf.offset == 5 && rf[0] == 10 && rf[10] == -10
+    rf = Base.floatrange(Float64, 1, 2, 4, 1)
+    @test rf.offset == 0 && rf[0] == 1 && rf[3] == 7
+    rf = Base.floatrange(Float64, -1, 2, 4, 1)
+    @test rf.offset == 0 && rf[0] == -1 && rf[3] == 5
+
+    s = r[1:2]
+    @test firstindex(s) == 0 && lastindex(s) == 1
+    @test s[0] == 0.2 && s[1] == 0.3
+    @test r[0:2] == r
+
+    ru = range(0.0, stop=1.0, length=UInt(3))
+    @test length(ru) == 3 && ru[0] == 0.0 && ru[2] == 1.0
+
+    e = range(1.0, stop=0.0, length=0)
+    @test isempty(e) && firstindex(e) == 0 && lastindex(e) == -1
+    @test sum(e) == 0.0
+    @test sum(range(-3.5, 4.4, length=97)) == 43.65
+
+    ro = StepRangeLen(Base.TwicePrecision(10.0), Base.TwicePrecision(1.0), 3, 2)
+    @test ro[0] == 8.0 && ro[2] == 10.0 && sum(ro) == 27.0
+end
+
+# Empty floating ranges keep their extrapolated endpoint, including unsigned length storage.
+@testset "zero-origin empty floating endpoints" begin
+    @test repr(0.0:-5.0) == "0.0:1.0:-1.0"
+    for T in (Float16, Float32, Float64)
+        for r in (T(0):T(-5), T(0):T(2):T(-5), T(0):T(-2):T(5))
+            @test length(r) == 0
+            @test isempty(r)
+            @test first(r) == T(0)
+            @test last(r) == -step(r)
+            @test isempty(collect(r))
+            @test firstindex(r) == 0 && lastindex(r) == -1
+            @test_throws BoundsError r[0]
+        end
+        for L in (Int, UInt), (a,b) in ((T(0),T(-5)), (T(1),T(0)), (T(-3),T(4)))
+            r = range(a, stop=b, length=L(0))
+            @test length(r) == 0
+            @test first(r) === a
+            @test last(r) === b
+            @test isempty(collect(r))
+        end
+    end
+end

@@ -35,7 +35,7 @@ function _helpmode(io::IO, line::AbstractString, mod::Module=Main, internal_acce
     line = strip(line)
     ternary_operator_help = (line == "?" || line == "?:")
     if startswith(line, '?') && !ternary_operator_help
-        line = line[2:end]
+        line = line[1:end]
         extended_help_on[] = nothing
         brief = false
     else
@@ -145,7 +145,7 @@ function _trimdocs(md::Markdown.MD, brief::Bool)
     content, trimmed = [], false
     for c in md.content
         if isa(c, Markdown.Header{1}) && isa(c.text, AbstractArray) && !isempty(c.text)
-            item = c.text[1]
+            item = c.text[0]
             if isa(item, AbstractString) &&
                 lowercase(item) ∈ ("extended help",
                                    "extended documentation",
@@ -179,10 +179,10 @@ end
 (la::Logged)(args...) = la.f(args...)
 
 function log_nonpublic_access(expr::Expr, mod::Module, internal_access::Set{Pair{Module,Symbol}})
-    if expr.head === :. && length(expr.args) == 2 && !is_tuple(expr.args[2])
+    if expr.head === :. && length(expr.args) == 2 && !is_tuple(expr.args[1])
         Expr(:call, Logged(getproperty, mod, internal_access), log_nonpublic_access.(expr.args, (mod,), (internal_access,))...)
-    elseif expr.head === :call && expr.args[1] === Base.Docs.Binding
-        Expr(:call, Logged(Base.Docs.Binding, mod, internal_access), log_nonpublic_access.(expr.args[2:end], (mod,), (internal_access,))...)
+    elseif expr.head === :call && expr.args[0] === Base.Docs.Binding
+        Expr(:call, Logged(Base.Docs.Binding, mod, internal_access), log_nonpublic_access.(expr.args[1:end], (mod,), (internal_access,))...)
     else
         Expr(expr.head, log_nonpublic_access.(expr.args, (mod,), (internal_access,))...)
     end
@@ -275,7 +275,7 @@ function lookup_doc(@nospecialize(ex))
             eq = isdotted ? ".=" : "="
             return Markdown.parse("`x $op= y` is a synonym for `x $eq x $op y`")
         elseif isdotted && ex !== :(..)
-            op = str[2:end]
+            op = str[1:end]
             if op in ("&&", "||")
                 return Markdown.parse("`x $ex y` broadcasts the boolean operator `$op` to `x` and `y`. See [`broadcast`](@ref).")
             else
@@ -470,7 +470,7 @@ quote_spaces(x::AccessibleBinding) = AccessibleBinding(x.source, quote_spaces(x.
 function repl_search(io::IO, s::Union{Symbol,String}, mod::Module)
     pre = "search:"
     print(io, pre)
-    printmatches(io, s, map(quote_spaces, doc_completions(s, mod)), cols = _displaysize(io)[2] - length(pre))
+    printmatches(io, s, map(quote_spaces, doc_completions(s, mod)), cols = _displaysize(io)[1] - length(pre))
     println(io, "\n")
 end
 
@@ -536,14 +536,14 @@ function repl_latex(io::IO, s0::String)
                 cstr = string(c)
                 if haskey(symbols_latex, cstr)
                     latex_symbol = symbols_latex[cstr]
-                    if length(latex_symbol) == 3 && latex_symbol[2] in ('^','_')
+                    if length(latex_symbol) == 3 && latex_symbol[1] in ('^','_')
                         # coalesce runs of sub/superscripts
-                        if state != latex_symbol[2]
+                        if state != latex_symbol[1]
                             '\0' != state && print(io, "<tab>")
-                            print(io, latex_symbol[1:2])
-                            state = latex_symbol[2]
+                            print(io, latex_symbol[0:1])
+                            state = latex_symbol[1]
                         end
-                        print(io, latex_symbol[3])
+                        print(io, latex_symbol[2])
                     else
                         if '\0' != state
                             print(io, "<tab>")
@@ -580,7 +580,7 @@ function repl(io::IO, s::Symbol; brief::Bool=true, mod::Module=Main, internal_ac
         $(_repl(s, brief, mod, internal_accesses))
     end
 end
-isregex(x) = isexpr(x, :macrocall, 3) && x.args[1] === Symbol("@r_str") && !isempty(x.args[3])
+isregex(x) = isexpr(x, :macrocall, 3) && x.args[0] === Symbol("@r_str") && !isempty(x.args[2])
 
 repl(io::IO, ex::Expr; brief::Bool=true, mod::Module=Main, internal_accesses::Union{Nothing, Set{Pair{Module,Symbol}}}=nothing) = isregex(ex) ? :(apropos($io, $ex)) : _repl(ex, brief, mod, internal_accesses)
 repl(io::IO, str::AbstractString; brief::Bool=true, mod::Module=Main, internal_accesses::Union{Nothing, Set{Pair{Module,Symbol}}}=nothing) = :(apropos($io, $str))
@@ -594,19 +594,19 @@ function _repl(x, brief::Bool=true, mod::Module=Main, internal_accesses::Union{N
         # determine the types of the values
         kwargs = nothing
         pargs = Any[]
-        for arg in x.args[2:end]
+        for arg in x.args[1:end]
             if isexpr(arg, :parameters)
                 kwargs = mapany(arg.args) do kwarg
                     if kwarg isa Symbol
                         kwarg = :($kwarg::Any)
                     elseif isexpr(kwarg, :kw)
-                        let kw_lhs = kwarg.args[1],
-                            kw_rhs = kwarg.args[2]
+                        let kw_lhs = kwarg.args[0],
+                            kw_rhs = kwarg.args[1]
                             if kw_lhs isa Symbol
                                 if kw_rhs isa Symbol
-                                    kwarg.args[1] = :($kw_lhs::(@isdefined($kw_rhs) ? typeof($kw_rhs) : Any))
+                                    kwarg.args[0] = :($kw_lhs::(@isdefined($kw_rhs) ? typeof($kw_rhs) : Any))
                                 else
-                                    kwarg.args[1] = :($kw_lhs::typeof($kw_rhs))
+                                    kwarg.args[0] = :($kw_lhs::typeof($kw_rhs))
                                 end
                             end
                         end
@@ -617,13 +617,13 @@ function _repl(x, brief::Bool=true, mod::Module=Main, internal_accesses::Union{N
                 if kwargs === nothing
                     kwargs = Any[]
                 end
-                arg_lhs = arg.args[1]
-                arg_rhs = arg.args[2]
+                arg_lhs = arg.args[0]
+                arg_rhs = arg.args[1]
                 if arg_lhs isa Symbol
                     if arg_rhs isa Symbol
-                        arg.args[1] = :($arg_lhs::(@isdefined($arg_rhs) ? typeof($arg_rhs) : Any))
+                        arg.args[0] = :($arg_lhs::(@isdefined($arg_rhs) ? typeof($arg_rhs) : Any))
                     else
-                        arg.args[1] = :($arg_lhs::typeof($arg_rhs))
+                        arg.args[0] = :($arg_lhs::typeof($arg_rhs))
                     end
                 end
                 push!(kwargs, arg)
@@ -637,17 +637,17 @@ function _repl(x, brief::Bool=true, mod::Module=Main, internal_accesses::Union{N
             end
         end
         if kwargs === nothing
-            x.args = Any[x.args[1], pargs...]
+            x.args = Any[x.args[0], pargs...]
         else
-            x.args = Any[x.args[1], Expr(:parameters, kwargs...), pargs...]
+            x.args = Any[x.args[0], Expr(:parameters, kwargs...), pargs...]
         end
     end
     #docs = lookup_doc(x) # TODO
     docs = esc(:(@doc $x))
     docs = if isfield(x)
         quote
-            if $(esc(x.args[1])) isa Type
-                fielddoc($(esc(x.args[1])), $(esc(x.args[2])))
+            if $(esc(x.args[0])) isa Type
+                fielddoc($(esc(x.args[0])), $(esc(x.args[1])))
             else
                 $docs
             end
@@ -709,7 +709,7 @@ function matchinds(needle, haystack; acronym::Bool = false)
             popfirst!(chars) # skip spaces
         end
         isempty(chars) && break
-        if lowercase(char) == lowercase(chars[1]) &&
+        if lowercase(char) == lowercase(chars[0]) &&
            (!acronym || !isletter(lastc))
             push!(is, i)
             popfirst!(chars)
@@ -737,7 +737,7 @@ function string_distance(a::AbstractString, lena::Integer, b::AbstractString, le
     end
     start = 0
     for (i, j) in zip(a, b)
-        if a == b
+        if i == j
             start += 1
         else
             break
@@ -749,12 +749,12 @@ function string_distance(a::AbstractString, lena::Integer, b::AbstractString, le
     prev_a, prev_b = first(a), first(b)
     current = 0
     for (i, ai) in enumerate(a)
-        i > start || (prev_a = ai; continue)
-        left = i - start - 1
-        current = i - start
+        i >= start || (prev_a = ai; continue)
+        left = i - start
+        current = i - start + 1
         transition_next = 0
         for (j, bj) in enumerate(b)
-            j > start || (prev_b = bj; continue)
+            j >= start || (prev_b = bj; continue)
             # No need to look beyond window of lower right diagonal
             above = current
             this_transition = transition_next
@@ -764,7 +764,7 @@ function string_distance(a::AbstractString, lena::Integer, b::AbstractString, le
             if ai != bj
                 # Minimum between substitution, deletion and insertion
                 current = min(current + 1, above + 1, left + 1)
-                if i > start + 1 && j > start + 1 && ai == prev_b && prev_a == bj
+                if i > start && j > start && ai == prev_b && prev_a == bj
                     current = min(current, (this_transition += 1))
                 end
             end
@@ -778,6 +778,7 @@ end
 
 function fuzzyscore(needle::AbstractString, haystack::AbstractString)
     lena, lenb = length(needle), length(haystack)
+    max(lena, lenb) == 0 && return 1.0
     1 - (string_distance(needle, lena, haystack, lenb) / max(lena, lenb))
 end
 
@@ -804,16 +805,17 @@ function levenshtein(s1, s2)
     n = length(b)
     d = Matrix{Int}(undef, m+1, n+1)
 
-    d[1:m+1, 1] = 0:m
-    d[1, 1:n+1] = 0:n
+    # Row and column zero hold distances from the empty prefix.
+    d[0:m, 0] = 0:m
+    d[0, 0:n] = 0:n
 
-    for i = 1:m, j = 1:n
+    for i = 0:m-1, j = 0:n-1
         d[i+1,j+1] = min(d[i  , j+1] + 1,
                          d[i+1, j  ] + 1,
                          d[i  , j  ] + (a[i] != b[j]))
     end
 
-    return d[m+1, n+1]
+    return d[m, n]
 end
 
 function levsort(search::String, candidates::Vector{AccessibleBinding})
@@ -821,11 +823,12 @@ function levsort(search::String, candidates::Vector{AccessibleBinding})
         (Float64(levenshtein(search, cand.name)), -fuzzyscore(search, cand))
     end
     candidates = candidates[sortperm(scores)]
-    i = 0
-    for outer i = 1:length(candidates)
-        levenshtein(search, candidates[i].name) > 3 && break
+    i = -1
+    for j in eachindex(candidates)
+        levenshtein(search, candidates[j].name) > 3 && break
+        i = j
     end
-    return candidates[1:i]
+    return candidates[0:i]
 end
 
 # Result printing
@@ -855,7 +858,7 @@ function matchlength(x::AccessibleBinding)
 end
 matchlength(x) = length(x)
 
-function printmatches(io::IO, word, matches; cols::Int = _displaysize(io)[2])
+function printmatches(io::IO, word, matches; cols::Int = _displaysize(io)[1])
     total = 0
     for match in matches
         ml = matchlength(match)
@@ -867,25 +870,25 @@ function printmatches(io::IO, word, matches; cols::Int = _displaysize(io)[2])
     end
 end
 
-printmatches(args...; cols::Int = _displaysize(stdout)[2]) = printmatches(stdout, args..., cols = cols)
+printmatches(args...; cols::Int = _displaysize(stdout)[1]) = printmatches(stdout, args..., cols = cols)
 
-function print_joined_cols(io::IO, ss::Vector{AccessibleBinding}, delim = "", last = delim; cols::Int = _displaysize(io)[2])
-    i = 0
+function print_joined_cols(io::IO, ss::Vector{AccessibleBinding}, delim = "", last = delim; cols::Int = _displaysize(io)[1])
+    i = -1
     total = 0
-    for outer i = 1:length(ss)
+    for outer i in eachindex(ss)
         total += matchlength(ss[i])
-        total + max(i-2,0)*length(delim) + (i>1 ? 1 : 0)*length(last) > cols && (i-=1; break)
+        total + max(i-1,0)*length(delim) + (i>0 ? 1 : 0)*length(last) > cols && (i-=1; break)
     end
-    join(io, ss[1:i], delim, last)
+    join(io, ss[0:i], delim, last)
 end
 
-print_joined_cols(args...; cols::Int = _displaysize(stdout)[2]) = print_joined_cols(stdout, args...; cols=cols)
+print_joined_cols(args...; cols::Int = _displaysize(stdout)[1]) = print_joined_cols(stdout, args...; cols=cols)
 
 function print_correction(io::IO, word::String, mod::Module)
     cors = map(quote_spaces, levsort(word, accessible(mod)))
     pre = "Perhaps you meant "
     print(io, pre)
-    print_joined_cols(io, cors, ", ", " or "; cols = _displaysize(io)[2] - length(pre))
+    print_joined_cols(io, cors, ", ", " or "; cols = _displaysize(io)[1] - length(pre))
     println(io)
     return
 end

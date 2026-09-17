@@ -191,3 +191,17 @@ end
 for (k, v) in pairs(original_env)
     ENV[k] = v
 end
+
+# Environment iteration must preserve the first character of names and include the first entry.
+@testset "zero-origin environment iteration" begin
+    withenv("JOOLIA_ORIGIN_TEST" => "first=value") do
+        entries = Dict(ENV)
+        @test entries["JOOLIA_ORIGIN_TEST"] == "first=value"
+        @test entries["JOOLIA_ORIGIN_TEST"] == ENV["JOOLIA_ORIGIN_TEST"]
+    end
+    if !Sys.iswindows()
+        first_entry = unsafe_string(unsafe_load(Base._environ()))
+        key, value = split(first_entry, '='; limit=2)
+        @test first(ENV) == (key => value)
+    end
+end

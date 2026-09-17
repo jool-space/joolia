@@ -5,12 +5,17 @@ using Test, Base.BinaryPlatforms, Base.BinaryPlatforms.CPUID
 @testset "CPUID" begin
     @test CPUID.cpu_isa() isa CPUID.ISA
 
+    # Feature bytes and feature bit IDs are both zero-origin.
+    bits = CPUID._featurebytes_to_isa(UInt8[0x01, 0x80]).features
+    @test bits == Set{UInt32}((0, 15))
+    @test isempty(CPUID._featurebytes_to_isa(UInt8[]).features)
+
     # x86_64 tiers form a strict subset chain
     get_x86_64(n) = (CPUID.ISAs_by_family["x86_64"][n].second)
     @test get_x86_64(2) <  get_x86_64(4)
     @test get_x86_64(5) <= get_x86_64(5)
     @test get_x86_64(3) >= get_x86_64(3)
-    @test get_x86_64(7) >= get_x86_64(1)
+    @test get_x86_64(6) >= get_x86_64(1)
     @test sort([get_x86_64(6), get_x86_64(4), get_x86_64(2), get_x86_64(4)]) ==
         [get_x86_64(2), get_x86_64(4), get_x86_64(4), get_x86_64(6)]
 

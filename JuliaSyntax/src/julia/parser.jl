@@ -22,13 +22,13 @@ struct ParseState
     # Enable parsing `where` with high precedence
     where_enabled::Bool
     # First byte of the content of the bare parens currently being parsed
-    # (0 otherwise).
+    # (typemax(UInt32) otherwise).
     paren_content_byte_index::UInt32
 end
 
 # Normal context
 function ParseState(stream::ParseStream)
-    ParseState(stream, true, false, false, false, false, true, UInt32(0))
+    ParseState(stream, true, false, false, false, false, true, typemax(UInt32))
 end
 
 function ParseState(ps::ParseState; range_colon_enabled=nothing,
@@ -1525,7 +1525,7 @@ function maybe_parsed_special_macro(ps, last_identifier_orig_kind)
     if is_special && ps.stream.version >= (1, 14)
         # Encode the current parser version into an invisible token
         bump_invisible(ps, K"VERSION",
-            set_numeric_flags(ps.stream.version[2] * 10))
+            set_numeric_flags(ps.stream.version[1] * 10))
     end
 end
 
@@ -1698,8 +1698,8 @@ function parse_call_chain(ps::ParseState, mark, is_macrocall=false)
                     error="`@` must appear on first or last macro name component")
                 # Recover by treating the `@` as if it had been on the last identifier
                 saw_misplaced_atsym = true
-                reset_node!(ps, macro_atname_range[2], kind=K"TOMBSTONE")
-                reset_node!(ps, macro_atname_range[1], kind=K"error")
+                reset_node!(ps, macro_atname_range[1], kind=K"TOMBSTONE")
+                reset_node!(ps, macro_atname_range[0], kind=K"error")
             end
             bump(ps, TRIVIA_FLAG)
             k = peek(ps)
@@ -1784,8 +1784,8 @@ function parse_call_chain(ps::ParseState, mark, is_macrocall=false)
                     # zero-width error token here. If that's not right, we'll
                     # reset it later.
                     if misplaced_atsym_mark !== nothing
+                        reset_node!(ps, misplaced_atsym_mark[0], kind=K"TOMBSTONE")
                         reset_node!(ps, misplaced_atsym_mark[1], kind=K"TOMBSTONE")
-                        reset_node!(ps, misplaced_atsym_mark[2], kind=K"TOMBSTONE")
                     end
                     macro_name_mark = position(ps)
                     bump_invisible(ps, K"error", TRIVIA_FLAG)
@@ -2182,7 +2182,7 @@ function parse_resword(ps::ParseState)
                 # will use this to set the same parser version for runtime `include`
                 # etc into this module.
                 bump_invisible(ps, K"VERSION",
-                    set_numeric_flags(ps.stream.version[2] * 10))
+                    set_numeric_flags(ps.stream.version[1] * 10))
             end
             # module $A end  ==>  (module ($ A) (block))
             parse_unary_prefix(ps)

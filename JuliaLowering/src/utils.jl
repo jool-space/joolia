@@ -155,7 +155,7 @@ function Base.showerror(io::IO, exc::LoweringError; show_detail=true)
 
     if (show_detail || exc.internal) && !isempty(exc.sts)
         print(io, "\n\nDetailed provenance:\n  ")
-        _show_provtree(io, exc.sts[1], "  ")
+        _show_provtree(io, exc.sts[0], "  ")
     end
 end
 
@@ -191,13 +191,13 @@ function showprov(io::IO, exs::AbstractVector;
                   note=nothing, include_location::Bool=true, highlight_kwargs...)
     for (i,ex) in enumerate(Iterators.reverse(exs))
         sr = sourceref(ex)
-        if i > 1
+        if i > 0
             print(io, "\n\n")
         end
         k = kind(ex)
         ex_note = !isnothing(note) ? note :
-            i > 1 && k == K"macrocall"  ? "in macro expansion" :
-            i > 1 && k == K"$"          ? "interpolated here"  :
+            i > 0 && k == K"macrocall"  ? "in macro expansion" :
+            i > 0 && k == K"$"          ? "interpolated here"  :
             "in source"
         highlight(io, sr; note=ex_note, highlight_kwargs...)
 
@@ -221,31 +221,31 @@ end
 
 function _deref_ssa(stmts, ex)
     while kind(ex) == K"SSAValue"
-        ex = stmts[syntax_id(ex)]
+        ex = stmts[syntax_id(ex) - 1]
     end
     ex
 end
 
 function _is_define_method_call(e)
     kind(e) == K"call" && numchildren(e) >= 1 &&
-        kind(e[1]) == K"core" && syntax_name(e[1]) == "define_method"
+        kind(e[0]) == K"core" && syntax_name(e[0]) == "define_method"
 end
 
 function _find_method_lambda(ex0, name)
-    ex = kind(ex0) === K"thunk" ? ex0[1] : ex0
+    ex = kind(ex0) === K"thunk" ? ex0[0] : ex0
     @jl_assert kind(ex) == K"code_info" ex
     # Heuristic search through outer thunk for the method in question.
-    stmts = children(ex[2])
+    stmts = children(ex[1])
     for e in stmts
         if _is_define_method_call(e) && numchildren(e) == 5
             # define_method(module, fname, sig, lam)
-            sig = _deref_ssa(stmts, e[4])
+            sig = _deref_ssa(stmts, e[3])
             @jl_assert kind(sig) == K"call" ex
-            arg_types = _deref_ssa(stmts, sig[2])
+            arg_types = _deref_ssa(stmts, sig[1])
             @jl_assert kind(arg_types) == K"call" ex
-            self_type = _deref_ssa(stmts, arg_types[2])
+            self_type = _deref_ssa(stmts, arg_types[1])
             if kind(self_type) == K"globalref" && occursin(name, syntax_name(self_type))
-                return e[5]
+                return e[4]
             end
         end
     end
@@ -267,11 +267,11 @@ end
 # TODO: JuliaLowering-the-module should always print the same way, ignoring parent modules
 function _print_ir(io::IO, ex0, indent)
     added_indent = "    "
-    (ex, is_toplevel_thunk) = kind(ex0) === K"thunk" ? (ex0[1],true) : (ex0,false)
+    (ex, is_toplevel_thunk) = kind(ex0) === K"thunk" ? (ex0[0],true) : (ex0,false)
     @jl_assert ((kind(ex) == K"lambda" || kind(ex) == K"code_info")
-                && kind(ex[2]) == K"block") ex
+                && kind(ex[1]) == K"block") ex
     if !is_toplevel_thunk && kind(ex) == K"code_info"
-        slots = ex[1].value
+        slots = ex[0].value
         print(io, indent, "slots: [")
         for (i,slot) in enumerate(slots)
             print(io, "slot$(subscript_str(i))/$(slot.name)")
@@ -284,35 +284,35 @@ function _print_ir(io::IO, ex0, indent)
             if !isempty(flags)
                 print(io, "($(join(flags, ",")))")
             end
-            if i < length(slots)
+            if i < lastindex(slots)
                 print(io, " ")
             end
         end
         println(io, "]")
     end
-    stmts = children(ex[2])
+    stmts = children(ex[1])
     for (i, e) in enumerate(stmts)
         lno = rpad(i, 3)
         if _is_define_method_call(e) && numchildren(e) == 5
             # define_method(module, fname, sig, lam)
             print(io, indent, lno, " (call core.define_method ",
-                  string(e[2]), " ", string(e[3]), " ", string(e[4]))
-            if kind(e[5]) == K"lambda" || kind(e[5]) == K"code_info"
+                  string(e[1]), " ", string(e[2]), " ", string(e[3]))
+            if kind(e[4]) == K"lambda" || kind(e[4]) == K"code_info"
                 println(io)
                 print(io, indent, "    --- code_info")
                 println(io)
-                _print_ir(io, e[5], indent*added_indent)
+                _print_ir(io, e[4], indent*added_indent)
             else
-                println(io, " ", string(e[5]), ")")
+                println(io, " ", string(e[4]), ")")
             end
         elseif kind(e) == K"opaque_closure_method"
             @jl_assert numchildren(e) == 5 e
             print(io, indent, lno, " --- opaque_closure_method ")
-            for i=1:4
+            for i=0:3
                 print(io, " ", e[i])
             end
             println(io)
-            _print_ir(io, e[5], indent*added_indent)
+            _print_ir(io, e[4], indent*added_indent)
         elseif kind(e) == K"code_info"
             println(io, indent, lno, " --- ", "code_info")
             _print_ir(io, e, indent*added_indent)
@@ -328,9 +328,9 @@ if isdefined(Base.Compiler, Symbol("@zone")) && DEBUG
     macro fzone(str, f)
         @assert(f isa Expr && f.head === :function && length(f.args) === 2 && str isa String,
                 "usage: @fzone name_string <function expression>")
-        esc(Expr(:function, f.args[1],
+        esc(Expr(:function, f.args[0],
                  # Use source of our caller, not of this macro.
-                 Expr(:macrocall, :(Base.Compiler.var"@zone"), __source__, str, f.args[2])))
+                 Expr(:macrocall, :(Base.Compiler.var"@zone"), __source__, str, f.args[1])))
     end
 else
     macro fzone(str, f)
@@ -378,10 +378,10 @@ function renumber_assigned_ssavalues(ctx, st)
 end
 function _find_assigned_ssavars!(ctx, ssamap, st)
     (is_leaf(st) || is_quoted(st)) && return
-    if kind(st) == K"=" && kind(st[1]) == K"BindingId"
-        b = get_binding(ctx, st[1])
+    if kind(st) == K"=" && kind(st[0]) == K"BindingId"
+        b = get_binding(ctx, st[0])
         b.is_ssa || return
-        ssamap[b.id] = syntax_id(ssavar(ctx, st[1], b.name))
+        ssamap[b.id] = syntax_id(ssavar(ctx, st[0], b.name))
     end
     foreach(e->_find_assigned_ssavars!(ctx, ssamap, e), children(st))
 end

@@ -4,7 +4,7 @@ rst(x) = sprint(rst, x)
 
 function rst(io::IO, content::Vector)
     isempty(content) && return
-    for md in content[1:end-1]
+    for md in content[0:end-1]
         rst(io, md)
         println(io)
     end
@@ -16,7 +16,7 @@ rst(io::IO, md::MD) = rst(io, md.content)
 function rst(io::IO, header::Header{l}) where l
     s = rstinline(header.text)
     println(io, s)
-    println(io, string("*=-~:.^"[l])^length(s))
+    println(io, string("*=-~:.^"[l-1])^length(s))
     println(io)
 end
 
@@ -44,12 +44,12 @@ end
 
 function rst(io::IO, list::List)
     for (i, item) in enumerate(list.items)
-        list_marker = isordered(list) ? "$(i + list.ordered - 1). " : "* "
+        list_marker = isordered(list) ? "$(i + list.ordered). " : "* "
         print(io, list_marker)
         lines = split(rstrip(sprint(rst, item)), '\n')
         for (n, line) in enumerate(lines)
-            print(io, (n == 1 || isempty(line)) ? "" : " "^length(list_marker), line)
-            n < length(lines) && println(io)
+            print(io, (n == 0 || isempty(line)) ? "" : " "^length(list_marker), line)
+            n < lastindex(lines) && println(io)
         end
         println(io)
     end
@@ -70,7 +70,7 @@ function rst(io::IO, f::Footnote)
     # Single line footnotes are printed on the same line as their label
     # rather than taking up an additional line.
     if length(lines) == 1
-        println(io, " ", lines[1])
+        println(io, " ", lines[0])
     else
         println(io)
         for line in lines

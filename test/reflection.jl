@@ -1547,3 +1547,18 @@ end
 using .X1ConstConflict, .X2ConstConflict
 
 @test_throws ErrorException which(@__MODULE__, :xconstconflict)
+
+# Reflection argument vectors include the callable at position zero.
+@testset "zero-origin method argument names" begin
+    joolia_method_args(x::Int, y::Int) = x + y
+    joolia_method_varargs(x::Int, xs::Int...) = x
+    joolia_method_noargs() = nothing
+    names = Base.method_argnames(which(joolia_method_args, (Int, Int)))
+    @test length(names) == 3
+    @test names[1:2] == [:x, :y]
+    @test names[0] isa Symbol
+    varnames = Base.method_argnames(which(joolia_method_varargs, (Int, Int)))
+    @test length(varnames) == 3
+    @test varnames[1:2] == [:x, :xs]
+    @test length(Base.method_argnames(which(joolia_method_noargs, ()))) == 1
+end

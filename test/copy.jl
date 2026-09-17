@@ -308,3 +308,53 @@ end
     @inferred deepcopy(a)
     @inferred deepcopy(a.lock)
 end
+
+# Deep copies preserve zero-origin fields, reference offsets, undefined slots, and aliases.
+mutable struct JooliaCopyNode
+    first::Any
+    last::Any
+    JooliaCopyNode() = new()
+end
+struct JooliaCopyTail
+    first::Any
+    last::Any
+    JooliaCopyTail(x) = new(x)
+end
+@testset "zero-origin deep copy" begin
+    node = JooliaCopyNode()
+    node.first = node
+    node.last = [7]
+    other = deepcopy(node)
+    @test other !== node
+    @test other.first === other
+    @test other.last == [7] && other.last !== node.last
+    @test !isdefined(deepcopy(JooliaCopyNode()), 0)
+    tail = JooliaCopyTail([8])
+    copied_tail = deepcopy(tail)
+    @test copied_tail.first == [8] && copied_tail.first !== tail.first
+    @test !isdefined(copied_tail, 1)
+    @test deepcopy(Core.svec()) === Core.svec()
+    sv = Core.svec(node, node)
+    copied_sv = deepcopy(sv)
+    @test copied_sv[0] === copied_sv[1] && copied_sv[0] !== node
+    mem = Memory{Any}(undef, 3)
+    mem[0] = node
+    mem[2] = node
+    copied_mem = deepcopy(mem)
+    @test !isassigned(copied_mem, 1)
+    @test copied_mem[0] === copied_mem[2] && copied_mem[0] !== node
+    for i in (0, 2)
+        ref = Core.memoryrefnew(memoryref(mem), i, true)
+        copied_ref = deepcopy(ref)
+        @test Core.memoryrefoffset(copied_ref) == i
+        @test copied_ref.mem !== mem
+        @test Core.memoryrefget(copied_ref, :not_atomic, true).first === copied_ref.mem[0]
+    end
+    empty_mem = Memory{Any}(undef, 0)
+    @test isempty(deepcopy(empty_mem))
+    @test Core.memoryrefoffset(deepcopy(memoryref(empty_mem))) == 0
+    a = Any[node, node]
+    b = deepcopy(a)
+    @test b[0] === b[1] && b[0] !== node
+    @test axes(b) == axes(a)
+end

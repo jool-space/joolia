@@ -2,11 +2,11 @@
 
 include("formatting.jl")
 
-cols(io) = displaysize(io)[2]
+cols(io) = displaysize(io)[1]
 
 function term(io::IO, content::Vector, cols)
     isempty(content) && return
-    for md in content[1:end-1]
+    for md in content[0:end-1]
         term(io, md, cols)
         print(io, '\n', '\n')
     end
@@ -22,12 +22,12 @@ function term(io::IO, md::Paragraph, columns)
     lines = wraplines(annotprint(terminline, md.content), columns-2margin)
     for (i, line) in enumerate(lines)
         print(io, ' '^margin, line)
-        i < length(lines) && println(io)
+        i < lastindex(lines) && println(io)
     end
 end
 
 function term(io::IO, md::HTMLBlock, columns)
-    for line in md.content[1:end-1]
+    for line in md.content[0:end-1]
         println(io, line)
     end
     print(io, md.content[end])
@@ -38,7 +38,7 @@ function term(io::IO, md::BlockQuote, columns)
     lines = wraplines(rstrip(content), columns - 10)
     for (i, line) in enumerate(lines)
         print(io, ' '^margin, '│', line)
-        i < length(lines) && println(io)
+        i < lastindex(lines) && println(io)
     end
 end
 
@@ -63,7 +63,7 @@ function term(io::IO, md::Admonition, columns)
     lines = split(rstrip(content), '\n')
     for (i, line) in enumerate(lines)
         print(io, ' '^margin, styled"{$accent,markdown_admonition:│}", line)
-        i < length(lines) && println(io)
+        i < lastindex(lines) && println(io)
     end
 end
 
@@ -75,7 +75,7 @@ function term(io::IO, f::Footnote, columns)
     lines = split(rstrip(content), '\n')
     for (i, line) in enumerate(lines)
         print(io, ' '^margin, '│', line)
-        i < length(lines) && println(io)
+        i < lastindex(lines) && println(io)
     end
 end
 
@@ -87,25 +87,25 @@ function term(io::IO, md::List, columns, depth::Int = 1)
 
     function make_list_marker(i::Int)
         list_marker = if isordered(md)
-            string(lpad(i + md.ordered - 1, ndigits(length(md.items) + md.ordered - 1)), ". ")
+            string(lpad(i + md.ordered, ndigits(length(md.items) + md.ordered - 1)), ". ")
         elseif depth == 1
             first(_bullets)
         else
-            _bullets[2 + mod(depth, length(_bullets) - 1)]
+            _bullets[1 + mod(depth, length(_bullets) - 1)]
         end
     end
 
     # adjust column count to ensure word wrap works correctly; the last
     # label will be the widest (for ordered lists; for unordered lists they
     # are all the same anyway)
-    columns -= length(make_list_marker(length(md.items)))
+    columns -= length(make_list_marker(length(md.items)-1))
 
     for (i, point) in enumerate(md.items)
         list_marker = make_list_marker(i)
         print(io, ' '^margin, styled"{markdown_list:$list_marker}")
         buf = AnnotatedIOBuffer()
         if point isa Vector && !isempty(point)
-            for (i, elt) in enumerate(point[1:end-1])
+            for (i, elt) in enumerate(point[0:end-1])
                 dterm(buf, elt, columns, depth + 1)
                 println(buf)
                 (!(point[i+1] isa List) || point[i+1].loose) && println(buf)
@@ -121,11 +121,11 @@ function term(io::IO, md::List, columns, depth::Int = 1)
              for line in Iterators.filter(!isempty, lines)),
             init=if isempty(lines) 0 else length(first(lines)) end)
         for (l, line) in enumerate(lines)
-            l > 1 && print(io, ' '^(margin + length(list_marker)))
-            !isempty(line) && print(io, line[common_indent+1:end])
-            l < length(lines) && println(io)
+            l > 0 && print(io, ' '^(margin + length(list_marker)))
+            !isempty(line) && print(io, line[common_indent:end])
+            l < lastindex(lines) && println(io)
         end
-        i < length(md.items) && print(io, '\n'^(1 + md.loose))
+        i < lastindex(md.items) && print(io, '\n'^(1 + md.loose))
     end
 end
 
@@ -134,14 +134,14 @@ const _header_underlines = collect("≡=–-⋅ ")
 
 function term(io::AnnotIO, md::Header{l}, columns) where l
     face = Symbol("markdown_h$l")
-    underline = _header_underlines[l]
+    underline = _header_underlines[l-1]
     pre = ' '^margin
     line_width = with_output_annotations(io, :face => face) do io
         headline = annotprint(terminline, md.text)
         lines = wraplines(headline, columns - 4margin)
         for (i, line) in enumerate(lines)
             print(io, pre, line)
-            i < length(lines) && println(io)
+            i < lastindex(lines) && println(io)
         end
         if length(lines) == 1
             return min(textwidth(lines[end]), columns)
@@ -187,7 +187,7 @@ function term(io::IO, md::Code, columns)
     lines = split(code, '\n')
     for (i, line) in enumerate(lines)
         print(io, ' '^margin, line)
-        i < length(lines) && println(io)
+        i < lastindex(lines) && println(io)
     end
 end
 

@@ -2,6 +2,24 @@
 
 SubStr(s) = SubString("abc$(s)de", firstindex(s) + 3, lastindex(s) + 3)
 
+@testset "zero-origin utility positions" begin
+    @test firstindex("αβ") == 0
+    @test lastindex("") == -1
+    @test startswith("αβ", "α") && endswith("αβ", "β")
+    @test startswith("", "") && endswith("", "")
+    @test chopprefix("αβ", "α") == "β"
+    @test chopsuffix("αβ", "β") == "α"
+    @test chopprefix("αβ", "αβ") == chopsuffix("αβ", "αβ") == ""
+    @test split("a,b,", ',') == ["a", "b", ""]
+    @test split("a,b,", ','; keepempty=false) == ["a", "b"]
+    @test rsplit("a,b,", ',') == ["a", "b", ""]
+    @test collect(eachrsplit("a..b", '.')) == ["b", "", "a"]
+    @test lpad("x", 3, "ab") == "abx" && rpad("x", 3, "ab") == "xab"
+    @test bytes2hex(UInt8[0x01, 0xab, 0xff]) == "01abff"
+    @test ascii("abc") == "abc"
+    @test Base.rest("aβcd", 1) == "βcd"
+end
+
 @testset "textwidth" begin
     for (c, w) in [('x', 1), ('α', 1), ('🍕', 2), ('\0', 0), ('\u0302', 0), ('\xc0', 1)]
         @test textwidth(c) == w
@@ -100,8 +118,8 @@ end
 
     @inferred ltruncate("xxx", 4)
     @inferred ltruncate("xxx", 2)
-    @inferred ltruncate(@view("xxxxxxx"[1:4]), 4)
-    @inferred ltruncate(@view("xxxxxxx"[1:4]), 2)
+    @inferred ltruncate(@view("xxxxxxx"[0:3]), 4)
+    @inferred ltruncate(@view("xxxxxxx"[0:3]), 2)
 
     @test rtruncate("foo", 4) == "foo"
     @test rtruncate("foo", 3) == "foo"
@@ -112,8 +130,8 @@ end
 
     @inferred rtruncate("xxx", 4)
     @inferred rtruncate("xxx", 2)
-    @inferred rtruncate(@view("xxxxxxx"[1:4]), 4)
-    @inferred rtruncate(@view("xxxxxxx"[1:4]), 2)
+    @inferred rtruncate(@view("xxxxxxx"[0:3]), 4)
+    @inferred rtruncate(@view("xxxxxxx"[0:3]), 2)
 
     @test ctruncate("foo", 4) == "foo"
     @test ctruncate("foo", 3) == "foo"
@@ -130,12 +148,15 @@ end
 
     @inferred ctruncate("xxxxx", 5)
     @inferred ctruncate("xxxxx", 3)
-    @inferred ctruncate(@view("xxxxxxx"[1:5]), 5)
-    @inferred ctruncate(@view("xxxxxxx"[1:5]), 3)
+    @inferred ctruncate(@view("xxxxxxx"[0:4]), 5)
+    @inferred ctruncate(@view("xxxxxxx"[0:4]), 3)
 end
 
 # string manipulation
 @testset "lstrip/rstrip/strip" begin
+    # Preserve the character at position zero when trimming a single-character string.
+    @test strip("1") == "1"
+    @test rstrip("α") == "α"
     @test strip("") == ""
     @test strip(" ") == ""
     @test strip("  ") == ""
@@ -187,12 +208,12 @@ end
     end
 
     for n in [7,8]
-        @test collect(Iterators.partition("foobars",n))[1]=="foobars"
+        @test collect(Iterators.partition("foobars",n))[0]=="foobars"
     end
 
     # HOWEVER enumerate explicitly slices String "atoms" so `Tuple{Int, Char}` pairs are returned
     let v=collect(Iterators.partition(enumerate("foobars"),1))
-        @test v==Vector{Tuple{Int64, Char}}[[(1, 'f')],[(2, 'o')],[(3, 'o')],[(4, 'b')],[(5, 'a')],[(6, 'r')], [(7, 's')]]
+        @test v==Vector{Tuple{Int64, Char}}[[(0, 'f')],[(1, 'o')],[(2, 'o')],[(3, 'b')],[(4, 'a')],[(5, 'r')], [(6, 's')]]
     end
 end
 
@@ -737,8 +758,8 @@ end
     @test hex_str == bytes2hex(bin_val) == sprint(bytes2hex, bin_val)
 
     bin_val = hex2bytes("07bf")
-    @test bin_val[1] == 7
-    @test bin_val[2] == 191
+    @test bin_val[0] == 7
+    @test bin_val[1] == 191
     @test typeof(bin_val) == Array{UInt8, 1}
     @test length(bin_val) == 2
 
@@ -759,10 +780,10 @@ end
         @test hex2bytes("0123456789abcdefABCDEF") == hex2bytes(arr)
         @test_throws ArgumentError hex2bytes!(arr1, b"") # incorrect arr1 length
         @test hex2bytes(b"") == UInt8[]
-        @test hex2bytes(view(b"012345",1:6)) == UInt8[0x01,0x23,0x45]
+        @test hex2bytes(view(b"012345",0:5)) == UInt8[0x01,0x23,0x45]
         @test begin
-            s = view(b"012345ab",1:6)
-            d = view(zeros(UInt8, 10),1:3)
+            s = view(b"012345ab",0:5)
+            d = view(zeros(UInt8, 10),0:2)
             hex2bytes!(d,s) == UInt8[0x01,0x23,0x45]
         end
         # odd size
@@ -793,10 +814,10 @@ end
     a, b, c... = s
     @test c === SubString(s, 4)
 
-    s = SubString("aβcd", 2)
+    s = SubString("aβcd", 1)
     @test Base.rest(s) === SubString(s)
     b, c... = s
-    @test c === SubString(s, 3)
+    @test c === SubString(s, 2)
 
     s = GenericString("aβcd")
     @test Base.rest(s) === "aβcd"

@@ -496,12 +496,12 @@ function _uvreq_witness_slot(w::WaitEntry)
         (o === nothing || o isa CancellationTokenSource) && continue
         return i
     end
-    return 0
+    return -1
 end
 
 function _mark_uvreq_cancel_requested!(w::WaitEntry, @nospecialize(witness))
     i = _find_slot(w, witness)
-    i == 0 || _set_slot_aux!(w, i, _slot_aux(w, i) | _UVREQ_AUX_CANCEL_REQUESTED)
+    i < 0 || _set_slot_aux!(w, i, _slot_aux(w, i) | _UVREQ_AUX_CANCEL_REQUESTED)
     return nothing
 end
 
@@ -513,7 +513,7 @@ function _uvreq_cancel_requested(req::Ptr{Cvoid})
     (d == C_NULL || d == UV_REQ_DETACHED) && return false
     w = unsafe_pointer_to_objref(d)::WaitEntry
     i = _uvreq_witness_slot(w)
-    return i != 0 && _slot_aux(w, i) & _UVREQ_AUX_CANCEL_REQUESTED != 0
+    return i >= 0 && _slot_aux(w, i) & _UVREQ_AUX_CANCEL_REQUESTED != 0
 end
 
 # Buffers of detached write requests. A detached request keeps referencing
@@ -855,8 +855,8 @@ function displaysize(io::TTY)
             # io is actually a libuv pipe but a cygwin/msys2 pty
             try
                 h, w = parse.(Int, split(read(open(Base.Cmd(String["stty", "size"]), "r", io).out, String)))
-                h > 0 || (h = default_size[1])
-                w > 0 || (w = default_size[2])
+                h > 0 || (h = default_size[0])
+                w > 0 || (w = default_size[1])
                 return h, w
             catch
                 return default_size
@@ -873,8 +873,8 @@ function displaysize(io::TTY)
                                       io, s1, s2) != 0)
     iolock_end()
     w, h = s1[], s2[]
-    h > 0 || (h = default_size[1])
-    w > 0 || (w = default_size[2])
+    h > 0 || (h = default_size[0])
+    w > 0 || (w = default_size[1])
     return h, w
 end
 
@@ -884,8 +884,8 @@ end
 ## Allocate space in buffer (for immediate use)
 function alloc_request(buffer::IOBuffer, recommended_size::UInt)
     ensureroom(buffer, recommended_size)
-    ptr = buffer.append ? buffer.size + 1 : buffer.ptr
-    start_offset = ptr - 1
+    ptr = buffer.append ? buffer.size : buffer.ptr
+    start_offset = ptr
     nb = max(0, min(length(buffer.data) - start_offset, buffer.maxsize - (start_offset - get_offset(buffer))))
     return (Ptr{Cvoid}(pointer(buffer.data, ptr)), nb)
 end
@@ -897,7 +897,7 @@ function notify_filled(buffer::IOBuffer, nread::Int)
         buffer.size += nread
     else
         buffer.ptr += nread
-        buffer.size = max(buffer.size, buffer.ptr - 1)
+        buffer.size = max(buffer.size, buffer.ptr)
     end
     nothing
 end
@@ -1781,7 +1781,7 @@ function _requeue_unwritten!(s::LibuvStream, arr::Vector{UInt8}, nwritten::Int)
     buf = s.sendbuf
     if buf !== nothing
         appended = bytesavailable(buf) > 0 ? take!(buf) : nothing
-        write(buf, @view arr[nwritten+1:end])
+        write(buf, @view arr[nwritten:end])
         appended === nothing || write(buf, appended)
     end
     iolock_end()
@@ -1863,7 +1863,7 @@ function uv_writecb_task(req::Ptr{Cvoid}, status::Cint)
     if d != C_NULL && d != UV_REQ_DETACHED
         w = unsafe_pointer_to_objref(d)::WaitEntry
         i = _uvreq_witness_slot(w)
-        if i != 0
+        if i >= 0
             aux = _slot_aux(w, i)
             pending = aux >> _UVREQ_AUX_PENDING_SHIFT
             if pending > 1
@@ -1994,7 +1994,7 @@ end
 # Deprecate these in v2 (RedirectStdStream support)
 iterate(p::Pipe) = (p.out, 1)
 iterate(p::Pipe, i::Int) = i == 1 ? (p.in, 2) : nothing
-getindex(p::Pipe, key::Int) = key == 1 ? p.out : key == 2 ? p.in : throw(KeyError(key))
+getindex(p::Pipe, key::Int) = key == 0 ? p.out : key == 1 ? p.in : throw(KeyError(key))
 
 """
     redirect_stdout([stream]) -> stream

@@ -1319,3 +1319,115 @@ end
 # The "searchsorted" testset is at the end of the file because it is slow.
 
 end
+
+# ScratchQuickSort maps arbitrary input positions into zero-origin scratch storage.
+@testset "zero-origin quicksort scratch" begin
+    v = [Symbol("k", lpad(string(mod(37i, 101)), 3, '0')) for i in 0:100]
+    expected = [Symbol("k", lpad(string(i), 3, '0')) for i in 0:100]
+    @test sort(v; alg=Base.Sort.ScratchQuickSort()) == expected
+    @test sort(v; alg=Base.Sort.ScratchQuickSort(), rev=true) == reverse(expected)
+    w = copy(v)
+    sort!(view(w, 7:93); alg=Base.Sort.ScratchQuickSort())
+    @test issorted(w[7:93]) && w[0:6] == v[0:6] && w[94:end] == v[94:end]
+end
+
+# Counting-sort permutations retain stable zero-origin positions at integer boundaries.
+@testset "zero-origin counting sort permutations" begin
+    for values in ([2,1,2,1,2,1,2,1], repeat([4,0,2,4,2,0,4], 8), fill(-3,8),
+                   [typemin(Int),typemin(Int)+1,typemin(Int),typemin(Int)+1],
+                   UInt8[255,254,255,254,255,254,255,254])
+        expected = sort(collect(eachindex(values)); by=i->(values[i],i), alg=Base.Sort.InsertionSort)
+        @test sortperm(values) == expected
+        @test sort(values) == values[expected]
+        @test sort(values; rev=true) == reverse(values[expected])
+        @test Base.Sort.sortperm_int_range(values, maximum(values)-minimum(values)+1, minimum(values)) == expected
+    end
+end
+
+# Partition boundaries, radix buckets, and tuple heads are zero-origin positions.
+@testset "zero-origin sorting boundaries" begin
+    for values in (Float64[], [NaN], [1.0], [NaN, NaN],
+                   [3.0, NaN, -0.0, 0.0, -Inf, Inf, -2.0, NaN],
+                   [sin(i) for i in 0:1320],
+                   Union{Missing,Float64}[missing, 3.0, -0.0, missing, NaN, 0.0, -2.0])
+        for rev in (false, true)
+            expected = sort(collect(eachindex(values)); by=i->values[i], rev, alg=Base.Sort.InsertionSort)
+            actual = sortperm(values; rev)
+            @test actual == expected
+            @test isequal(sort(values; rev), values[expected])
+        end
+    end
+    for values in ((), (3,), (3,1), (3,1,2,1), Tuple(10:-1:0))
+        @test sort(values) == Tuple(sort(collect(values)))
+        @test sort(values; rev=true) == Tuple(sort(collect(values); rev=true))
+    end
+    for values in (UInt16[0xffff,0x0,0x100,0xff,0x8000,0x1], UInt16[255,0,255,1,0,128])
+        expected = sort(values; alg=Base.Sort.InsertionSort)
+        v = copy(values)
+        scratch = similar(v)
+        in_original = Base.Sort.radix_sort!(v, firstindex(v), lastindex(v), UInt(16), scratch, 0, 8)
+        @test (in_original ? v : scratch) == expected
+        guarded = vcat(UInt16[23,42], values, UInt16[17])
+        lo, hi = 2, length(values)+1
+        in_original = Base.Sort.radix_sort!(guarded, lo, hi, UInt(16), scratch, -lo, 8)
+        @test (in_original ? guarded[lo:hi] : scratch) == expected
+        @test guarded[0:1] == UInt16[23,42] && guarded[end] == 17
+    end
+end
+
+# Matrix dimension selectors start at zero, including empty axes.
+@testset "zero-origin sorting dimensions" begin
+    a = [4 3; 1 2]
+    @test sort(a; dims=0) == [1 2; 4 3]
+    @test sort(a; dims=1) == [3 4; 1 2]
+    @test sort!(copy(a); dims=0) == [1 2; 4 3]
+    @test sort!(copy(a); dims=1) == [3 4; 1 2]
+    @test sortperm(a; dims=0) == [1 3; 0 2]
+    @test sortperm(a; dims=1) == [2 0; 1 3]
+    @test_throws ArgumentError sort(a; dims=2)
+    @test_throws ArgumentError sort!(copy(a); dims=2)
+    for shape in ((0,2), (2,0)), dim in 0:1
+        empty = Matrix{Int}(undef, shape)
+        @test size(sort(empty; dims=dim)) == shape
+        @test size(sort!(empty; dims=dim)) == shape
+    end
+    values = [mod(37i, 101) for i in 0:100]
+    @test sort(values; alg=Base.Sort.MergeSort) == collect(0:100)
+    @test sort(values; alg=Base.Sort.MergeSort, rev=true) == collect(100:-1:0)
+end
+
+# Fast range search returns positions in zero-origin range axes.
+@testset "zero-origin fast range search" begin
+    function check_fast_range(r, queries; order=Base.Order.Forward)
+        v = collect(r)
+        for x in queries
+            @test searchsortedfirst(r, x, order) == searchsortedfirst(v, x, order)
+            @test searchsortedlast(r, x, order) == searchsortedlast(v, x, order)
+            @test searchsorted(r, x, order) == searchsorted(v, x, order)
+        end
+    end
+
+    check_fast_range(0:10, [-2, -0.5, 0, 1, 1.5, 5, 10, 10.5, 20])
+    check_fast_range(0:10, [-2, 0, 1.5, 10, 20]; order=Base.Order.Lt(<))
+    check_fast_range(-10:2:10, [-20, -10, -9, -1, 0, 1, 10, 11, 20])
+    check_fast_range(typemin(Int):typemin(Int)+10,
+                     [typemin(Int)-big(1), typemin(Int), typemin(Int)+1,
+                      typemin(Int)+5, typemin(Int)+10, typemin(Int)+11])
+    check_fast_range(10:-1:0, [-2, 0, 0.5, 1, 5, 9.5, 10, 11, 20]; order=Base.Order.Reverse)
+    check_fast_range(10:-2:0, [-2, 0, 1, 2, 3, 9, 10, 11]; order=Base.Order.Reverse)
+    check_fast_range(0.0:0.25:2.0, [-1.0, 0.0, 0.125, 0.25, 1.125, 2.0, 2.1])
+    check_fast_range(range(-0.0; step=0.0, length=5), [-1.0, -0.0, 0.0, 1.0])
+    check_fast_range(range(-0.0; step=0.0, length=5), [-1.0, -0.0, 0.0, 1.0]; order=Base.Order.Reverse)
+    check_fast_range(2.0:-0.5:0.0, [-1.0, 0.0, 0.25, 0.5, 1.25, 2.0, 2.1]; order=Base.Order.Reverse)
+
+    for r in (1:0, 1:2:0, range(0.0; step=1.0, length=0), range(1.0; step=-1.0, length=0))
+        @test isempty(r)
+        @test searchsortedfirst(r, 0, Base.Order.Forward) == 0
+        @test searchsortedlast(r, 0, Base.Order.Forward) == -1
+        @test searchsorted(r, 0, Base.Order.Forward) === 0:-1
+    end
+
+    offset = Base.IdentityUnitRange(5:10)
+    @test_throws ArgumentError searchsortedfirst(offset, 5, Base.Order.Forward)
+    @test_throws ArgumentError searchsortedlast(offset, 5, Base.Order.Forward)
+end

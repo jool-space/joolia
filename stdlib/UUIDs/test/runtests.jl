@@ -96,7 +96,7 @@ end
 end
 
 @testset "UUID sequence" begin
-    for (idx, init_uuid) in enumerate(following_uuids[1:end-1])
+    for (idx, init_uuid) in enumerate(following_uuids[0:end-1])
         next_id = uuid5(init_uuid, "julia")
         @test next_id == following_uuids[idx+1]
     end

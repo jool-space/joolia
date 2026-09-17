@@ -68,7 +68,7 @@ parent(ref::GenericMemoryRef) = ref.mem
 """
     memoryindex(ref::GenericMemoryRef)::Int
 
-Get the 1-based index of `ref` in its `GenericMemory`.
+Get the zero-based index of `ref` in its `GenericMemory`.
 
 # Examples
 ```jldoctest
@@ -198,7 +198,7 @@ isassigned(a::GenericMemoryRef) = memoryref_isassigned(a, default_access_order(a
 function unsafe_copyto!(dest::MemoryRef{T}, src::MemoryRef{T}, n) where {T}
     @_terminates_globally_notaskstate_meta
     n == 0 && return dest
-    @boundscheck memoryref(dest, n), memoryref(src, n)
+    @boundscheck memoryref(dest, n - 1), memoryref(src, n - 1)
     if isbitstype(T)
         tdest = @_gc_preserve_begin dest
         tsrc = @_gc_preserve_begin src
@@ -215,7 +215,7 @@ end
 
 function unsafe_copyto!(dest::GenericMemoryRef, src::GenericMemoryRef, n)
     n == 0 && return dest
-    @boundscheck memoryref(dest, n), memoryref(src, n)
+    @boundscheck memoryref(dest, n - 1), memoryref(src, n - 1)
     unsafe_copyto!(dest.mem, memoryrefoffset(dest), src.mem, memoryrefoffset(src), n)
     return dest
 end
@@ -235,19 +235,19 @@ function unsafe_copyto!(dest::Memory, doffs, src::Memory, soffs, n)
     srcp = pointer(src, soffs)
     endp = pointer(src, soffs + n - 1)
     @inbounds if destp < srcp || destp > endp
-        for i = 1:n
-            if isassigned(src, soffs + i - 1)
-                dest[doffs + i - 1] = src[soffs + i - 1]
+        for i = 0:n-1
+            if isassigned(src, soffs + i)
+                dest[doffs + i] = src[soffs + i]
             else
-                unsetindex!(dest, doffs + i - 1)
+                unsetindex!(dest, doffs + i)
             end
         end
     else
-        for i = n:-1:1
-            if isassigned(src, soffs + i - 1)
-                dest[doffs + i - 1] = src[soffs + i - 1]
+        for i = n-1:-1:0
+            if isassigned(src, soffs + i)
+                dest[doffs + i] = src[soffs + i]
             else
-                unsetindex!(dest, doffs + i - 1)
+                unsetindex!(dest, doffs + i)
             end
         end
     end
@@ -259,10 +259,10 @@ function copy(a::T) where {T<:Memory}
     # but since we're copying an existing array, we're guaranteed that this will not happen.
     @_nothrow_meta
     newmem = T(undef, length(a))
-    @inbounds unsafe_copyto!(newmem, 1, a, 1, length(a))
+    @inbounds unsafe_copyto!(newmem, 0, a, 0, length(a))
 end
 
-copyto!(dest::Memory, src::Memory) = copyto!(dest, 1, src, 1, length(src))
+copyto!(dest::Memory, src::Memory) = copyto!(dest, 0, src, 0, length(src))
 function copyto!(dest::Memory, doffs::Integer, src::Memory, soffs::Integer, n::Integer)
     n < 0 && _throw_argerror("Number of elements to copy must be non-negative.")
     unsafe_copyto!(dest, doffs, src, soffs, n)
@@ -279,9 +279,9 @@ similar(a::GenericMemory{kind,<:Any,AS}, T::Type) where {kind,AS} =
 similar(a::GenericMemory, m::Int) =
     typeof(a)(undef, m)
 similar(a::GenericMemory{kind,<:Any,AS}, T::Type, dims::Dims{1}) where {kind,AS} =
-    GenericMemory{kind,T,AS}(undef, dims[1])
+    GenericMemory{kind,T,AS}(undef, getfield(dims, 0))
 similar(a::GenericMemory, dims::Dims{1}) =
-    typeof(a)(undef, dims[1])
+    typeof(a)(undef, getfield(dims, 0))
 
 function fill!(a::Union{Memory{UInt8}, Memory{Int8}}, x::Integer)
     t = @_gc_preserve_begin a
@@ -352,7 +352,7 @@ function setindex!(A::Memory{T}, X::Memory{T}, I::AbstractUnitRange{Int}) where 
     lI = length(I)
     @boundscheck setindex_shape_check(X, lI)
     if lI > 0
-        unsafe_copyto!(A, first(I), X, 1, lI)
+        unsafe_copyto!(A, first(I), X, 0, lI)
     end
     return A
 end
@@ -361,7 +361,7 @@ function setindex!(A::Memory{T}, X::Memory{T}, c::Colon) where T
     lI = length(A)
     @boundscheck setindex_shape_check(X, lI)
     if lI > 0
-        unsafe_copyto!(A, 1, X, 1, lI)
+        unsafe_copyto!(A, 0, X, 0, lI)
     end
     return A
 end
@@ -406,12 +406,12 @@ end
 # Copying subregions
 function indcopy(sz::Dims, I::GenericMemory)
     n = length(I)
-    s = sz[n]
-    for i = n+1:length(sz)
-        s *= sz[i]
+    s = getfield(sz, n-1)
+    for i = n:length(sz)-1
+        s *= getfield(sz, i)
     end
-    dst = eltype(I)[_findin(I[i], i < n ? (1:sz[i]) : (1:s)) for i = 1:n]
-    src = eltype(I)[I[i][_findin(I[i], i < n ? (1:sz[i]) : (1:s))] for i = 1:n]
+    dst = eltype(I)[_findin(I[i], i < n ? (0:sz[i]-1) : (0:s-1)) for i = 0:n-1]
+    src = eltype(I)[I[i][_findin(I[i], i < n ? (0:sz[i]-1) : (0:s-1))] for i = 0:n-1]
     dst, src
 end
 

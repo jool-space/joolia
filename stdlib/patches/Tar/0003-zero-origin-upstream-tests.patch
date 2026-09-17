@@ -1,0 +1,62 @@
+--- a/test/runtests.jl
++++ b/test/runtests.jl
+@@ -674,7 +674,7 @@
+ 
+     @testset "without predicate" begin
+         dir = make_test_dir()
+-        @test !any(splitext(name)[2] == ".skip" for name in readdir(dir))
++        @test !any(last(splitext(name)) == ".skip" for name in readdir(dir))
+ 
+         for dir in (dir, SubString(dir))
+             # create(dir)
+@@ -698,8 +698,8 @@
+ 
+     @testset "with predicate" begin
+         dir = make_test_dir(true)
+-        @test any(splitext(name)[2] == ".skip" for name in readdir(dir))
+-        predicate = path -> splitext(path)[2] != ".skip"
++        @test any(last(splitext(name)) == ".skip" for name in readdir(dir))
++        predicate = path -> last(splitext(path)) != ".skip"
+ 
+         for dir in (dir, SubString(dir))
+             # create(predicate, dir)
+@@ -867,7 +867,7 @@
+         @test hash != Tar.tree_hash(tarball, skip_empty=false)
+ 
+         # predicate to skip paths ending in `.skip`
+-        predicate = hdr -> !any(splitext(p)[2] == ".skip" for p in split(hdr.path, '/'))
++        predicate = hdr -> !any(last(splitext(p)) == ".skip" for p in split(hdr.path, '/'))
+         @test hash != Tar.tree_hash(predicate, tarball, skip_empty=true)
+         @test hash == Tar.tree_hash(predicate, tarball, skip_empty=false)
+ 
+@@ -1014,7 +1014,7 @@
+         tarballs[Tar.create(dir)] = true
+         rm(dir, recursive=true)
+     end
+-    tarballs[make_test_tarball()[1]] = true
++    tarballs[first(make_test_tarball())] = true
+     if @isdefined(gtar)
+         tarball, _ = make_test_tarball() do root
+             tarball = tempname()
+@@ -1198,17 +1198,17 @@
+     end
+     @testset "octal parsing" begin
+         buf = fill(0x0, 512)
+-        buf[1:21] .= '7'
++        buf[0:20] .= '7'
+         # largest valid octal value
+         @test Tar.read_header_int(buf, :name) == typemax(Int64)
+         # smallest too large octal value
+-        buf[1] = '1'
+-        buf[2:22] .= '0'
++        buf[0] = '1'
++        buf[1:21] .= '0'
+         test_error_prefix("octal integer name value too large:") do
+             Tar.read_header_int(buf, :name)
+         end
+         # way too large octal value
+-        for i = 1:length(buf)
++        for i in eachindex(buf)
+             buf[i] = '0' + (i % 8)
+         end
+         test_error_prefix("octal integer name value too large:") do

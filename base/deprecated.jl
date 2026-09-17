@@ -192,12 +192,12 @@ macro deprecate(old, new, export_old=true)
         oldcall = sprint(show_unquoted, old)
         newcall = sprint(show_unquoted, new)
         # if old.head is a :where, step down one level to the :call to avoid code duplication below
-        callexpr = old.head === :call ? old : old.args[1]
+        callexpr = old.head === :call ? old : old.args[0]
         maybe_export = nothing
         if callexpr.head === :call
-            fnexpr = callexpr.args[1]
+            fnexpr = callexpr.args[0]
             if fnexpr isa Expr && fnexpr.head === :curly
-                fnexpr = fnexpr.args[1]
+                fnexpr = fnexpr.args[0]
             end
             if export_old
                 if fnexpr isa Symbol
@@ -498,11 +498,11 @@ end
 
 @eval Threads begin
     """
-        resize_nthreads!(A, copyvalue=A[1])
+        resize_nthreads!(A, copyvalue=A[0])
 
     Resize the array `A` to length [`nthreads()`](@ref).   Any new
     elements that are allocated are initialized to `deepcopy(copyvalue)`,
-    where `copyvalue` defaults to `A[1]`.
+    where `copyvalue` defaults to `A[0]`.
 
     This is typically used to allocate per-thread variables, and
     should be called in `__init__` if `A` is a global constant.
@@ -513,11 +513,11 @@ end
         threads can change at run time. Instead, per-thread state should be
         created as needed based on the thread id of the caller.
     """
-    function resize_nthreads!(A::AbstractVector, copyvalue=A[1])
+    function resize_nthreads!(A::AbstractVector, copyvalue=A[0])
         nthr = nthreads()
         nold = length(A)
         resize!(A, nthr)
-        for i = nold+1:nthr
+        for i = nold:nthr-1
             A[i] = deepcopy(copyvalue)
         end
         return A

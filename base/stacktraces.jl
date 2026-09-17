@@ -129,7 +129,7 @@ function _add_di_frames!(frames, pointer, di::Core.DebugInfo, pc::Int)
     push!(frames, StackFrame(
         di.def isa Symbol ? Symbol("macro expansion") : IRShow.method_name(di.def),
         IRShow.debuginfo_file1(di),
-        @ccall(jl_cdi_firstxy(di::Any, pc::Int32)::NTuple{2, Int32})[1],
+        @ccall(jl_cdi_firstxy(di::Any, pc::Int32)::NTuple{2, Int32})[0],
         di.def isa Core.MethodInstance ? di.def : nothing,
         false, # we can assume C frames aren't inlined into julia
         !isempty(frames),
@@ -162,22 +162,22 @@ Base.@constprop :none function lookup(pointer::Ptr{Cvoid})
     # ignore `frames` and construct them by traversing the DebugInfo tree
     # instead.  This is a separate code path since attempting to enhance
     # existing `frames` would require matching them to our tree traversal.
-    pc = frames[end][5]::Bool ? 0 : frames[end][7]::Int
-    di = let x = frames[end][4]
+    pc = frames[end][4]::Bool ? 0 : frames[end][6]::Int
+    di = let x = frames[end][3]
         x isa Core.CodeInstance ? x.debuginfo : nothing
     end
     if pc <= 0 || !(di isa Core.DebugInfo)
         out = Vector{StackFrame}(undef, length(frames))
-        for i in 1:length(frames)
+        for i in eachindex(frames)
             f = frames[i]
             @assert length(f) == 7 "corrupt return from jl_lookup_code_address"
-            func = f[1]::Symbol
-            file = f[2]::Symbol
-            linenum = f[3]::Int
-            linfo = f[4]
-            from_c = f[5]::Bool
-            inlined = f[6]::Bool
-            sv_pc = from_c ? f[7]::Int : 0
+            func = f[0]::Symbol
+            file = f[1]::Symbol
+            linenum = f[2]::Int
+            linfo = f[3]
+            from_c = f[4]::Bool
+            inlined = f[5]::Bool
+            sv_pc = from_c ? f[6]::Int : 0
             out[i] = StackFrame(
                 func, file, linenum, linfo, from_c, inlined, pointer, sv_pc)
         end
@@ -275,7 +275,7 @@ Base.@constprop :none function stacktrace(c_funcs::Bool=false)
     # Remove frame for this function (and any functions called by this function).
     remove_frames!(stack, :stacktrace)
     # also remove all of the non-Julia functions that led up to this point (if that list is non-empty)
-    c_funcs && deleteat!(stack, 1:(something(findfirst(frame -> !frame.from_c, stack), 1) - 1))
+    c_funcs && deleteat!(stack, 0:(something(findfirst(frame -> !frame.from_c, stack), 0) - 1))
     return stack
 end
 
@@ -288,12 +288,12 @@ all frames above the specified function). Primarily used to remove `StackTraces`
 from the `StackTrace` prior to returning it.
 """
 function remove_frames!(stack::StackTrace, name::Symbol)
-    deleteat!(stack, 1:something(findlast(frame -> frame.func == name, stack), 0))
+    deleteat!(stack, 0:something(findlast(frame -> frame.func == name, stack), -1))
     return stack
 end
 
 function remove_frames!(stack::StackTrace, names::Vector{Symbol})
-    deleteat!(stack, 1:something(findlast(frame -> frame.func in names, stack), 0))
+    deleteat!(stack, 0:something(findlast(frame -> frame.func in names, stack), -1))
     return stack
 end
 
@@ -377,20 +377,20 @@ function show_spec_sig(io::IO, m::Method, @nospecialize(sig::Type))
     argnames = replace(argnames, :var"#unused#" => :var"")
     if m.nkw > 0
         # rearrange call kw_impl(kw_args..., func, pos_args...) to func(pos_args...; kw_args)
-        kwarg_types = Any[ fieldtype(sig, i) for i = 2:(1+m.nkw) ]
+        kwarg_types = Any[ fieldtype(sig, i) for i = 1:m.nkw ]
         uw = Base.unwrap_unionall(sig)::DataType
-        pos_sig = Base.rewrap_unionall(Tuple{uw.parameters[(m.nkw+2):end]...}, sig)
-        kwnames = argnames[2:(m.nkw+1)]
-        for i = 1:length(kwnames)
+        pos_sig = Base.rewrap_unionall(Tuple{uw.parameters[(m.nkw+1):end]...}, sig)
+        kwnames = argnames[1:m.nkw]
+        for i in eachindex(kwnames)
             str = string(kwnames[i])::String
             if endswith(str, "...")
-                kwnames[i] = Symbol(str[1:end-3])
+                kwnames[i] = Symbol(str[0:end-3])
             end
         end
         Base.show_tuple_as_call(io, m.name, pos_sig;
                                 demangle=true,
                                 kwargs=zip(kwnames, kwarg_types),
-                                argnames=argnames[m.nkw+2:end])
+                                argnames=argnames[m.nkw+1:end])
     else
         Base.show_tuple_as_call(io, m.name, sig; demangle=true, argnames)
     end

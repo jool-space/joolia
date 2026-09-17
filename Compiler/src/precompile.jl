@@ -17,7 +17,7 @@ function count_union_components(t::Union)
 end
 
 function nth_union_component(t::Union, n::Int)
-    current = 1
+    current = 0
     while current < n && isa(t, Union)
         current += 1
         t = t.b
@@ -42,13 +42,13 @@ function compile_all_tvar_union(methsig)
     idx = Vector{Int}(undef, tvarslen)
 
     # Initialize environment
-    for i in 1:tvarslen
+    for i in 0:tvarslen-1
         if !isa(sigbody, UnionAll)
             return false
         end
-        idx[i] = 1
+        idx[i] = 0
         var = sigbody.var
-        env[2*i - 1] = var
+        env[2*i] = var
 
         # Get upper bound
         tv = var
@@ -61,7 +61,7 @@ function compile_all_tvar_union(methsig)
             return false
         end
 
-        env[2*i] = tv
+        env[2*i+1] = tv
         sigbody = sigbody.body
     end
 
@@ -70,9 +70,9 @@ function compile_all_tvar_union(methsig)
 
     while !incr
         # Generate all combinations
-        for i in 1:tvarslen
+        for i in 0:tvarslen-1
             incr = true
-            tv = env[2*i - 1]
+            tv = env[2*i]
             while isa(tv, TypeVar)
                 tv = tv.ub
             end
@@ -80,12 +80,12 @@ function compile_all_tvar_union(methsig)
             if isa(tv, Union)
                 l = count_union_components(tv)
                 j = idx[i]
-                env[2*i] = nth_union_component(tv, j)
+                env[2*i+1] = nth_union_component(tv, j)
                 j += 1
 
                 if incr
-                    if j > l
-                        idx[i] = 1
+                    if j >= l
+                        idx[i] = 0
                     else
                         idx[i] = j
                         incr = false
@@ -145,14 +145,14 @@ function compile_all_union(sig)
     while !incr
         # Generate parameter combinations
         new_params = Vector{Any}(undef, length(params))
-        idx_ctr = 1
+        idx_ctr = 0
         incr = true
 
         for (i, ty) in enumerate(params)
             if isa(ty, Union)
                 l = count_union_components(ty)
                 j = idx[idx_ctr]
-                new_params[i] = nth_union_component(ty, j + 1)  # 1-based indexing
+                new_params[i] = nth_union_component(ty, j)
                 j += 1
 
                 if incr
@@ -290,7 +290,7 @@ function enqueue_specializations!(all::Bool, newmethods, worklist)
             # Process existing specializations
             specializations = method.specializations
             if isa(specializations, Core.SimpleVector)
-                for i = 1:length(specializations)
+                for i = 0:length(specializations)-1
                     mi = specializations[i]
                     if mi !== nothing
                         enqueue_specialization!(all, worklist, mi::MethodInstance)
@@ -381,7 +381,7 @@ function compile_and_emit_native(worlds::Vector{UInt},
             # Compute new_used using queue_used with global newly_inferred
             new_used = ccall(:jl_compute_new_used_ci, Any, ())
             if new_used !== nothing
-                for i in 1:length(new_used::Vector{Any})
+                for i in 0:length(new_used::Vector{Any})-1
                     ci = new_used[i]
                     if ci isa MethodInstance
                         push!(specialization_worklist, ci)
@@ -484,7 +484,7 @@ function add_ccallable_entrypoints!()
         method = method::Method
         if isdefined(method, :ccallable)
             # Add the ccallable tuple signature
-            ccallable_sig = method.ccallable[2]  # Second element is the signature
+            ccallable_sig = method.ccallable[1]  # Second element is the signature
             add_entrypoint(ccallable_sig)
         end
         return true

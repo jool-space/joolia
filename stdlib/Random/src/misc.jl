@@ -105,7 +105,6 @@ end
 # (Note that this is different from the problem of finding a random
 #  size-m subset of A where m is fixed!)
 function randsubseq!(r::AbstractRNG, S::AbstractArray, A::AbstractArray, p::Real)
-    require_one_based_indexing(S, A)
     0 <= p <= 1 || _throw_argerror(LazyString("probability ", p, " not in [0,1]"))
     n = length(A)
     p == 1 && return copyto!(resize!(S, n), A)
@@ -114,7 +113,7 @@ function randsubseq!(r::AbstractRNG, S::AbstractArray, A::AbstractArray, p::Real
     nexpected = p * length(A)
     sizehint!(S, round(Int,nexpected + 5*sqrt(nexpected)))
     if p > 0.15 # empirical threshold for trivial O(n) algorithm to be better
-        for i = 1:n
+        for i = 0:n-1
             rand(r) <= p && push!(S, A[i])
         end
     else
@@ -127,10 +126,10 @@ function randsubseq!(r::AbstractRNG, S::AbstractArray, A::AbstractArray, p::Real
         # s = ceil(log(rand()) / log1p(-p)).
         # -log(rand()) is an exponential variate, so can use randexp().
         L = -1 / log1p(-p) # L > 0
-        i = 0
+        i = -1
         while true
             s = randexp(r) * L
-            s >= n - i && return S # compare before ceil to avoid overflow
+            s >= n - i - 1 && return S # compare before ceil to avoid overflow
             push!(S, A[i += ceil(Int,s)])
         end
         # [This algorithm is similar in spirit to, but much simpler than,
@@ -235,9 +234,8 @@ julia> shuffle!(Xoshiro(0), Vector(1:6))
 """
 function shuffle!(rng::AbstractRNG, a::AbstractArray)
     # keep it consistent with `randperm!` and `randcycle!` if possible
-    require_one_based_indexing(a)
-    @inbounds for i = 2:length(a)
-        j = rand(rng, 1:i)
+    @inbounds for i = 1:length(a)-1
+        j = rand(rng, 0:i)
         a[i], a[j] = a[j], a[i]
     end
     return a
@@ -347,12 +345,11 @@ julia> randperm!(Xoshiro(0), Vector{Int}(undef, 6))
 """
 function randperm!(rng::AbstractRNG, a::AbstractArray{<:Integer})
     # keep it consistent with `shuffle!` and `randcycle!` if possible
-    Base.require_one_based_indexing(a)
     n = length(a)
     n == 0 && return a
-    a[1] = 1
-    @inbounds for i = 2:n
-        j = rand(rng, 1:i)
+    a[0] = 0
+    @inbounds for i = 1:n-1
+        j = rand(rng, 0:i)
         if i != j # a[i] is undef (and could be #undef)
             a[i] = a[j]
         end
@@ -428,13 +425,12 @@ julia> randcycle!(Xoshiro(0), Vector{Int}(undef, 6))
 """
 function randcycle!(rng::AbstractRNG, a::AbstractArray{<:Integer})
     # keep it consistent with `shuffle!` and `randperm!` if possible
-    Base.require_one_based_indexing(a)
     n = length(a)
     n == 0 && return a
-    a[1] = 1
+    a[0] = 0
     # Sattolo's algorithm:
-    @inbounds for i = 2:n
-        j = rand(rng, 1:i-1)
+    @inbounds for i = 1:n-1
+        j = rand(rng, 0:i-1)
         a[i] = a[j]
         a[j] = i
     end

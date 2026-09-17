@@ -27,7 +27,7 @@ import .Main.FakePTYs: with_fake_pty
             Base.close_stdio(pts)
 
             # Read output until we get the prompt, which indicates successful startup
-            output = readuntil(ptm, "julia> ", keep=true)
+            output = readuntil(ptm, "joolia> ", keep=true)
             # println("====== subprocess output ======")
             # println(output)
             # println("====== end subprocess output ======")

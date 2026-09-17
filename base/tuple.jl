@@ -26,10 +26,10 @@ _counttuple(::Type) = nothing
 ## indexing ##
 
 length(@nospecialize t::Tuple) = nfields(t)
-firstindex(@nospecialize t::Tuple) = 1
-lastindex(@nospecialize t::Tuple) = length(t)
-size(@nospecialize(t::Tuple), d::Integer) = (d == 1) ? length(t) : throw(ArgumentError("invalid tuple dimension $d"))
-axes(@nospecialize t::Tuple) = (OneTo(length(t)),)
+firstindex(@nospecialize t::Tuple) = 0
+lastindex(@nospecialize t::Tuple) = length(t) - 1
+size(@nospecialize(t::Tuple), d::Integer) = (d == 0) ? length(t) : throw(ArgumentError("invalid tuple dimension $d"))
+axes(@nospecialize t::Tuple) = (ZeroTo(length(t)),)
 getindex(@nospecialize(t::Tuple), i::Int) = getfield(t, i, @_boundscheck)
 getindex(@nospecialize(t::Tuple), i::Integer) = getfield(t, convert(Int, i), @_boundscheck)
 __safe_getindex(@nospecialize(t::Tuple), i::Int) = (@_nothrow_noub_meta; getfield(t, i, false))
@@ -37,8 +37,8 @@ getindex(t::Tuple, r::AbstractArray{<:Any,1}) = (eltype(t)[t[ri] for ri in r]...
 getindex(t::Tuple, b::AbstractArray{Bool,1}) = length(b) == length(t) ? getindex(t, findall(b)) : throw(BoundsError(t, b))
 getindex(t::Tuple, c::Colon) = t
 
-get(t::Tuple, i::Integer, default) = i in 1:length(t) ? getindex(t, i) : default
-get(f::Callable, t::Tuple, i::Integer) = i in 1:length(t) ? getindex(t, i) : f()
+get(t::Tuple, i::Integer, default) = i in 0:length(t)-1 ? getindex(t, i) : default
+get(f::Callable, t::Tuple, i::Integer) = i in 0:length(t)-1 ? getindex(t, i) : f()
 
 """
     setindex(t::Tuple, v, i::Integer)
@@ -53,7 +53,7 @@ true
 ```
 """
 function setindex(x::Tuple, v, i::Integer)
-    @boundscheck 1 <= i <= length(x) || throw(BoundsError(x, i))
+    @boundscheck 0 <= i < length(x) || throw(BoundsError(x, i))
     @inline
     _setindex(v, i, x...)
 end
@@ -66,13 +66,13 @@ end
 
 ## iterating ##
 
-function iterate(@nospecialize(t::Tuple), i::Int=1)
+function iterate(@nospecialize(t::Tuple), i::Int=0)
     @inline
     @_nothrow_meta
-    return (1 <= i <= length(t)) ? (t[i], i + 1) : nothing
+    return (0 <= i < length(t)) ? (t[i], i + 1) : nothing
 end
 
-keys(@nospecialize t::Tuple) = OneTo(length(t))
+keys(@nospecialize t::Tuple) = ZeroTo(length(t))
 
 """
     prevind(A, i)
@@ -153,13 +153,13 @@ function keys(t::Tuple, t2::Tuple...)
             throw_eachindex_mismatch_indices("indices", inds...)
         end
     end
-    Base.OneTo(lent)
+    ZeroTo(lent)
 end
 
 # this allows partial evaluation of bounded sequences of next() calls on tuples,
 # while reducing to plain next() for arbitrary iterables.
-indexed_iterate(t::Tuple, i::Int, state=1) = (@inline; (getfield(t, i), i+1))
-indexed_iterate(a::Union{Array,Memory}, i::Int, state=1) = (@inline; (a[i], i+1))
+indexed_iterate(t::Tuple, i::Int, state=0) = (@inline; (getfield(t, i), i+1))
+indexed_iterate(a::Union{Array,Memory}, i::Int, state=0) = (@inline; (a[i], i+1))
 function indexed_iterate(I, i)
     x = iterate(I)
     x === nothing && throw(BoundsError(I, i))
@@ -206,10 +206,10 @@ function rest end
 rest(t::Tuple) = t
 function rest(t::Tuple, i)
     let i = i::Int
-        ntuple(x -> getfield(t, x+i-1), length(t)-i+1)
+        ntuple(x -> getfield(t, x+i), length(t)-i)
     end
 end
-rest(a::Union{Array,Memory,Core.SimpleVector}, i=1) = a[(i::Int):end]
+rest(a::Union{Array,Memory,Core.SimpleVector}, i=0) = a[(i::Int):end]
 rest(itr, state...) = Iterators.rest(itr, state...)
 
 """
@@ -262,13 +262,13 @@ function _split_rest(a::Union{AbstractArray, Core.SimpleVector}, n::Int)
     return a[begin:end-n], a[end-n+1:end]
 end
 
-@eval _split_tuple(t::Tuple, n::Int, i::Int=1) = ($(Expr(:meta, :aggressive_constprop)); (t[i:n], t[n+1:end]))
+@eval _split_tuple(t::Tuple, n::Int, i::Int=0) = ($(Expr(:meta, :aggressive_constprop)); (t[i:n-1], t[n:end]))
 
-@eval split_rest(t::Tuple, n::Int, i=1) = ($(Expr(:meta, :aggressive_constprop)); _split_tuple(t, length(t)-n, Int(i)))
+@eval split_rest(t::Tuple, n::Int, i=0) = ($(Expr(:meta, :aggressive_constprop)); _split_tuple(t, length(t)-n, Int(i)))
 
 # Use dispatch to avoid a branch in first
 first(::Tuple{}) = throw(ArgumentError("tuple must be non-empty"))
-first(t::Tuple) = t[1]
+first(t::Tuple) = t[0]
 
 # eltype
 
@@ -300,10 +300,10 @@ function _compute_eltype(@nospecialize t)
     end
     p = (t´::DataType).parameters
     length(p) == 0 && return Union{}
-    elt = rewrap_unionall(unwrapva(p[1]), t)
+    elt = rewrap_unionall(unwrapva(p[0]), t)
     elt isa Type || return Union{} # Tuple{2} is legal as a Type, but the eltype is Union{} since it is uninhabited
     r = elt
-    for i in 2:length(p)
+    for i in 1:length(p)-1
         r === Any && return r # if we've already reached Any, it can't widen any more
         elt = rewrap_unionall(unwrapva(p[i]), t)
         elt isa Type || return Union{} # Tuple{2} is legal as a Type, but the eltype is Union{} since it is uninhabited
@@ -356,10 +356,10 @@ end
 
 # 1 argument function
 map(f, t::Tuple{})              = ()
-map(f, t::Tuple{Any,})          = (@inline; (f(t[1]),))
-map(f, t::Tuple{Any, Any})      = (@inline; (f(t[1]), f(t[2])))
-map(f, t::Tuple{Any, Any, Any}) = (@inline; (f(t[1]), f(t[2]), f(t[3])))
-map(f, t::Tuple)                = (@inline; (f(t[1]), map(f,tail(t))...))
+map(f, t::Tuple{Any,})          = (@inline; (f(t[0]),))
+map(f, t::Tuple{Any, Any})      = (@inline; (f(t[0]), f(t[1])))
+map(f, t::Tuple{Any, Any, Any}) = (@inline; (f(t[0]), f(t[1]), f(t[2])))
+map(f, t::Tuple)                = (@inline; (f(t[0]), map(f,tail(t))...))
 # stop inlining after some number of arguments to avoid code blowup
 const Any32{N} = Tuple{Any,Any,Any,Any,Any,Any,Any,Any,
                        Any,Any,Any,Any,Any,Any,Any,Any,
@@ -386,7 +386,7 @@ end
 function map(f, t::Any32)
     n = length(t)
     A = Vector{Any}(undef, n)
-    for i=1:n
+    for i=0:n-1
         A[i] = f(t[i])
     end
     (A...,)
@@ -395,22 +395,22 @@ end
 map(f, t::Tuple{},        s::Tuple{})        = ()
 map(f, t::Tuple,          s::Tuple{})        = ()
 map(f, t::Tuple{},        s::Tuple)          = ()
-map(f, t::Tuple{Any,},    s::Tuple{Any,})    = (@inline; (f(t[1],s[1]),))
-map(f, t::Tuple{Any,Any}, s::Tuple{Any,Any}) = (@inline; (f(t[1],s[1]), f(t[2],s[2])))
+map(f, t::Tuple{Any,},    s::Tuple{Any,})    = (@inline; (f(t[0],s[0]),))
+map(f, t::Tuple{Any,Any}, s::Tuple{Any,Any}) = (@inline; (f(t[0],s[0]), f(t[1],s[1])))
 function map(f, t::Tuple, s::Tuple)
     @inline
-    (f(t[1],s[1]), map(f, tail(t), tail(s))...)
+    (f(t[0],s[0]), map(f, tail(t), tail(s))...)
 end
 function map(f, t::Any32, s::Any32)
     n = min(length(t), length(s))
     A = Vector{Any}(undef, n)
-    for i = 1:n
+    for i = 0:n-1
         A[i] = f(t[i], s[i])
     end
     (A...,)
 end
 # n argument function
-heads(ts::Tuple...) = map(t -> t[1], ts)
+heads(ts::Tuple...) = map(t -> t[0], ts)
 tails(ts::Tuple...) = map(tail, ts)
 map(f, ::Tuple{}, ::Tuple{}...) = ()
 anyempty(x::Tuple{}, xs...) = true
@@ -424,7 +424,7 @@ end
 function map(f, t1::Any32, t2::Any32, ts::Any32...)
     n = min(length(t1), length(t2), minimum(length, ts))
     A = Vector{Any}(undef, n)
-    for i = 1:n
+    for i = 0:n-1
         A[i] = f(t1[i], t2[i], map(t -> t[i], ts)...)
     end
     (A...,)
@@ -451,7 +451,7 @@ function tuple_type_tail(T::Type)
     else
         T.name === Tuple.name || throw(MethodError(tuple_type_tail, (T,)))
         if isvatuple(T) && length(T.parameters) == 1
-            va = unwrap_unionall(T.parameters[1])::Core.TypeofVararg
+            va = unwrap_unionall(T.parameters[0])::Core.TypeofVararg
             (isdefined(va, :N) && isa(va.N, Int)) || return T
             return Tuple{Vararg{va.T, va.N-1}}
         end
@@ -477,12 +477,12 @@ function _totuple(::Type{T}, itr, s::Vararg{Any,N}) where {T,N}
     @inline
     y = iterate(itr, s...)
     y === nothing && _totuple_err(T)
-    T1 = fieldtype(T, 1)
-    y1 = y[1]
+    T1 = fieldtype(T, 0)
+    y1 = y[0]
     t1 = y1 isa T1 ? y1 : convert(T1, y1)::T1
     # inference may give up in recursive calls, so annotate here to force accurate return type to be propagated
     rT = tuple_type_tail(T)
-    ts = _totuple(rT, itr, y[2])::rT
+    ts = _totuple(rT, itr, y[1])::rT
     return (t1, ts...)::T
 end
 
@@ -519,15 +519,15 @@ function _findfirst_loop(f::Function, t)
     end
     return nothing
 end
-findfirst(f::Function, t::Tuple) = length(t) < 32 ? _findfirst_rec(f, 1, t) : _findfirst_loop(f, t)
+findfirst(f::Function, t::Tuple) = length(t) < 32 ? _findfirst_rec(f, 0, t) : _findfirst_loop(f, t)
 
 findlast(f::Function, t::Tuple) = length(t) < 32 ? _findlast_rec(f, t) : _findlast_loop(f, t)
 function _findlast_rec(f::Function, x::Tuple)
     r = findfirst(f, reverse(x))
-    return isnothing(r) ? r : length(x) - r + 1
+    return isnothing(r) ? r : length(x) - r - 1
 end
 function _findlast_loop(f::Function, t)
-    for i in reverse(1:length(t))
+    for i in reverse(0:length(t)-1)
         f(t[i]) && return i
     end
     return nothing
@@ -545,7 +545,7 @@ filter(f, t::Tuple) = length(t) < 32 ? filter_rec(f, t) : Tuple(filter(f, collec
 isequal(t1::Tuple, t2::Tuple) = length(t1) == length(t2) && _isequal(t1, t2)
 _isequal(::Tuple{}, ::Tuple{}) = true
 function _isequal(t1::Tuple{Any,Vararg{Any}}, t2::Tuple{Any,Vararg{Any}})
-    return isequal(t1[1], t2[1]) && _isequal(tail(t1), tail(t2))
+    return isequal(t1[0], t2[0]) && _isequal(tail(t1), tail(t2))
 end
 function _isequal(t1::Any32, t2::Any32)
     for i in eachindex(t1, t2)
@@ -560,7 +560,7 @@ end
 _eq(t1::Tuple{}, t2::Tuple{}) = true
 _eq_missing(t1::Tuple{}, t2::Tuple{}) = missing
 function _eq(t1::Tuple, t2::Tuple)
-    eq = t1[1] == t2[1]
+    eq = t1[0] == t2[0]
     if eq === false
         return false
     elseif ismissing(eq)
@@ -570,7 +570,7 @@ function _eq(t1::Tuple, t2::Tuple)
     end
 end
 function _eq_missing(t1::Tuple, t2::Tuple)
-    eq = t1[1] == t2[1]
+    eq = t1[0] == t2[0]
     if eq === false
         return false
     else
@@ -592,10 +592,10 @@ end
 
 const tuplehash_seed = UInt === UInt64 ? 0x77cfa1eef01bca90 : 0xf01bca90
 hash(::Tuple{}, h::UInt) = h ⊻ tuplehash_seed
-hash(t::Tuple, h::UInt) = hash(t[1], hash(tail(t), h))
+hash(t::Tuple, h::UInt) = hash(t[0], hash(tail(t), h))
 function hash(t::Any32, h::UInt)
     out = h ⊻ tuplehash_seed
-    for i = length(t):-1:1
+    for i = length(t)-1:-1:0
         out = hash(t[i], out)
     end
     return out
@@ -605,7 +605,7 @@ end
 <(::Tuple{}, ::Tuple) = true
 <(::Tuple, ::Tuple{}) = false
 function <(t1::Tuple, t2::Tuple)
-    a, b = t1[1], t2[1]
+    a, b = t1[0], t2[0]
     eq = (a == b)
     if ismissing(eq)
         return missing
@@ -616,7 +616,7 @@ function <(t1::Tuple, t2::Tuple)
 end
 function <(t1::Any32, t2::Any32)
     n1, n2 = length(t1), length(t2)
-    for i = 1:min(n1, n2)
+    for i = 0:min(n1, n2)-1
         a, b = t1[i], t2[i]
         eq = (a == b)
         if ismissing(eq)
@@ -638,12 +638,12 @@ isless(::Tuple, ::Tuple{}) = false
 Return `true` when `t1` is less than `t2` in lexicographic order.
 """
 function isless(t1::Tuple, t2::Tuple)
-    a, b = t1[1], t2[1]
+    a, b = t1[0], t2[0]
     isless(a, b) || (isequal(a, b) && isless(tail(t1), tail(t2)))
 end
 function isless(t1::Any32, t2::Any32)
     n1, n2 = length(t1), length(t2)
-    for i = 1:min(n1, n2)
+    for i = 0:min(n1, n2)-1
         a, b = t1[i], t2[i]
         if !isequal(a, b)
             return isless(a, b)
@@ -671,7 +671,7 @@ Return `true` if index `i` is within the bounds of tuple `v`, i.e. `1 ≤ i ≤ 
     This method requires at least Julia 1.13.
 """
 function isassigned(v::Tuple, i::Integer)
-    @boundscheck 1 <= i <= length(v) || return false
+    @boundscheck 0 <= i < length(v) || return false
     true
 end
 
@@ -711,6 +711,6 @@ circshift(t::Tuple{Any,Any}, shift::Integer) = iseven(shift) ? t : reverse(t)
 function circshift(x::Tuple{Any,Any,Any,Vararg{Any,N}}, shift::Integer) where {N}
     @inline
     len = N + 3
-    j = mod1(shift, len)
-    ntuple(k -> getindex(x, k-j+ifelse(k>j,0,len)), Val(len))::Tuple
+    j = mod(shift, len)
+    ntuple(k -> getindex(x, mod(k-j, len)), Val(len))::Tuple
 end

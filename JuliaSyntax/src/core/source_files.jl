@@ -81,7 +81,8 @@ The second form allows one to be more precise with the `byte_index`, given the
 source file.
 
 Providing `LineNumberNode` as the first argument will return the line and file
-name in a line number node object.
+name in a line number node object. Byte indices start at zero; rendered line and
+column numbers start at one.
 """
 source_location(x) = source_location(sourcefile(x), first_byte(x))
 
@@ -119,7 +120,7 @@ end
 
 #-------------------------------------------------------------------------------
 """
-    SourceFile(code [; filename=nothing, first_line=1, first_index=1])
+    SourceFile(code [; filename=nothing, first_line=1, first_index=0])
 
 UTF-8 source text with associated file name and line number, storing the
 character indices of the start of each line. `first_line` and `first_index`
@@ -151,13 +152,13 @@ function Base.:(==)(a::SourceFile, b::SourceFile)
 end
 
 function SourceFile(code::AbstractString; filename=nothing, first_line=1,
-                    first_index=1)
-    line_starts = Int[1]
+                    first_index=0)
+    line_starts = Int[0]
     for i in eachindex(code)
         # The line is considered to start after the `\n`
         code[i] == '\n' && push!(line_starts, i+1)
     end
-    SourceFile(code, first_index-1, filename, first_line, line_starts)
+    SourceFile(code, first_index, filename, first_line, line_starts)
 end
 
 function SourceFile(; filename, kwargs...)
@@ -168,7 +169,7 @@ end
 function _source_line_index(source::SourceFile, byte_index)
     searchsortedlast(source.line_starts, byte_index - source.byte_offset)
 end
-_source_line(source::SourceFile, lineidx) = lineidx + source.first_line - 1
+_source_line(source::SourceFile, lineidx) = lineidx + source.first_line
 
 function source_location(::Type{LineNumberNode}, x)
     source_location(LineNumberNode, sourcefile(x), first_byte(x))
@@ -200,10 +201,10 @@ Get byte range of the source line at byte_index, buffered by
 function source_line_range(source::SourceFile, byte_index::Integer;
                            context_lines_before=0, context_lines_after=0)
     lineidx = _source_line_index(source, byte_index)
-    fbyte = source.line_starts[max(lineidx-context_lines_before, 1)]
+    fbyte = source.line_starts[max(lineidx-context_lines_before, 0)]
     lline = lineidx + context_lines_after
     lbyte = lline >= lastindex(source.line_starts) ?
-        ncodeunits(source.code) : source.line_starts[lline + 1] - 1
+        ncodeunits(source.code)-1 : source.line_starts[lline + 1] - 1
 
     return (fbyte + source.byte_offset,
             lbyte + source.byte_offset)
@@ -218,12 +219,12 @@ function Base.show(io::IO, ::MIME"text/plain", source::SourceFile)
     fn = filename(source)
     header = "## SourceFile$(isempty(fn) ? "" : " ")$fn ##"
     print(io, header, "\n")
-    heightlim = displaysize(io)[1] ÷ 2
+    heightlim = displaysize(io)[0] ÷ 2
     if !get(io, :limit, false) || length(source.line_starts) <= heightlim
         print(io, source.code)
     else
-        r1 = source_line_range(source, 1, context_lines_after=heightlim-3)
-        print(io, view(source, r1[1]:r1[2]))
+        r1 = source_line_range(source, firstindex(source), context_lines_after=heightlim-3)
+        print(io, view(source, r1[0]:r1[1]))
         println(io, "⋮")
     end
 end
@@ -283,7 +284,7 @@ function _print_marker_line(io, prefix_str, str, underline, singleline, color,
     # Assume tabs are 4 wide rather than 0. (fixme: implement tab alignment?)
     w = textwidth(str) + 4*count(c->c=='\t', str)
     if !isempty(indent)
-        indent = "#" * (first(indent) == '\t' ? indent : indent[nextind(indent,1):end])
+        indent = "#" * (first(indent) == '\t' ? indent : indent[nextind(indent,0):end])
     end
 
     startstr, endstr, singlestart = underline ? ("└","┘","╙") : ("┌","┐","╓")

@@ -74,7 +74,7 @@ macro lazy_str(text, flags...)
     compact = flags == ("c",)
     isempty(flags) || compact || throw(ArgumentError("unknown lazy-string flag: $flags"))
     parts = Any[]
-    lastidx = idx = 1
+    lastidx = idx = 0
     while (idx = findnext('$', text, idx)) !== nothing
         lastidx < idx && push!(parts, text[lastidx:prevind(text, idx)])
         idx += 1

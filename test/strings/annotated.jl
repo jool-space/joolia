@@ -1,5 +1,52 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
+@testset "Joolia zero-origin annotation primitives" begin
+    str = Base.AnnotatedString("abcd", [(0:1, :x, 1), (2:3, :y, 2)])
+    @test firstindex(str) == 0 && lastindex(str) == 3
+    @test str[0].char == 'a' && str[0].annotations[0].label == :x
+    regions = collect(Base.eachregion(str))
+    @test length(regions) == 2
+    @test regions[0][0] == "ab" && regions[1][0] == "cd"
+
+    sub = SubString(str, 1, 2)
+    @test Base.unannotate(sub) == "bc"
+    @test Base.annotations(sub)[0].region == 0:0
+    @test Base.annotations(sub)[1].region == 1:1
+
+    charstr = Base.annotatedstring(Base.AnnotatedChar('z', [(:z, 9)]))
+    @test charstr.annotations[0].region == 0:0
+
+    aio = Base.AnnotatedIOBuffer()
+    @test write(aio, str) == 4
+    @test Base.annotations(aio)[0].region == 0:1
+    merged = Base.AnnotatedIOBuffer()
+    write(merged, Base.AnnotatedString("a", [(0:0, :m, 1)]))
+    write(merged, Base.AnnotatedString("b", [(0:0, :m, 1)]))
+    @test Base.annotations(merged)[0].region == 0:1
+    splitio = Base.AnnotatedIOBuffer()
+    write(splitio, Base.AnnotatedString("abcdef", [(0:5, :s, 1)]))
+    seek(splitio, 2)
+    write(splitio, Base.AnnotatedString("X"))
+    splitanns = Base.annotations(splitio)
+    @test length(splitanns) == 2
+    @test splitanns[0].region == 0:1 && splitanns[1].region == 3:5
+    @test read(seekstart(aio), Base.AnnotatedString) == str
+    @test read(seek(aio, 1), Base.AnnotatedString).annotations[0].region == 1:2
+    @test read(seekstart(aio), Base.AnnotatedChar).annotations[0].label == :x
+    truncate(aio, 2)
+    @test last(Base.annotations(aio)[0].region) == 1
+
+    # Appending unannotated text and a longer annotation run must stay in bounds.
+    plain = Base.AnnotatedIOBuffer()
+    write(plain, Base.AnnotatedString("a", [(0:0, :x, 1)]))
+    @test write(plain, SubString(Base.AnnotatedString("bc"), 0, 1)) == 2
+    @test Base.annotations(plain) == [(region=0:0, label=:x, value=1)]
+    more = Base.AnnotatedIOBuffer()
+    write(more, Base.AnnotatedString("a", [(0:0, :x, 1)]))
+    write(more, Base.AnnotatedString("b", [(0:0, :x, 1), (0:0, :x, 1)]))
+    @test length(Base.annotations(more)) == 2
+end
+
 @testset "AnnotatedString" begin
     str = Base.AnnotatedString("some string")
     @test str == Base.AnnotatedString(str.string, Base.RegionAnnotation[])

@@ -176,7 +176,7 @@ const J_TABLE = (0x0000000000000000, 0xaac00b1afa5abcbe, 0x9b60163da9fb3335, 0xa
 
 # :nothrow needed since the compiler can't prove `ind` is inbounds.
 Base.@assume_effects :nothrow function table_unpack(ind::Int32)
-    ind = ind & 255 + 1 # 255 == length(J_TABLE) - 1
+    ind = ind & 255 # 255 == length(J_TABLE) - 1
     j = getfield(J_TABLE, ind) # use getfield so the compiler can prove consistent
     jU = reinterpret(Float64, JU_CONST | (j&JU_MASK))
     jL = reinterpret(Float64, JL_CONST | (j>>8))
@@ -421,13 +421,13 @@ Ln2(::Type{Float32}) = -0.6931472f0
                      0.001388888889068783, 0.00019841269447671544, 2.480157691845342e-5,
                      2.7558212415361945e-6, 2.758218402815439e-7, 2.4360682937111612e-8))
     p2 = exthorner(x, (1.0, .5, p))
-    return fma(x, p2[1], x*p2[2])
+    return fma(x, p2[0], x*p2[1])
 end
 @inline function expm1_small(x::Float32)
     p = evalpoly(x, (0.16666666f0, 0.041666627f0, 0.008333682f0,
                      0.0013908712f0, 0.0001933096f0))
     p2 = exthorner(x, (1f0, .5f0, p))
-    return fma(x, p2[1], x*p2[2])
+    return fma(x, p2[0], x*p2[1])
 end
 
 function expm1(x::Float64)

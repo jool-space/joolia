@@ -1,3 +1,107 @@
+# Exercise the zero-origin broadcast implementation before the ordinary test image exists.
+if Core.Intrinsics.not_int(Core.isdefined(Base, :end_base_include))
+    Core.eval(Base, quote
+        include("reflection.jl")
+        include("refpointer.jl")
+        include("flfrontend.jl")
+        Core._setparser!(fl_parse)
+        Core._setlowerer!(fl_lower)
+        include("meta.jl")
+        using .Meta
+        include("multimedia.jl")
+        using .Multimedia
+        include("char.jl")
+        include("strings/basic.jl")
+        include("strings/string.jl")
+        include("strings/substring.jl")
+        include("strings/cstring.jl")
+        include("cartesian.jl")
+        using .Cartesian
+        include("hashing.jl")
+        include("subarray.jl")
+        include("views.jl")
+        include("strings/stringview.jl")
+        include("strings/search.jl")
+        include("some.jl")
+        include("div.jl")
+        include("simdloop.jl")
+        using .SimdLoop
+        include("floatfuncs.jl")
+        include("twiceprecision.jl")
+        include("complex.jl")
+        include("rational.jl")
+        include("multinverses.jl")
+        using .MultiplicativeInverses
+        include("reduce.jl")
+        include("reshapedarray.jl")
+        include("reinterpretarray.jl")
+        include("intfuncs.jl")
+        include("multidimensional.jl")
+        include("combinatorics.jl")
+        include("abstractarraymath.jl")
+        include("arraymath.jl")
+        include("broadcast.jl")
+        using .Broadcast: broadcasted, broadcasted_kwsyntax, materialize, materialize!, broadcast_preserving_zero_d, andand, oror
+    end)
+    Core.eval(Core.Main, :(module JooliaBroadcastFoundation
+    using Base.Broadcast
+    const checks = Base.RefValue(0)
+    function check(ok::Bool, label::String)
+        ok || throw(ErrorException(label))
+        checks[] += 1
+    end
+    function throws(f, T, label::String)
+        try
+            f()
+        catch err
+            check(err isa T, label)
+            return
+        end
+        throw(ErrorException(label))
+    end
+    function run()
+        x = [1, 2, 3]
+        bcx = Broadcast.instantiate(Broadcast.broadcasted(+, x, 10))
+        check(firstindex(x) == 0 && axes(bcx) == (Base.ZeroTo(3),) && bcx[0] == 11 && bcx[2] == 13, "scalar-vector broadcast")
+        singleton = [10]
+        bcs = Broadcast.instantiate(Broadcast.broadcasted(+, x, singleton))
+        check(axes(bcs) == (Base.ZeroTo(3),) && bcs[0] == 11 && bcs[2] == 13, "singleton vector expansion")
+        m = reshape(collect(1:6), 2, 3)
+        cols = reshape([10, 20, 30], 1, 3)
+        bcm = Broadcast.instantiate(Broadcast.broadcasted(+, m, cols))
+        check(axes(bcm) == (Base.ZeroTo(2), Base.ZeroTo(3)) && bcm[CartesianIndex(0, 0)] == 11 && bcm[CartesianIndex(1, 1)] == 24 && bcm[CartesianIndex(0, 2)] == 35, "matrix-vector broadcast")
+        dest = similar(x)
+        Broadcast.copyto!(dest, Broadcast.convert(Broadcast.Broadcasted{Nothing}, bcx))
+        check(dest[0] == 11 && dest[2] == 13, "broadcast assignment zero positions")
+        bct = Broadcast.instantiate(Broadcast.broadcasted(+, (1, 2, 3), 10))
+        check(Broadcast.copy(bct) == (11, 12, 13), "tuple broadcast")
+        bcp = Broadcast.instantiate(Broadcast.broadcasted(+, (1, 2), (3, 4)))
+        check(Broadcast.copy(bcp) == (4, 6), "tuple pair broadcast")
+        nested = Broadcast.instantiate(Broadcast.broadcasted(+, Broadcast.broadcasted(*, x, 2), 1))
+        check(nested[0] == 3 && nested[2] == 7, "nested broadcast flattening")
+        bcr = Broadcast.instantiate(Broadcast.broadcasted(+, Ref(2), Ref(3)))
+        bcv = Broadcast.instantiate(Broadcast.broadcasted(+, Ref(2), [3]))
+        check(bcr[] == 5 && bcv[0] == 5, "scalar and zero-dimensional broadcast")
+        empty = Broadcast.instantiate(Broadcast.broadcasted(+, Int[], Int[]))
+        check(isempty(empty) && axes(empty) == (Base.ZeroTo(0),), "empty broadcast axes")
+        throws(() -> Broadcast.instantiate(Broadcast.broadcasted(+, [1, 2], [1, 2, 3])), DimensionMismatch, "broadcast mismatch")
+        bits = BitArray(undef, 65)
+        for i in 0:64
+            bits[i] = isodd(i)
+        end
+        invbits = similar(bits)
+        bitbc = Broadcast.instantiate(Broadcast.broadcasted(!, bits))
+        Broadcast.copyto!(invbits, Broadcast.convert(Broadcast.Broadcasted{Nothing}, bitbc))
+        check(length(invbits) == 65 && invbits[0] && !invbits[1] && invbits[64], "bit broadcast chunk boundary")
+        missingdim = Broadcast.instantiate(Broadcast.broadcasted(+, x))
+        check(Broadcast.axes(missingdim, 1) == Base.ZeroTo(1), "missing broadcast dimension axis")
+    Core.println("joolia broadcast foundation checks passed: ", checks[])
+    end
+    run()
+    end))
+    ccall(:jl_exit, Core.Cvoid, (Core.Int32,), Core.Int32(0))
+end
+
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
 using Test, Random

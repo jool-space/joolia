@@ -5,6 +5,39 @@ using Base.Threads
 using Base: Experimental
 using Base: n_avail
 
+@testset "zero-origin buffered channel head" begin
+    c = Channel{Int}(3)
+    put!(c, 10)
+    put!(c, 20)
+    @test fetch(c) == 10
+    @test take!(c) == 10
+    @test fetch(c) == 20
+    @test take!(c) == 20
+    @test isempty(c)
+
+    c = Channel{Int}(1)
+    producer = @async put!(c, 30)
+    @test fetch(c) == 30
+    @test take!(c) == 30
+    wait(producer)
+
+    c = Channel{Int}(1)
+    put!(c, 40)
+    producer = @async put!(c, 50)
+    yield()
+    @test !istaskdone(producer)
+    @test take!(c) == 40
+    wait(producer)
+    @test take!(c) == 50
+
+    c = Channel{Int}(0)
+    producer = @async put!(c, 60)
+    yield()
+    @test !istaskdone(producer)
+    @test take!(c) == 60
+    wait(producer)
+end
+
 @testset "single-threaded Condition usage" begin
     a = Condition()
     t = @async begin
@@ -217,11 +250,11 @@ using Distributed
     schedule(task)
 
     if N > 0
-        for i in 1:5
+        for i in 0:4
             @test put!(cs[i], 2) === 2
         end
     end
-    for i in 1:5
+    for i in 0:4
         while isopen(cs[i])
             yield()
         end
@@ -257,13 +290,13 @@ using Distributed
     for T in [Any, Int]
         tf_chnls1 = (c1, c2) -> (@assert take!(c1) == 1; put!(c2, 2))
         chnls, tasks = Base.channeled_tasks(2, tf_chnls1; ctypes=[T,T], csizes=[N,N])
-        put!(chnls[1], 1)
-        @test take!(chnls[2]) === 2
+        put!(chnls[0], 1)
+        @test take!(chnls[1]) === 2
+        @test_throws InvalidStateException wait(chnls[0])
         @test_throws InvalidStateException wait(chnls[1])
-        @test_throws InvalidStateException wait(chnls[2])
-        @test istaskdone(tasks[1])
+        @test istaskdone(tasks[0])
+        @test !isopen(chnls[0])
         @test !isopen(chnls[1])
-        @test !isopen(chnls[2])
 
         f = Future()
         tf4 = (c1, c2) -> begin
@@ -277,17 +310,17 @@ using Distributed
         end
 
         chnls, tasks = Base.channeled_tasks(2, tf4, tf5; ctypes=[T,T], csizes=[N,N])
-        put!(chnls[1], 1)
-        @test take!(chnls[2]) === 2
+        put!(chnls[0], 1)
+        @test take!(chnls[1]) === 2
         yield()
         put!(f, 1) # allow tf4 and tf5 to exit after now, eventually closing the channel
 
+        @test_throws InvalidStateException wait(chnls[0])
         @test_throws InvalidStateException wait(chnls[1])
-        @test_throws InvalidStateException wait(chnls[2])
+        @test istaskdone(tasks[0])
         @test istaskdone(tasks[1])
-        @test istaskdone(tasks[2])
+        @test !isopen(chnls[0])
         @test !isopen(chnls[1])
-        @test !isopen(chnls[2])
     end
 
     # channel
@@ -387,11 +420,11 @@ end
     newstderr = redirect_stderr()
     local errstream
     try
-        errstream = @async read(newstderr[1], String)
+        errstream = @async read(newstderr[0], String)
         yield(t)
     finally
         redirect_stderr(oldstderr)
-        close(newstderr[2])
+        close(newstderr[1])
     end
     @test istaskdone(t)
     @test fetch(t)
@@ -404,11 +437,11 @@ end
     @atomic t._state = 66
     newstderr = redirect_stderr()
     try
-        errstream = @async read(newstderr[1], String)
+        errstream = @async read(newstderr[0], String)
         yield()
     finally
         redirect_stderr(oldstderr)
-        close(newstderr[2])
+        close(newstderr[1])
     end
     @test fetch(errstream) == "\nWARNING: Workqueue inconsistency detected: popfirst!(Workqueue).state !== :runnable\n"
 end

@@ -51,7 +51,7 @@ _sub(t::Tuple, s::Tuple) = _sub(tail(t), tail(s))
 Return an array with the same data as `A`, but with the dimensions specified by
 `dims` removed.
 
-Repeated dimensions or numbers outside `1:ndims(A)` are forbidden.
+Repeated dimensions or numbers outside `0:ndims(A)-1` are forbidden.
 Moreover `size(A,d)` must equal 1 for every `d` in `dims`.
 
 The result shares the same underlying data as `A`, such that the
@@ -65,19 +65,19 @@ See also [`reshape`](@ref), [`vec`](@ref).
 ```jldoctest
 julia> a = reshape(Vector(1:4),(2,2,1,1))
 2×2×1×1 Array{Int64, 4}:
-[:, :, 1, 1] =
+[:, :, 0, 0] =
  1  3
  2  4
 
-julia> b = dropdims(a; dims=3)
+julia> b = dropdims(a; dims=2)
 2×2×1 Array{Int64, 3}:
-[:, :, 1] =
+[:, :, 0] =
  1  3
  2  4
 
-julia> b[1,1,1] = 5; a
+julia> b[0,0,0] = 5; a
 2×2×1×1 Array{Int64, 4}:
-[:, :, 1, 1] =
+[:, :, 0, 0] =
  5  3
  2  4
 ```
@@ -85,14 +85,17 @@ julia> b[1,1,1] = 5; a
 dropdims(A; dims) = _dropdims(A, dims)
 function _dropdims(A::AbstractArray, dims::Dims)
     for i in eachindex(dims)
-        1 <= dims[i] <= ndims(A) || throw(ArgumentError("dropped dims must be in range 1:ndims(A)"))
+        0 <= dims[i] < ndims(A) || throw(ArgumentError("dropped dims must be in range 0:ndims(A)-1"))
         length(axes(A, dims[i])) == 1 || throw(ArgumentError("dropped dims must all be size 1"))
-        for j = 1:i-1
+        for j = 0:i-1
             dims[j] == dims[i] && throw(ArgumentError("dropped dims must be unique"))
         end
     end
     ox = axes(A)
-    ax = _foldoneto((ds, d) -> d in dims ? ds : (ds..., axes(A,d)), (), Val(ndims(A)))
+    ax = _foldoneto((ds, d) -> begin
+        d -= 1
+        d in dims ? ds : (ds..., axes(A,d))
+    end, (), Val(ndims(A)))
     if isconcretetype(eltype(ox))
         # if all the axes are the same type, we can use the tail as the
         # axes of the result rather than extracting one at each index
@@ -109,7 +112,7 @@ _dropdims(A::AbstractArray, dim::Integer) = _dropdims(A, (Int(dim),))
 Return an array with new singleton dimensions at every dimension in `dims`.
 
 Repeated dimensions are forbidden and the largest entry in `dims` must be
-less than or equal than `ndims(A) + length(dims)`.
+less than `ndims(A) + length(dims)`.
 
 The result shares the same underlying data as `A`, such that the
 result is mutable if and only if `A` is mutable, and setting elements of one
@@ -125,16 +128,16 @@ julia> x = [1 2 3; 4 5 6]
  1  2  3
  4  5  6
 
-julia> insertdims(x, dims=3)
+julia> insertdims(x, dims=2)
 2×3×1 Array{Int64, 3}:
-[:, :, 1] =
+[:, :, 0] =
  1  2  3
  4  5  6
 
-julia> insertdims(x, dims=(1,2,5)) == reshape(x, 1, 1, 2, 3, 1)
+julia> insertdims(x, dims=(0,1,4)) == reshape(x, 1, 1, 2, 3, 1)
 true
 
-julia> dropdims(insertdims(x, dims=(1,2,5)), dims=(1,2,5))
+julia> dropdims(insertdims(x, dims=(0,1,4)), dims=(0,1,4))
 2×3 Matrix{Int64}:
  1  2  3
  4  5  6
@@ -146,9 +149,8 @@ julia> dropdims(insertdims(x, dims=(1,2,5)), dims=(1,2,5))
 insertdims(A; dims) = _insertdims(A, dims)
 function _insertdims(A::AbstractArray{T, N}, dims::NTuple{M, Int}) where {T, N, M}
     for i in eachindex(dims)
-        1 ≤ dims[i] || throw(ArgumentError("the smallest entry in dims must be ≥ 1."))
-        dims[i] ≤ N+M || throw(ArgumentError("the largest entry in dims must be not larger than the dimension of the array and the length of dims added"))
-        for j = 1:i-1
+        0 ≤ dims[i] < N+M || throw(ArgumentError("inserted dims must be in range 0:ndims(A)+length(dims)-1"))
+        for j = 0:i-1
             dims[j] == dims[i] && throw(ArgumentError("inserted dims must be unique"))
         end
     end
@@ -156,11 +158,11 @@ function _insertdims(A::AbstractArray{T, N}, dims::NTuple{M, Int}) where {T, N, 
     # acc is a tuple, where the first entry is the final shape
     # the second entry of acc is a counter for the axes of A
     inds= Base._foldoneto((acc, i) ->
-                            i ∈ dims
-                                ? ((acc[1]..., Base.OneTo(1)), acc[2])
-                                : ((acc[1]..., axes(A, acc[2])), acc[2] + 1),
-                            ((), 1), Val(N+M))
-    new_shape = inds[1]
+                            (i-1) ∈ dims
+                                ? ((acc[0]..., ZeroTo(1)), acc[1])
+                                : ((acc[0]..., axes(A, acc[1])), acc[1] + 1),
+                            ((), 0), Val(N+M))
+    new_shape = inds[0]
     return reshape(A, new_shape)
 end
 _insertdims(A::AbstractArray, dim::Integer) = _insertdims(A, (Int(dim),))
@@ -313,22 +315,24 @@ julia> A = [1 2 3 4; 5 6 7 8]
  1  2  3  4
  5  6  7  8
 
-julia> selectdim(A, 2, 3)
-2-element view(::Matrix{Int64}, :, 3) with eltype Int64:
+julia> selectdim(A, 1, 2)
+2-element view(::Matrix{Int64}, :, 2) with eltype Int64:
  3
  7
 
-julia> selectdim(A, 2, 3:4)
-2×2 view(::Matrix{Int64}, :, 3:4) with eltype Int64:
+julia> selectdim(A, 1, 2:3)
+2×2 view(::Matrix{Int64}, :, 2:3) with eltype Int64:
  3  4
  7  8
 ```
 """
-@inline selectdim(A::AbstractArray, d::Integer, i) = _selectdim(A, d, i, _setindex(i, d, map(Slice, axes(A))...))
+@inline function selectdim(A::AbstractArray, d::Integer, i)
+    0 <= d || throw(ArgumentError("dimension must be ≥ 0"))
+    _selectdim(A, d, i, _setindex(i, d, map(Slice, axes(A))...))
+end
 @noinline function _selectdim(A, d, i, idxs)
-    d >= 1 || throw(ArgumentError("dimension must be ≥ 1, got $d"))
     nd = ndims(A)
-    d > nd && (i == 1 || throw(BoundsError(A, (ntuple(Returns(Colon()),d-1)..., i))))
+    d >= nd && (i == 0 || throw(BoundsError(A, (ntuple(Returns(Colon()),d)..., i))))
     return view(A, idxs...)
 end
 
@@ -525,9 +529,8 @@ end
 
 function check(arr, inner, outer)
     if inner !== nothing
-        # TODO: Currently one based indexing is demanded for inner !== nothing,
-        # but not for outer !== nothing. Decide for something consistent.
-        Base.require_one_based_indexing(arr)
+        # Inner repetition operates on zero-based array axes.
+        Base.require_zero_based_indexing(arr)
         if !all(n -> n isa Integer, inner)
             throw(ArgumentError("repeat requires integer counts, got inner = $inner"))
         end
@@ -557,13 +560,13 @@ repeat_inner_outer(arr, inner, ::Nothing) = repeat_inner(arr, inner)
 repeat_inner_outer(arr, inner, outer) = repeat_outer(repeat_inner(arr, inner), outer)
 
 function repeat_outer(a::AbstractMatrix, (m,n)::NTuple{2, Any})
-    o, p = size(a,1), size(a,2)
+    o, p = size(a,0), size(a,1)
     b = similar(a, Base.checked_mul(o, m), Base.checked_mul(p, n))
-    for j=1:n
-        d = (j-1)*p+1
+    for j=0:n-1
+        d = j*p
         R = d:d+p-1
-        for i=1:m
-            c = (i-1)*o+1
+        for i=0:m-1
+            c = i*o
             @inbounds b[c:c+o-1, R] = a
         end
     end
@@ -573,8 +576,8 @@ end
 function repeat_outer(a::AbstractVector, (m,)::Tuple{Any})
     o = length(a)
     b = similar(a, Base.checked_mul(o, m))
-    for i=1:m
-        c = (i-1)*o+1
+    for i=0:m-1
+        c = i*o
         @inbounds b[c:c+o-1] = a
     end
     return b
@@ -587,7 +590,7 @@ function repeat_outer(arr::AbstractArray{<:Any,N}, dims::NTuple{N,Any}) where {N
     for I in CartesianIndices(arr)
         for J in CartesianIndices(dims)
             TIJ = map(Tuple(I), Tuple(J), insize) do i, j, d
-                i + d * (j-1)
+                i + d * j
             end
             IJ = CartesianIndex(TIJ)
             @inbounds out[IJ] = arr[I]
@@ -602,7 +605,7 @@ function repeat_inner(arr, inner)
     for I in CartesianIndices(arr)
         for J in CartesianIndices(inner)
             TIJ = map(Tuple(I), Tuple(J), inner) do i, j, d
-                (i-1) * d + j
+                i * d + j
             end
             IJ = CartesianIndex(TIJ)
             @inbounds out[IJ] = arr[I]

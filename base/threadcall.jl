@@ -34,10 +34,10 @@ macro threadcall(f, rettype, argtypes, argvals...)
     # worker thread, which only makes the raw call. The cconverted values are
     # captured by the wrapper closure and GC.@preserve'd around the worker-thread
     # ccall so their C representations (e.g. interior pointers) stay valid.
-    roots = [Symbol("root", i) for i in 1:length(argvals)]
-    args  = [Symbol("arg", i) for i in 1:length(argvals)]
-    rootbinds = [:($(roots[i]) = cconvert($(argtypes[i]), $(argvals[i]))) for i in 1:length(argvals)]
-    argbinds  = [:($(args[i]) = unsafe_convert($(argtypes[i]), $(roots[i]))) for i in 1:length(argvals)]
+    roots = [Symbol("root", i) for i in eachindex(argvals)]
+    args  = [Symbol("arg", i) for i in eachindex(argvals)]
+    rootbinds = [:($(roots[i]) = cconvert($(argtypes[i]), $(argvals[i]))) for i in eachindex(argvals)]
+    argbinds  = [:($(args[i]) = unsafe_convert($(argtypes[i]), $(roots[i]))) for i in eachindex(argvals)]
     call = :(result[] = ccall(cfptr, $rettype, ($(argtypes...),), $(args...)))
     # keep the cconverted values alive while their C representations are in use
     body = isempty(roots) ? call : :(GC.@preserve $(roots...) $call)

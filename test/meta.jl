@@ -286,3 +286,17 @@ end
 @testset "Base.Meta docstrings" begin
     @test isempty(Docs.undocumented_names(Meta))
 end
+
+# Compiler options read names and values from zero-origin assignment expressions.
+@testset "zero-origin compiler options" begin
+    options = macroexpand(@__MODULE__, :(Base.Experimental.@compiler_options optimize=1 compile=min infer=false max_methods=2))
+    @test options == Expr(:block, Expr(:meta, :optlevel, 1), Expr(:meta, :compile, 3), Expr(:meta, :infer, 0), Expr(:meta, :max_methods, 2))
+    @test_throws ErrorException macroexpand(@__MODULE__, :(Base.Experimental.@compiler_options unknown=1))
+    @test_throws ErrorException macroexpand(@__MODULE__, :(Base.Experimental.@compiler_options compile=unsupported))
+end
+
+# Overlay declarations replace the function name in the zero-origin call signature.
+@testset "zero-origin overlay declaration" begin
+    definition = Base.Experimental.overlay_def!(:mt, :(f(x) = x))
+    @test definition.args[0] == Expr(:call, Expr(:overlay, :mt, :f), :x)
+end

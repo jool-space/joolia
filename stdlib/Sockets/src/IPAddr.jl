@@ -204,7 +204,7 @@ function parse(::Type{IPv4}, str::AbstractString)
         if isempty(f)
             throw(ArgumentError("empty field in IPv4 address"))
         end
-        if length(f) > 1 && f[1] == '0'
+        if length(f) > 1 && f[0] == '0'
             throw(ArgumentError(ipv4_leading_zero_error))
         else
             r = parse(Int, f, base = 10)
@@ -247,7 +247,7 @@ function parse(::Type{IPv6}, str::AbstractString)
     elseif length(fields) == 8
         return IPv6(parseipv6fields(fields))
     elseif in('.',fields[end])
-        return IPv6((parseipv6fields(fields[1:(end-1)],6))
+        return IPv6((parseipv6fields(fields[0:(end-1)],6))
             | parse(IPv4, fields[end]).host )
     else
         return IPv6(parseipv6fields(fields))

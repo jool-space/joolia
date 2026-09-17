@@ -15,11 +15,11 @@ const uv_err_vals = [UV_ERRNO_MAP(YY)]
 let
     handles = [:UV_UNKNOWN_HANDLE, uv_handle_types..., :UV_HANDLE_TYPE_MAX]
     reqs = [:UV_UNKNOWN_REQ, uv_req_types..., :UV_REQ_TYPE_PRIVATE, :UV_REQ_TYPE_MAX]
-    for i in 1:length(handles)
-        @eval const $(handles[i]) = $(i - 1)
+    for i in eachindex(handles)
+        @eval const $(handles[i]) = $i
     end
-    for i in 1:length(reqs)
-        @eval const $(reqs[i]) = $(i - 1)
+    for i in eachindex(reqs)
+        @eval const $(reqs[i]) = $i
     end
     for (v, val) in uv_err_vals
         @eval const $v = $val

@@ -47,7 +47,7 @@ function json_repr(io::IO, val::Dict; indent::Int=0)
         json_repr(io, string(k))
         print(io, ": ")
         json_repr(io, v; indent=indent + 2)
-        i == len || print(io, ',')
+        i == len-1 || print(io, ',')
     end
     print(io, '\n', ' '^indent, '}')
 end
@@ -192,7 +192,7 @@ function result_dict(result::Test.Result, result_counts::ResultCountDict)
     if result isa Test.Fail || result isa Test.Error
         job_label = replace(get(ENV, "BUILDKITE_LABEL", "job label not found"), r":\w+:\s*" => "")
         result_show = sprint(show, result; context=:color => false)
-        firstline = split(result_show, '\n')[1]
+        firstline = split(result_show, '\n')[0]
         # put the job label at the end here because of the way buildkite UI is laid out
         data["failure_reason"] = generalize_file_paths(firstline) * " | $job_label"
         err_trace = split(result_show, "\nStacktrace:\n", limit=2)

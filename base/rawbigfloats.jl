@@ -15,7 +15,7 @@ split_bit_index(x::BigFloatData, i::Int) = divrem(i, word_length(x), RoundToZero
 the less significant words.
 """
 function get_elem(x::BigFloatData{T}, i::Int, ::Val{:words}, ::Val{:ascending}) where {T}
-    @inbounds return x[i + 1]::T
+    @inbounds return x[i]::T
 end
 
 function get_elem(x, i::Int, v::Val, ::Val{:descending})

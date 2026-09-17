@@ -61,12 +61,12 @@ struct ReinterpretArray{T,N,S,A<:AbstractArray{S},IsReshaped} <: AbstractArray{T
     1-element reinterpret(Tuple{UInt8, UInt32}, ::Vector{UInt32}):
      (0x01, 0x00000002)
 
-    julia> a[1] = 3
+    julia> a[0] = 3
     ERROR: Padding of type Tuple{UInt8, UInt32} is not compatible with type UInt32.
 
     julia> b = reinterpret(UInt32, Tuple{UInt8, UInt32}[(0x01, 0x00000002)]); # showing will error
 
-    julia> b[1]
+    julia> b[0]
     ERROR: Padding of type UInt32 is not compatible with type Tuple{UInt8, UInt32}.
     ```
     """
@@ -88,14 +88,14 @@ struct ReinterpretArray{T,N,S,A<:AbstractArray{S},IsReshaped} <: AbstractArray{T
         has_bit_padding(S) && throwbitpadding(S, T, S)
         (N != 0 || aligned_sizeof(T) == aligned_sizeof(S)) || throwsize0(S, T, "different")
         if N != 0 && aligned_sizeof(S) != aligned_sizeof(T)
-            ax1 = axes(a)[1]
+            ax1 = axes(a)[0]
             dim = length(ax1)
             if issingletontype(T)
                 issingletontype(S) || throwsingleton(S, T)
             else
                 rem(dim*aligned_sizeof(S),aligned_sizeof(T)) == 0 || thrownonint(S, T, dim)
             end
-            first(ax1) == 1 || throwaxes1(S, T, ax1)
+            first(ax1) == 0 || throwaxes1(S, T, ax1)
         end
         readable = array_subpadding(T, S)
         writable = array_subpadding(S, T)
@@ -113,8 +113,8 @@ struct ReinterpretArray{T,N,S,A<:AbstractArray{S},IsReshaped} <: AbstractArray{T
         function throwsize1(a::AbstractArray, T::Type)
             @noinline
             throw(ArgumentError(LazyString("`reinterpret(reshape, ", T, ", a)` where `eltype(a)` is ", eltype(a),
-                " requires that `axes(a, 1)` (got ", axes(a, 1), ") be equal to 1:",
-                aligned_sizeof(T) ÷ aligned_sizeof(eltype(a)), " (from the ratio of element sizes)")))
+                " requires that `axes(a, 0)` (got ", axes(a, 0), ") be equal to ZeroTo(",
+                aligned_sizeof(T) ÷ aligned_sizeof(eltype(a)), ") (from the ratio of element sizes)")))
         end
         function throwfromsingleton(S, T)
             @noinline
@@ -136,7 +136,7 @@ struct ReinterpretArray{T,N,S,A<:AbstractArray{S},IsReshaped} <: AbstractArray{T
             rem(aligned_sizeof(T), aligned_sizeof(S)) == 0 || throwintmult(S, T)
             N = ndims(a) - 1
             N > -1 || throwsize0(S, T, "larger")
-            axes(a, 1) == OneTo(aligned_sizeof(T) ÷ aligned_sizeof(S)) || throwsize1(a, T)
+            axes(a, 0) == ZeroTo(aligned_sizeof(T) ÷ aligned_sizeof(S)) || throwsize1(a, T)
         end
         readable = array_subpadding(T, S)
         writable = array_subpadding(S, T)
@@ -203,7 +203,7 @@ StridedVecOrMat{T} = Union{StridedVector{T}, StridedMatrix{T}}
 
 strides(a::Union{DenseArray,StridedReshapedArray,StridedReinterpretArray}) = size_to_strides(1, size(a)...)
 stride(A::Union{DenseArray,StridedReshapedArray,StridedReinterpretArray}, k::Integer) =
-    k ≤ ndims(A) ? strides(A)[k] : length(A)
+    k < 0 ? throw(BoundsError(A, k)) : (k < ndims(A) ? strides(A)[k] : length(A))
 
 function strides(a::ReinterpretArray{T,<:Any,S,<:AbstractArray{S},IsReshaped}) where {T,S,IsReshaped}
     _checkcontiguous(Bool, a) && return size_to_strides(1, size(a)...)
@@ -221,7 +221,7 @@ end
 
 @inline function _checked_strides(byte_strides::Tuple, els::Integer)
     drs = map(i -> divrem(i, els), byte_strides)
-    all(i->iszero(i[2]), drs) ||
+    all(i->iszero(i[1]), drs) ||
         throw(ArgumentError("Parent's strides could not be exactly divided!"))
     map(first, drs)
 end
@@ -286,10 +286,10 @@ eachindex(::IndexSCartesian2{K}, A::ReshapedReinterpretArray) where {K} = SCarte
 end
 
 size(iter::SCartesianIndices2{K}) where K = (K, length(iter.indices2))
-axes(iter::SCartesianIndices2{K}) where K = (OneTo(K), iter.indices2)
+axes(iter::SCartesianIndices2{K}) where K = (ZeroTo(K), iter.indices2)
 
-first(iter::SCartesianIndices2{K}) where {K} = SCartesianIndex2{K}(1, first(iter.indices2))
-last(iter::SCartesianIndices2{K}) where {K}  = SCartesianIndex2{K}(K, last(iter.indices2))
+first(iter::SCartesianIndices2{K}) where {K} = SCartesianIndex2{K}(0, first(iter.indices2))
+last(iter::SCartesianIndices2{K}) where {K}  = SCartesianIndex2{K}(K-1, last(iter.indices2))
 
 @inline function getindex(iter::SCartesianIndices2{K}, i::Int, j::Int) where {K}
     @boundscheck checkbounds(iter, i, j)
@@ -300,24 +300,24 @@ function iterate(iter::SCartesianIndices2{K}) where {K}
     ret = iterate(iter.indices2)
     ret === nothing && return nothing
     item2, state2 = ret
-    return SCartesianIndex2{K}(1, item2), (1, item2, state2)
+    return SCartesianIndex2{K}(0, item2), (0, item2, state2)
 end
 
 function iterate(iter::SCartesianIndices2{K}, (state1, item2, state2)) where {K}
-    if state1 < K
+    if state1 < K-1
         item1 = state1 + 1
         return SCartesianIndex2{K}(item1, item2), (item1, item2, state2)
     end
     ret = iterate(iter.indices2, state2)
     ret === nothing && return nothing
     item2, state2 = ret
-    return SCartesianIndex2{K}(1, item2), (1, item2, state2)
+    return SCartesianIndex2{K}(0, item2), (0, item2, state2)
 end
 
 SimdLoop.simd_outer_range(iter::SCartesianIndices2) = iter.indices2
 SimdLoop.simd_inner_length(::SCartesianIndices2{K}, ::Any) where K = K
 @inline function SimdLoop.simd_index(::SCartesianIndices2{K}, Ilast::Int, I1::Int) where {K}
-    SCartesianIndex2{K}(I1+1, Ilast)
+    SCartesianIndex2{K}(I1, Ilast)
 end
 
 _maybe_reshape(::IndexSCartesian2, A::AbstractArray, I...) = _maybe_reshape(IndexCartesian(), A, I...)
@@ -342,7 +342,7 @@ end
 
 function _getindex(::IndexSCartesian2{2}, A::AbstractArray{T,2}, ind::SCartesianIndex2) where {T}
     @_propagate_inbounds_meta
-    J = first(axes(A, 2)) + ind.j - 1
+    J = first(axes(A, 1)) + ind.j
     getindex(A, ind.i, J)
 end
 
@@ -354,7 +354,7 @@ end
 
 function _setindex!(::IndexSCartesian2{2}, A::AbstractArray{T,2}, v, ind::SCartesianIndex2) where {T}
     @_propagate_inbounds_meta
-    J = first(axes(A, 2)) + ind.j - 1
+    J = first(axes(A, 1)) + ind.j
     setindex!(A, v, ind.i, J)
 end
 
@@ -369,7 +369,7 @@ unaliascopy(a::ReshapedReinterpretArray{T}) where {T} = reinterpret(reshape, T, 
 
 function size(a::NonReshapedReinterpretArray{T,N,S} where {N}) where {T,S}
     psize = size(a.parent)
-    size1 = issingletontype(T) ? psize[1] : div(psize[1]*aligned_sizeof(S), aligned_sizeof(T))
+    size1 = issingletontype(T) ? psize[0] : div(psize[0]*aligned_sizeof(S), aligned_sizeof(T))
     tuple(size1, tail(psize)...)
 end
 function size(a::ReshapedReinterpretArray{T,N,S} where {N}) where {T,S}
@@ -382,13 +382,13 @@ size(a::NonReshapedReinterpretArray{T,0}) where {T} = ()
 
 function axes(a::NonReshapedReinterpretArray{T,N,S} where {N}) where {T,S}
     paxs = axes(a.parent)
-    f, l = first(paxs[1]), length(paxs[1])
+    f, l = first(paxs[0]), length(paxs[0])
     size1 = issingletontype(T) ? l : div(l*aligned_sizeof(S), aligned_sizeof(T))
-    tuple(oftype(paxs[1], f:f+size1-1), tail(paxs)...)
+    tuple(oftype(paxs[0], f:f+size1-1), tail(paxs)...)
 end
 function axes(a::ReshapedReinterpretArray{T,N,S} where {N}) where {T,S}
     paxs = axes(a.parent)
-    aligned_sizeof(S) > aligned_sizeof(T) && return (OneTo(div(aligned_sizeof(S), aligned_sizeof(T))), paxs...)
+    aligned_sizeof(S) > aligned_sizeof(T) && return (ZeroTo(div(aligned_sizeof(S), aligned_sizeof(T))), paxs...)
     aligned_sizeof(S) < aligned_sizeof(T) && return tail(paxs)
     return paxs
 end
@@ -432,7 +432,7 @@ check_ptr_indexable(a::AbstractArray) = false
 @propagate_inbounds function getindex(a::ReinterpretArray{T,N,S}, inds::Vararg{Int, N}) where {T,N,S}
     check_readable(a)
     check_ptr_indexable(a) && return _getindex_ptr(a, inds...)
-    _getindex_ra(a, inds[1], tail(inds))
+    _getindex_ra(a, inds[0], tail(inds))
 end
 
 @propagate_inbounds function getindex(a::ReinterpretArray{T,N,S}, i::Int) where {T,N,S}
@@ -444,7 +444,7 @@ end
     # Convert to full indices here, to avoid needing multiple conversions in
     # the loop in _getindex_ra
     inds = _to_subscript_indices(a, i)
-    isempty(inds) ? _getindex_ra(a, firstindex(a), ()) : _getindex_ra(a, inds[1], tail(inds))
+    isempty(inds) ? _getindex_ra(a, firstindex(a), ()) : _getindex_ra(a, inds[0], tail(inds))
 end
 
 @propagate_inbounds function getindex(a::ReshapedReinterpretArray{T,N,S}, ind::SCartesianIndex2) where {T,N,S}
@@ -458,7 +458,7 @@ end
     @boundscheck checkbounds(a, inds...)
     li = _to_linear_index(a, inds...)
     ap = cconvert(Ptr{T}, a)
-    p = unsafe_convert(Ptr{T}, ap) + elsize(a) * (li - 1)
+    p = unsafe_convert(Ptr{T}, ap) + elsize(a) * li
     GC.@preserve ap return unsafe_load(p)
 end
 
@@ -474,7 +474,7 @@ end
         return reinterpret(T, a.parent[i1, tailinds...])
     else
         @boundscheck checkbounds(a, i1, tailinds...)
-        ind_start, sidx = divrem((i1-1)*aligned_sizeof(T), aligned_sizeof(S))
+        ind_start, sidx = divrem(i1*aligned_sizeof(T), aligned_sizeof(S))
         # Optimizations that avoid branches
         if aligned_sizeof(T) % aligned_sizeof(S) == 0
             # T is bigger than S and contains an integer number of them
@@ -482,7 +482,7 @@ end
             t = Ref{T}()
             GC.@preserve t begin
                 sptr = Ptr{S}(unsafe_convert(Ref{T}, t))
-                for i = 1:n
+                for i = 0:n-1
                      s = a.parent[ind_start + i, tailinds...]
                      unsafe_store!(sptr, s, i)
                 end
@@ -490,13 +490,13 @@ end
             return t[]
         elseif aligned_sizeof(S) % aligned_sizeof(T) == 0
             # S is bigger than T and contains an integer number of them
-            s = Ref{S}(a.parent[ind_start + 1, tailinds...])
+            s = Ref{S}(a.parent[ind_start, tailinds...])
             GC.@preserve s begin
                 tptr = Ptr{T}(unsafe_convert(Ref{S}, s))
                 return unsafe_load(tptr + sidx)
             end
         else
-            i = 1
+            i = 0
             nbytes_copied = 0
             # This is a bit complicated to deal with partial elements
             # at both the start and the end. LLVM will fold as appropriate,
@@ -537,12 +537,12 @@ end
                 n = aligned_sizeof(T) ÷ aligned_sizeof(S)
                 if isempty(tailinds) && IndexStyle(a.parent) === IndexLinear()
                     offset = n * (i1 - firstindex(a))
-                    for i = 1:n
+                    for i = 0:n-1
                         s = a.parent[i + offset]
                         unsafe_store!(sptr, s, i)
                     end
                 else
-                    for i = 1:n
+                    for i = 0:n-1
                         s = a.parent[i, i1, tailinds...]
                         unsafe_store!(sptr, s, i)
                     end
@@ -578,7 +578,7 @@ end
 @propagate_inbounds function setindex!(a::ReinterpretArray{T,N,S}, v, inds::Vararg{Int, N}) where {T,N,S}
     check_writable(a)
     check_ptr_indexable(a) && return _setindex_ptr!(a, v, inds...)
-    _setindex_ra!(a, v, inds[1], tail(inds))
+    _setindex_ra!(a, v, inds[0], tail(inds))
 end
 
 @propagate_inbounds function setindex!(a::ReinterpretArray{T,N,S}, v, i::Int) where {T,N,S}
@@ -588,7 +588,7 @@ end
         return _setindex_ra!(a, v, i, ())
     end
     inds = _to_subscript_indices(a, i)
-    isempty(inds) ? _setindex_ra!(a, v, firstindex(a), ()) : _setindex_ra!(a, v, inds[1], tail(inds))
+    isempty(inds) ? _setindex_ra!(a, v, firstindex(a), ()) : _setindex_ra!(a, v, inds[0], tail(inds))
 end
 
 @propagate_inbounds function setindex!(a::ReshapedReinterpretArray{T,N,S}, v, ind::SCartesianIndex2) where {T,N,S}
@@ -607,7 +607,7 @@ end
     @boundscheck checkbounds(a, inds...)
     li = _to_linear_index(a, inds...)
     ap = cconvert(Ptr{T}, a)
-    p = unsafe_convert(Ptr{T}, ap) + elsize(a) * (li - 1)
+    p = unsafe_convert(Ptr{T}, ap) + elsize(a) * li
     GC.@preserve ap unsafe_store!(p, v)
     return a
 end
@@ -621,7 +621,7 @@ end
         setindex!(a.parent, reinterpret(S, v), i1, tailinds...)
     else
         @boundscheck checkbounds(a, i1, tailinds...)
-        ind_start, sidx = divrem((i1-1)*aligned_sizeof(T), aligned_sizeof(S))
+        ind_start, sidx = divrem(i1*aligned_sizeof(T), aligned_sizeof(S))
         # Optimizations that avoid branches
         if aligned_sizeof(T) % aligned_sizeof(S) == 0
             # T is bigger than S and contains an integer number of them
@@ -629,18 +629,18 @@ end
             GC.@preserve t begin
                 sptr = Ptr{S}(unsafe_convert(Ref{T}, t))
                 n = aligned_sizeof(T) ÷ aligned_sizeof(S)
-                for i = 1:n
+                for i = 0:n-1
                     s = unsafe_load(sptr, i)
                     a.parent[ind_start + i, tailinds...] = s
                 end
             end
         elseif aligned_sizeof(S) % aligned_sizeof(T) == 0
             # S is bigger than T and contains an integer number of them
-            s = Ref{S}(a.parent[ind_start + 1, tailinds...])
+            s = Ref{S}(a.parent[ind_start, tailinds...])
             GC.@preserve s begin
                 tptr = Ptr{T}(unsafe_convert(Ref{S}, s))
                 unsafe_store!(tptr + sidx, v)
-                a.parent[ind_start + 1, tailinds...] = s[]
+                a.parent[ind_start, tailinds...] = s[]
             end
         else
             t = Ref{T}(v)
@@ -649,7 +649,7 @@ end
                 tptr = Ptr{UInt8}(unsafe_convert(Ref{T}, t))
                 sptr = Ptr{UInt8}(unsafe_convert(Ref{S}, s))
                 nbytes_copied = 0
-                i = 1
+                i = 0
                 # Deal with any partial elements at the start. We'll have to copy in the
                 # element from the original array and overwrite the relevant parts
                 if sidx != 0
@@ -699,12 +699,12 @@ end
                     n = aligned_sizeof(T) ÷ aligned_sizeof(S)
                     if isempty(tailinds) && IndexStyle(a.parent) === IndexLinear()
                         offset = n * (i1 - firstindex(a))
-                        for i = 1:n
+                        for i = 0:n-1
                             s = unsafe_load(sptr, i)
                             a.parent[i + offset] = s
                         end
                     else
-                        for i = 1:n
+                        for i = 0:n-1
                             s = unsafe_load(sptr, i)
                             a.parent[i, i1, tailinds...] = s
                         end
@@ -752,11 +752,11 @@ function non_padding_bytes(T::DataType)::Memory{Bool}
 end
 function fill_nonpadding_bytes!(T::DataType, offset::Int, used::Memory{Bool})
     if isprimitivetype(T)
-        for i in 1:sizeof(T)
+        for i in 0:sizeof(T)-1
             used[i + offset] = true
         end
     else
-        for i in 1:fieldcount(T)
+        for i in 0:fieldcount(T)-1
             fill_nonpadding_bytes!(fieldtype(T, i), offset + Int(fieldoffset(T, i)), used)
         end
     end
@@ -786,7 +786,7 @@ end
     isempty(t_used) && return true
     isempty(s_used) && return false
     s_n, t_n = length(s_used), length(t_used)
-    s_i, t_i = 1, 1
+    s_i, t_i = 0, 0
     while true
         # If a byte can be read in S, but is padding in T, return false
         if s_used[s_i] && !t_used[t_i]
@@ -794,15 +794,15 @@ end
         end
         # Advance the indexes with wrapping around
         s_i += 1
-        if s_i > s_n
-            s_i = 1
+        if s_i >= s_n
+            s_i = 0
         end
         t_i += 1
-        if t_i > t_n
-            t_i = 1
+        if t_i >= t_n
+            t_i = 0
         end
         # We made it back to the start
-        if isone(s_i) && isone(t_i)
+        if iszero(s_i) && iszero(t_i)
             return true
         end
     end
@@ -829,7 +829,7 @@ end
         return Core.bitsizeof(T) % 8 != 0
     end
     T isa Union && return any(has_bit_padding, uniontypes(T))
-    for i in 1:fieldcount(T)
+    for i in 0:fieldcount(T)-1
         has_bit_padding(fieldtype(T, i)) && return true
     end
     return false
@@ -837,7 +837,7 @@ end
 
 function _copytopacked!(ptr_out::Ptr{Out}, ptr_in::Ptr{In}) where {Out, In}
     writeoffset = 0
-    for i ∈ 1:fieldcount(In)
+    for i ∈ 0:fieldcount(In)-1
         readoffset = fieldoffset(In, i)
         fT = fieldtype(In, i)
         if ispacked(fT)
@@ -853,7 +853,7 @@ end
 
 function _copyfrompacked!(ptr_out::Ptr{Out}, ptr_in::Ptr{In}) where {Out, In}
     readoffset = 0
-    for i ∈ 1:fieldcount(Out)
+    for i ∈ 0:fieldcount(Out)-1
         writeoffset = fieldoffset(Out, i)
         fT = fieldtype(Out, i)
         if ispacked(fT)
@@ -933,7 +933,7 @@ end
 
 function _mapreduce(f::F, op::OP, style::IndexSCartesian2{K}, A::AbstractArrayOrBroadcasted) where {F,OP,K}
     inds = eachindex(style, A)
-    n = size(inds)[2]
+    n = size(inds)[1]
     if n == 0
         return mapreduce_empty_iter(f, op, A, IteratorEltype(A))
     else
@@ -946,15 +946,15 @@ end
     if ilast.j - ifirst.j < blksize
         # sequential portion
         @inbounds a1 = A[ifirst]
-        @inbounds a2 = A[SCI(2,ifirst.j)]
+        @inbounds a2 = A[SCI(1,ifirst.j)]
         v = op(f(a1), f(a2))
-        @simd for i = ifirst.i + 2 : K
+        @simd for i = ifirst.i + 2 : K-1
             @inbounds ai = A[SCI(i,ifirst.j)]
             v = op(v, f(ai))
         end
         # Remaining columns
         for j = ifirst.j+1 : ilast.j
-            @simd for i = 1:K
+            @simd for i = 0:K-1
                 @inbounds ai = A[SCI(i,j)]
                 v = op(v, f(ai))
             end
@@ -963,8 +963,8 @@ end
     else
         # pairwise portion
         jmid = ifirst.j + (ilast.j - ifirst.j) >> 1
-        v1 = mapreduce_impl(f, op, A, ifirst, SCI(K,jmid), blksize)
-        v2 = mapreduce_impl(f, op, A, SCI(1,jmid+1), ilast, blksize)
+        v1 = mapreduce_impl(f, op, A, ifirst, SCI(K-1,jmid), blksize)
+        v2 = mapreduce_impl(f, op, A, SCI(0,jmid+1), ilast, blksize)
         return op(v1, v2)
     end
 end
@@ -979,8 +979,8 @@ function _totuple(T::Type{All32{E,N}}, itr::Union{Array,Memory}) where {E,N}
     len = N + 32
     length(itr) >= len || _totuple_err(T)
     if isbitstype(E) && eltype(itr) === E
-        v = length(itr) == len ? itr : view(itr, 1:len)
-        return @inbounds reinterpret(T, v)[1]
+        v = length(itr) == len ? itr : view(itr, 0:len-1)
+        return @inbounds reinterpret(T, v)[0]
     end
     elts = collect(E, Iterators.take(itr, len))
     return (elts...,)

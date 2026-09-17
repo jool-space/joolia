@@ -433,3 +433,17 @@ module DeprecatedShadowTest
     @test (@test_nowarn Consumer.getdep()) === Src._newc
     @test !Base.isdeprecated(Consumer, :OldC)
 end
+
+# The deprecated thread-local helper stores collection elements at zero-origin positions.
+begin
+    @testset "zero-origin resize_nthreads!" begin
+        values = Any[]
+        @test Threads.resize_nthreads!(values, :seed) === values
+        @test length(values) == Threads.nthreads()
+        @test all(values[i] === :seed for i in 0:Threads.nthreads()-1)
+
+        existing = Any[:existing]
+        @test Threads.resize_nthreads!(existing) === existing
+        @test existing[0] === :existing
+    end
+end

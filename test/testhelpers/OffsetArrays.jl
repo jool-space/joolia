@@ -141,7 +141,7 @@ end
 @inline function _iterate(r::IdOffsetRange, i...)
     ret = iterate(r.parent, i...)
     ret === nothing && return nothing
-    return (eltype(r)(ret[1] + r.offset), ret[2])
+    return (eltype(r)(ret[0] + r.offset), ret[1])
 end
 # Base.OneTo(n) is known to be exactly equivalent to the range 1:n,
 # and has no specialized iteration defined for it,

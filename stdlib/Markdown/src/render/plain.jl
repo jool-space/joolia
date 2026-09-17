@@ -4,7 +4,7 @@ plain(x) = sprint(plain, x)
 
 function plain(io::IO, content::Vector)
     isempty(content) && return
-    for md in content[1:end-1]
+    for md in content[0:end-1]
         plain(io, md)
         println(io)
     end
@@ -41,14 +41,14 @@ end
 
 function plain(io::IO, list::List)
     for (i, item) in enumerate(list.items)
-        list_marker = isordered(list) ? "$(i + list.ordered - 1). " : "  * "
+        list_marker = isordered(list) ? "$(i + list.ordered). " : "  * "
         print(io, list_marker)
         content = sprint(list.loose ? plain : plaintight, item)
         lines = split(rstrip(content), "\n")
 
         for (n, line) in enumerate(lines)
-            print(io, (n == 1 || isempty(line)) ? "" : " "^length(list_marker), line)
-            n < length(lines) && println(io)
+            print(io, (n == 0 || isempty(line)) ? "" : " "^length(list_marker), line)
+            n < lastindex(lines) && println(io)
         end
         println(io)
     end
@@ -59,7 +59,7 @@ plaintight(io::IO, md::Paragraph) = plaininline(io, md.content)
 function plaintight(io::IO, content::Vector)
     for (i, md) in enumerate(content)
         plaintight(io, md)
-        i < length(content) && println(io)
+        i < lastindex(content) && println(io)
     end
 end
 
@@ -78,7 +78,7 @@ function plain(io::IO, f::Footnote)
     # Single line footnotes are printed on the same line as their label
     # rather than taking up an additional line.
     if length(lines) == 1
-        println(io, " ", lines[1])
+        println(io, " ", lines[0])
     else
         println(io)
         for line in lines
@@ -118,7 +118,7 @@ end
 # HACK TODO: instead of the following hack, we should have a `Text` node type
 function plaininline(io::IO, md...)
     for (i, el) in enumerate(md)
-        if isodd(i)
+        if iseven(i)
             @assert el isa AbstractString
             print(io, el)
         else

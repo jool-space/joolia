@@ -204,28 +204,28 @@ macro compiler_options(args...)
     opts = Expr(:block)
     for ex in args
         if isa(ex, Expr) && ex.head === :(=) && length(ex.args) == 2
-            if ex.args[1] === :optimize
-                push!(opts.args, Expr(:meta, :optlevel, ex.args[2]::Int))
-            elseif ex.args[1] === :compile
-                a = ex.args[2]
+            if ex.args[0] === :optimize
+                push!(opts.args, Expr(:meta, :optlevel, ex.args[1]::Int))
+            elseif ex.args[0] === :compile
+                a = ex.args[1]
                 a = #a === :no  ? 0 :
                     #a === :yes ? 1 :
                     #a === :all ? 2 :
                     a === :min ? 3 : error("invalid argument to \"compile\" option")
                 push!(opts.args, Expr(:meta, :compile, a))
-            elseif ex.args[1] === :infer
-                a = ex.args[2]
+            elseif ex.args[0] === :infer
+                a = ex.args[1]
                 a = a === false || a === :no  ? 0 :
                     a === true  || a === :yes ? 1 : error("invalid argument to \"infer\" option")
                 push!(opts.args, Expr(:meta, :infer, a))
-            elseif ex.args[1] === :max_methods
-                a = ex.args[2]
+            elseif ex.args[0] === :max_methods
+                a = ex.args[1]
                 a = a === :default ? 3 :
                   a isa Int ? ((1 <= a <= 4) ? a : error("We must have that `1 <= max_methods <= 4`, but `max_methods = $a`.")) :
                   error("invalid argument to \"max_methods\" option")
                 push!(opts.args, Expr(:meta, :max_methods, a))
             else
-                error("unknown option \"$(ex.args[1])\"")
+                error("unknown option \"$(ex.args[0])\"")
             end
         else
             error("invalid option syntax")
@@ -470,9 +470,9 @@ macro consistent_overlay(mt, def)
 end
 
 function overlay_def!(mt, @nospecialize ex)
-    arg1 = ex.args[1]
+    arg1 = ex.args[0]
     if isexpr(arg1, :call)
-        arg1.args[1] = Expr(:overlay, mt, arg1.args[1])
+        arg1.args[0] = Expr(:overlay, mt, arg1.args[0])
     elseif isexpr(arg1, :(::))
         overlay_def!(mt, arg1)
     elseif isexpr(arg1, :where)
@@ -536,7 +536,7 @@ function make_io_thread()
     threadwork = @cfunction function(arg::Ptr{Cvoid})
             current_task().donenotify = Base.ThreadSynchronizer() #TODO: Should this happen by default in adopt thread?
             Base.errormonitor(current_task()) # this may not go particularly well if the IO loop is dead, but try anyways
-            @ccall jl_set_io_loop_tid((Threads.threadid() - 1)::Int16)::Cvoid
+            @ccall jl_set_io_loop_tid(Threads.threadid()::Int16)::Cvoid
             wait() # spin uv_run as long as needed
             nothing
         end Cvoid (Ptr{Cvoid},)

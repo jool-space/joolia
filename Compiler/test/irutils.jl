@@ -32,15 +32,15 @@ function iscall((src, f)::Tuple{IR,Base.Callable}, @nospecialize(x)) where IR<:U
 end
 function iscall(pred::Base.Callable, @nospecialize(x))
     if isexpr(x, :(=))
-        x = x.args[2]
+        x = x.args[1]
     end
-    return isexpr(x, :call) && pred(x.args[1])
+    return isexpr(x, :call) && pred(x.args[0])
 end
 
 # check if `x` is a statically-resolved call of a function whose name is `sym`
 isinvoke(y) = @nospecialize(x) -> isinvoke(y, x)
 isinvoke(sym::Symbol, @nospecialize(x)) = isinvoke(mi->mi.def.name===sym, x)
-isinvoke(pred::Function, @nospecialize(x)) = isexpr(x, :invoke) && pred((x.args[1]::CodeInstance).def)
+isinvoke(pred::Function, @nospecialize(x)) = isexpr(x, :invoke) && pred((x.args[0]::CodeInstance).def)
 
 fully_eliminated(@nospecialize args...; retval=(@__FILE__), kwargs...) =
     fully_eliminated(code_typed1(args...; kwargs...); retval)
@@ -63,7 +63,7 @@ end
 
 let m = Meta.@lower 1 + 1
     @assert isexpr(m, :thunk)
-    orig_src = m.args[1]::CodeInfo
+    orig_src = m.args[0]::CodeInfo
     global function make_codeinfo(code::Vector{Any};
                                   ssavaluetypes::Union{Nothing,Vector{Any}}=nothing,
                                   slottypes::Union{Nothing,Vector{Any}}=nothing,

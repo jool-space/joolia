@@ -1,0 +1,57 @@
+--- a/src/adjtrans.jl
++++ b/src/adjtrans.jl
+@@ -339,14 +339,14 @@
+ length(A::AdjOrTrans) = length(A.parent)
+ size(v::AdjOrTransAbsVec) = (1, length(v.parent))
+ size(A::AdjOrTransAbsMat) = reverse(size(A.parent))
+-axes(v::AdjOrTransAbsVec) = (axes(v.parent,2), axes(v.parent)...)
++axes(v::AdjOrTransAbsVec) = (axes(v.parent,1), axes(v.parent)...)
+ axes(A::AdjOrTransAbsMat) = reverse(axes(A.parent))
+ IndexStyle(::Type{<:AdjOrTransAbsVec}) = IndexLinear()
+-@propagate_inbounds Base.isassigned(v::AdjOrTransAbsVec, i::Int) = isassigned(v.parent, i-1+first(axes(v.parent)[1]))
++@propagate_inbounds Base.isassigned(v::AdjOrTransAbsVec, i::Int) = isassigned(v.parent, i+first(axes(v.parent)[0]))
+ @propagate_inbounds Base.isassigned(v::AdjOrTransAbsMat, i::Int, j::Int) = isassigned(v.parent, j, i)
+-@propagate_inbounds getindex(v::AdjOrTransAbsVec{T}, i::Int) where {T} = wrapperop(v)(v.parent[i-1+first(axes(v.parent)[1])])::T
++@propagate_inbounds getindex(v::AdjOrTransAbsVec{T}, i::Int) where {T} = wrapperop(v)(v.parent[i+first(axes(v.parent)[0])])::T
+ @propagate_inbounds getindex(A::AdjOrTransAbsMat{T}, i::Int, j::Int) where {T} = wrapperop(A)(A.parent[j, i])::T
+-@propagate_inbounds setindex!(v::AdjOrTransAbsVec, x, i::Int) = (setindex!(v.parent, _wrapperop(v)(x), i-1+first(axes(v.parent)[1])); v)
++@propagate_inbounds setindex!(v::AdjOrTransAbsVec, x, i::Int) = (setindex!(v.parent, _wrapperop(v)(x), i+first(axes(v.parent)[0])); v)
+ @propagate_inbounds setindex!(A::AdjOrTransAbsMat, x, i::Int, j::Int) = (setindex!(A.parent, _wrapperop(A)(x), j, i); A)
+ # AbstractArray interface, additional definitions to retain wrapper over vectors where appropriate
+ @propagate_inbounds getindex(v::AdjOrTransAbsVec, ::Colon, is::AbstractArray{Int}) = wrapperop(v)(v.parent[is])
+--- a/test/adjtrans.jl
++++ b/test/adjtrans.jl
+@@ -878,4 +878,33 @@
+     end
+ end
+ 
++# Vector row wrappers must expose zero-origin axes and preserve conjugation.
++@testset "zero-origin vector row wrappers" begin
++    for op in (transpose, adjoint), values in ([2, 3, 5], ComplexF64[2+im, 3-2im, 5+3im])
++        v = copy(values)
++        row = op(v)
++        @test size(row) == (1, 3)
++        @test axes(row) == (Base.ZeroTo(1), Base.ZeroTo(3))
++        for i in eachindex(v)
++            @test row[0, i] == op(v[i])
++            @test row[i] == op(v[i])
++            @test isassigned(row, 0, i)
++        end
++        @test !isassigned(row, 1, 0)
++        @test !isassigned(row, 0, 3)
++        @test_throws BoundsError row[0, 3]
++        row[0, 0] = 7
++        @test v[0] == 7
++        row[2] = op(values[0])
++        @test v[2] == values[0]
++        @test !isempty(sprint(show, MIME"text/plain"(), row))
++    end
++    for op in (transpose, adjoint)
++        row = op(Int[])
++        @test size(row) == (1, 0)
++        @test axes(row) == (Base.ZeroTo(1), Base.ZeroTo(0))
++        @test !isassigned(row, 0, 0)
++    end
++end
++
+ end # module TestAdjointTranspose

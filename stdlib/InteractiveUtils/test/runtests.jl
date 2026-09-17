@@ -152,7 +152,7 @@ let a = @code_typed 1 + 1
     b = @code_lowered 1 + 1
     @test isa(a, Pair{Core.CodeInfo, DataType})
     @test isa(b, Core.CodeInfo)
-    @test isa(a[1].code, Array{Any,1})
+    @test isa(a[0].code, Array{Any,1})
     @test isa(b.code, Array{Any,1})
 
     function thing(a::Array, b::Real)
@@ -205,7 +205,7 @@ let v = repr(varinfo(_test_varinfo_, all = true))
     @test occursin("x_exported", v)
     @test occursin("y_not_exp", v)
     @test !occursin("@test", v)
-    @test findfirst("a_smaller", v)[1] < findfirst("z_larger", v)[1] # check for alphabetical
+    @test findfirst("a_smaller", v)[0] < findfirst("z_larger", v)[0] # check for alphabetical
     @test !occursin("inner_x", v)
 end
 let v = repr(varinfo(_test_varinfo_, imported = true))
@@ -215,10 +215,10 @@ let v = repr(varinfo(_test_varinfo_, imported = true))
     @test !occursin("inner_x", v)
 end
 let v = repr(varinfo(_test_varinfo_, all = true, sortby = :size))
-    @test findfirst("z_larger", v)[1] < findfirst("a_smaller", v)[1] # check for size order
+    @test findfirst("z_larger", v)[0] < findfirst("a_smaller", v)[0] # check for size order
 end
 let v = repr(varinfo(_test_varinfo_, sortby = :summary))
-    @test findfirst("Float64", v)[1] < findfirst("Module", v)[1] # check for summary order
+    @test findfirst("Float64", v)[0] < findfirst("Module", v)[0] # check for summary order
 end
 let v = repr(varinfo(_test_varinfo_, all = true, recursive = true))
     @test occursin("inner_x", v)
@@ -252,7 +252,7 @@ end
         buf = PipeBuffer()
         versioninfo(buf, verbose=true)
         ver = read(buf, String)
-        @test startswith(ver, "Julia Version $VERSION")
+        @test startswith(ver, "joolia Version $VERSION")
         @test occursin("Environment:", ver)
 
         let exename = `$(Base.julia_cmd()) --startup-file=no`,
@@ -309,15 +309,15 @@ end
 
 let w = Vector{Any}(undef, 9)
     @testset "@which x^literal" begin
-        w[1] = @which 2^0
-        w[2] = @which 2^1
-        w[3] = @which 2^2
-        w[4] = @which 2^3
-        w[5] = @which 2^-1
-        w[6] = @which 2^-2
-        w[7] = @which 2^10
-        w[8] = @which big(2.0)^1
-        w[9] = @which big(2.0)^-1
+        w[0] = @which 2^0
+        w[1] = @which 2^1
+        w[2] = @which 2^2
+        w[3] = @which 2^3
+        w[4] = @which 2^-1
+        w[5] = @which 2^-2
+        w[6] = @which 2^10
+        w[7] = @which big(2.0)^1
+        w[8] = @which big(2.0)^-1
         @test all(getproperty.(w, :name) .=== :literal_pow)
         @test length(Set(w)) == length(w) # all methods distinct
     end
@@ -412,40 +412,40 @@ end
         @test (@which round(::Float64; digits=3)).name === :round
         @test (@which round(1.2; digits = ::Int)).name === :round
         @test (@which round(1.2; digits::Int)).name === :round
-        @test (@code_typed round(::T; digits = ::T) where {T<:Float64})[2] === Union{}
-        @test (@code_typed round(::T; digits = ::T) where {T<:Int})[2] === Float64
+        @test (@code_typed round(::T; digits = ::T) where {T<:Float64})[1] === Union{}
+        @test (@code_typed round(::T; digits = ::T) where {T<:Int})[1] === Float64
         base = 10
         kwargs_1 = (; digits = 3)
         kwargs_2 = (; sigdigits = 3)
         @test (@which round(1.2; kwargs_1...)).name === :round
         @test (@which round(1.2; digits = 1, kwargs_1...)).name === :round
-        @test (@code_typed round(1.2; digits = ::Float64, kwargs_1...))[2] === Float64 # picks `3::Int` from `kwargs_1`
-        @test (@code_typed round(1.2; kwargs_1..., digits = ::Float64))[2] === Union{} # picks `::Float64` from parameters
+        @test (@code_typed round(1.2; digits = ::Float64, kwargs_1...))[1] === Float64 # picks `3::Int` from `kwargs_1`
+        @test (@code_typed round(1.2; kwargs_1..., digits = ::Float64))[1] === Union{} # picks `::Float64` from parameters
         @test (@which round(1.2; digits = ::Float64, kwargs_1...)).name === :round
         @test (@which round(1.2; sigdigits = ::Int, kwargs_1...)).name === :round
         @test (@which round(1.2; kwargs_1..., kwargs_2..., base)).name === :round
     end
 
     @testset "Broadcasting" begin
-        @test (@code_typed optimize=false round.([1.0, 2.0]; digits = ::Int64))[2] == Vector{Float64}
-        @test (@code_typed optimize=false round.(::Vector{Float64}, base = 2; digits = ::Int64))[2] == Vector{Float64}
-        @test (@code_typed optimize=false round.(base = ::Int64, ::Vector{Float64}; digits = ::Int64))[2] == Vector{Float64}
-        @test (@code_typed optimize=false [1, 2] .= ::Int)[2] == Vector{Int}
-        @test (@code_typed optimize=false ::Vector{Int} .= ::Int)[2] == Vector{Int}
-        @test (@code_typed optimize=false ::Vector{Float64} .= 1 .+ ::Vector{Int})[2] == Vector{Float64}
-        @test (@code_typed optimize=false ::Vector{Float64} .= 1 .+ round.(base = ::Int, ::Vector{Int}; digits = 3))[2] == Vector{Float64}
+        @test (@code_typed optimize=false round.([1.0, 2.0]; digits = ::Int64))[1] == Vector{Float64}
+        @test (@code_typed optimize=false round.(::Vector{Float64}, base = 2; digits = ::Int64))[1] == Vector{Float64}
+        @test (@code_typed optimize=false round.(base = ::Int64, ::Vector{Float64}; digits = ::Int64))[1] == Vector{Float64}
+        @test (@code_typed optimize=false [1, 2] .= ::Int)[1] == Vector{Int}
+        @test (@code_typed optimize=false ::Vector{Int} .= ::Int)[1] == Vector{Int}
+        @test (@code_typed optimize=false ::Vector{Float64} .= 1 .+ ::Vector{Int})[1] == Vector{Float64}
+        @test (@code_typed optimize=false ::Vector{Float64} .= 1 .+ round.(base = ::Int, ::Vector{Int}; digits = 3))[1] == Vector{Float64}
     end
 
     @testset "Callable objects" begin
-        @test (@code_typed (::Base.Fix2{typeof(+), Float64})(3))[2] === Float64
-        @test (@code_typed optimize=false (::Returns{Float64})(::Int64; name::String))[2] === Float64
-        @test (@code_typed (::Returns{T})(3.0) where {T<:Real})[2] === Real
+        @test (@code_typed (::Base.Fix2{typeof(+), Float64})(3))[1] === Float64
+        @test (@code_typed optimize=false (::Returns{Float64})(::Int64; name::String))[1] === Float64
+        @test (@code_typed (::Returns{T})(3.0) where {T<:Real})[1] === Real
     end
 
     @testset "Opaque closures" begin
         opaque_f(@nospecialize(x::Type), @nospecialize(y::Type)) = sizeof(x) == sizeof(y)
         src, _ = only(code_typed(opaque_f, (Type, Type)))
-        src.slottypes[1] = Tuple{}
+        src.slottypes[0] = Tuple{}
 
         # from CodeInfo
         oc = Core.OpaqueClosure(src; sig = Tuple{Type, Type}, rettype = Bool, nargs = 2)
@@ -470,15 +470,15 @@ end
         @test_throws "Inconsistent type `Float64`" @eval @code_typed +(1, 2, 3, 4::Vararg{Int}, ::Float64)
         @test_throws "Inconsistent type `Any`" @eval @code_typed +(1, 2, 3, 4::Vararg{Int}, ::Any)
         @test_throws r"at most 2 types .* found 3 instead" @eval @code_typed +(1, 2, 3, 4::Vararg{Int,2}, 5, 6)
-        @test (@code_typed +(1, 2, 3, 4::Vararg{Int}))[2] === Int
-        @test (@code_typed +(1, 2, 3, 4::Vararg{Int}, 5))[2] === Int
-        @test (@code_typed +(1, 2, 3, 4::Vararg{Int, 3}))[2] === Int
-        @test (@code_typed +(1, 2, 3, 4::Vararg{Int, 3}, 5))[2] === Int
-        @test (@code_typed +(1, 2, 3, 4::Vararg{Int, 3}, 5, 6))[2] === Int
-        @test (@code_typed +(1, 2, 3, 4::Vararg))[2] === Any
-        @test (@code_typed +(1, 2, 3, 4::Vararg, 5.0))[2] === Any
-        @test (@code_typed +(1, 2, 3, ::Int...))[2] === Int
-        @test (@code_typed +(1, 2, 3, ::Int..., 5))[2] === Int
+        @test (@code_typed +(1, 2, 3, 4::Vararg{Int}))[1] === Int
+        @test (@code_typed +(1, 2, 3, 4::Vararg{Int}, 5))[1] === Int
+        @test (@code_typed +(1, 2, 3, 4::Vararg{Int, 3}))[1] === Int
+        @test (@code_typed +(1, 2, 3, 4::Vararg{Int, 3}, 5))[1] === Int
+        @test (@code_typed +(1, 2, 3, 4::Vararg{Int, 3}, 5, 6))[1] === Int
+        @test (@code_typed +(1, 2, 3, 4::Vararg))[1] === Any
+        @test (@code_typed +(1, 2, 3, 4::Vararg, 5.0))[1] === Any
+        @test (@code_typed +(1, 2, 3, ::Int...))[1] === Int
+        @test (@code_typed +(1, 2, 3, ::Int..., 5))[1] === Int
         # We just ignore the checks with `where` parameters for simplicity of implementation.
         @test isa((@code_typed +(::T, ::Vararg{T}, ::T) where {T}), Vector{Any})
         @test isa((@code_typed +(::T, ::Vararg{T}, ::Float64) where {T<:Real}), Vector{Any})
@@ -500,9 +500,9 @@ end # module
 (; var"@escape_argument", var"@escape_type_annotation", var"@escape_all") = HygieneTest
 @testset "Macro hygiene interactions" begin
     _f = sum
-    @test (@escape_argument _f(Int[]))[2] == Float64
-    @test (@escape_type_annotation _f(Int[]))[2] == Int
-    @test (@escape_all _f(Int[]))[2] == Int
+    @test (@escape_argument _f(Int[]))[1] == Float64
+    @test (@escape_type_annotation _f(Int[]))[1] == Int
+    @test (@escape_all _f(Int[]))[1] == Int
 end
 
 module MacroTest
@@ -611,9 +611,9 @@ end
 A33163(x; y) = x + y
 B33163(x) = x
 let
-    (@code_typed A33163(1, y=2))[1]
-    (@code_typed optimize=false A33163(1, y=2))[1]
-    (@code_typed optimize=false B33163(1))[1]
+    (@code_typed A33163(1, y=2))[0]
+    (@code_typed optimize=false A33163(1, y=2))[0]
+    (@code_typed optimize=false B33163(1))[0]
 end
 
 @test_throws MethodError (@code_lowered wrongkeyword=true 3 + 4)
@@ -621,34 +621,34 @@ end
 # Issue #14637
 @test (@which Base.Base.Base.nothing) == Core
 @test_throws ErrorException (@functionloc Base.nothing)
-@test (@code_typed (3//4).num)[2] == Int
+@test (@code_typed (3//4).num)[1] == Int
 
 struct A14637
     x
 end
 a14637 = A14637(0)
 @test (@which a14637.x).name === :getproperty
-@test (@functionloc a14637.x)[2] isa Integer
+@test (@functionloc a14637.x)[1] isa Integer
 
 # Issue #28615
 @test_throws ErrorException (@which [1, 2] .+ [3, 4])
-@test (@code_typed optimize=true max.([1,7], UInt.([4])))[2] == Vector{UInt}
-@test (@code_typed Ref.([1,2])[1].x)[2] == Int
-@test (@code_typed max.(Ref(true).x))[2] == Bool
-@test (@code_typed optimize=false round.([1.0, 2.0]; digits = 3))[2] == Vector{Float64}
-@test (@code_typed optimize=false round.([1.0, 2.0], base = 2; digits = 3))[2] == Vector{Float64}
-@test (@code_typed optimize=false round.(base = 2, [1.0, 2.0], digits = 3))[2] == Vector{Float64}
-@test (@code_typed optimize=false [1, 2] .= 2)[2] == Vector{Int}
-@test (@code_typed optimize=false [1, 2] .<<= 2)[2] == Vector{Int}
-@test (@code_typed optimize=false [1, 2.0] .= 1 .+ [2, 3])[2] == Vector{Float64}
-@test (@code_typed optimize=false [1, 2.0] .= 1 .+ round.(base = 1, [1, 3]; digits = 3))[2] == Vector{Float64}
-@test (@code_typed optimize=false [1] .+ [2])[2] == Vector{Int}
+@test (@code_typed optimize=true max.([1,7], UInt.([4])))[1] == Vector{UInt}
+@test (@code_typed Ref.([1,2])[0].x)[1] == Int
+@test (@code_typed max.(Ref(true).x))[1] == Bool
+@test (@code_typed optimize=false round.([1.0, 2.0]; digits = 3))[1] == Vector{Float64}
+@test (@code_typed optimize=false round.([1.0, 2.0], base = 2; digits = 3))[1] == Vector{Float64}
+@test (@code_typed optimize=false round.(base = 2, [1.0, 2.0], digits = 3))[1] == Vector{Float64}
+@test (@code_typed optimize=false [1, 2] .= 2)[1] == Vector{Int}
+@test (@code_typed optimize=false [1, 2] .<<= 2)[1] == Vector{Int}
+@test (@code_typed optimize=false [1, 2.0] .= 1 .+ [2, 3])[1] == Vector{Float64}
+@test (@code_typed optimize=false [1, 2.0] .= 1 .+ round.(base = 1, [1, 3]; digits = 3))[1] == Vector{Float64}
+@test (@code_typed optimize=false [1] .+ [2])[1] == Vector{Int}
 @test !isempty(@code_typed optimize=false max.(Ref.([5, 6])...))
 expansion = string(@macroexpand @code_typed optimize=false max.(Ref.([5, 6])...))
 @test contains(expansion, "(x1) =") # presence of wrapper function
 # Make sure broadcasts in nested arguments are not processed.
 v = Any[1]
-expansion = string(@macroexpand @code_typed v[1] = rand.(Ref(1)))
+expansion = string(@macroexpand @code_typed v[0] = rand.(Ref(1)))
 @test contains(expansion, "Core.Typeof(rand.(Ref(1)))")
 @test !contains(expansion, "(x1) =")
 
@@ -660,13 +660,13 @@ expansion = string(@macroexpand @code_typed v[1] = rand.(Ref(1)))
 @test !isempty(@code_typed optimize=false (.- 0.5))
 
 # Issue #36261
-@test (@code_typed max.(1 .+ 3, 5 - 7))[2] == Int
+@test (@code_typed max.(1 .+ 3, 5 - 7))[1] == Int
 f36261(x,y) = 3x + 4y
 A36261 = Float64[1.0, 2.0, 3.0]
 let
-    @code_typed f36261.(A36261, pi)[1]
-    @code_typed f36261.(A36261, 1 .+ pi)[1]
-    @code_typed f36261.(A36261, 1 + pi)[1]
+    @code_typed f36261.(A36261, pi)[0]
+    @code_typed f36261.(A36261, 1 .+ pi)[0]
+    @code_typed f36261.(A36261, 1 + pi)[0]
 end
 
 module ReflectionTest
@@ -872,7 +872,7 @@ file, ln = functionloc(Core.Compiler.tmeet, Tuple{Int, Float64})
     m = @which versioninfo()
     s = sprint(showerror, e)
     m = match(Regex("@ .+ (.*?):$(m.line)"), s)
-    @test isfile(expanduser(m.captures[1]))
+    @test isfile(expanduser(m.captures[0]))
 
     g() = x
     e, bt = try code_llvm(g, Tuple{Int})
@@ -882,7 +882,7 @@ file, ln = functionloc(Core.Compiler.tmeet, Tuple{Int, Float64})
     @test e isa Exception
     s = sprint(showerror, e, bt)
     m = match(r"(\S*InteractiveUtils[\/\\]src\S*):", s)
-    @test isfile(expanduser(m.captures[1]))
+    @test isfile(expanduser(m.captures[0]))
 end
 
 @testset "Issue #34434" begin
@@ -900,7 +900,7 @@ end
     export B41010
 
     ms = methodswith(A41010, @__MODULE__) |> collect
-    @test ms[1].name === :B41010
+    @test ms[0].name === :B41010
 end
 
 # macro options should accept both literals and variables
@@ -1016,9 +1016,9 @@ let # specifying calls as argtypes (incl. arg0) should be supported
 end
 
 @testset "code_llvm on opaque_closure" begin
-    let ci = code_typed(+, (Int, Int))[1][1]
+    let ci = code_typed(+, (Int, Int))[0][0]
         ir = Core.Compiler.inflate_ir(ci)
-        ir.argtypes[1] = Tuple{}
+        ir.argtypes[0] = Tuple{}
         @test ir.debuginfo.def === nothing
         ir.debuginfo.def = Symbol(@__FILE__)
         oc = Core.OpaqueClosure(ir)

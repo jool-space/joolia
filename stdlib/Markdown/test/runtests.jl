@@ -109,15 +109,15 @@ end
     """
     md = Markdown.parse(text)
     @test length(md) == 4
-    @test isa(md[1], Markdown.Paragraph)
+    @test isa(md[0], Markdown.Paragraph)
+    @test isa(md[1], Markdown.Footnote)
     @test isa(md[2], Markdown.Footnote)
-    @test isa(md[3], Markdown.Footnote)
-    @test isa(md[4], Markdown.Paragraph)
+    @test isa(md[3], Markdown.Paragraph)
 
-    @test md[2].id == "1"
-    @test md[3].id == "note"
+    @test md[1].id == "1"
+    @test md[2].id == "note"
 
-    @test length(md[3].text) == 5
+    @test length(md[2].text) == 5
 
     expected =
             """
@@ -189,11 +189,11 @@ end
     2. ninja
     3. zombie"""
     @test typeof.(doc) == [Markdown.List, Markdown.List]
-    @test doc[1].items[1][1].content[1] == "one"
-    @test doc[1].items[2][1].content[1] == "two"
-    @test doc[2].items[1][1].content[1] == "pirate"
-    @test doc[2].items[2][1].content[1] == "ninja"
-    @test doc[2].items[3][1].content[1] == "zombie"
+    @test doc[0].items[0][0].content[0] == "one"
+    @test doc[0].items[1][0].content[0] == "two"
+    @test doc[1].items[0][0].content[0] == "pirate"
+    @test doc[1].items[1][0].content[0] == "ninja"
+    @test doc[1].items[2][0].content[0] == "zombie"
 
     doc = Markdown.parse(
         """
@@ -207,15 +207,15 @@ end
     )
     @test typeof.(doc) == [Markdown.Paragraph, Markdown.List, Markdown.Paragraph]
 
-    @test length(doc[2].items) === 2
-    @test doc[2].items[1][1].content[1] == "one"
-    @test length(doc[2].items[2]) == 2
-    @test doc[2].items[2][1].content[1] == "two"
+    @test length(doc[1].items) === 2
+    @test doc[1].items[0][0].content[0] == "one"
+    @test length(doc[1].items[1]) == 2
+    @test doc[1].items[1][0].content[0] == "two"
 
-    @test isa(doc[2].items[2][2], Markdown.List)
-    @test length(doc[2].items[2][2].items) === 2
-    @test doc[2].items[2][2].items[1][1].content[1] == "three"
-    @test doc[2].items[2][2].items[2][1].content[1] == "four"
+    @test isa(doc[1].items[1][1], Markdown.List)
+    @test length(doc[1].items[1][1].items) === 2
+    @test doc[1].items[1][1].items[0][0].content[0] == "three"
+    @test doc[1].items[1][1].items[1][0].content[0] == "four"
 end
 
 @testset "Links" begin
@@ -300,7 +300,7 @@ end
     function test_list_wrap(str, lenmin, lenmax)
         strs = rstrip.(split(str, '\n'))
         l = length.(strs)
-        for i = 1:length(l)-1
+        for i = 0:length(l)-2
             if l[i] != 0 && l[i+1] != 0    # the next line isn't blank, so this line should be "full"
                 lenmin <= l[i] <= lenmax || return false
             else
@@ -314,12 +314,12 @@ end
         labelends = findfirst.((r"[.•–▪] ",), strs)
         # sanity checks: label end locations must be either equal or separated by at least one char
         sorted_labels = unique(sort(filter(!isnothing, labelends)))
-        for i in 1:length(sorted_labels)-1
+        for i in 0:length(sorted_labels)-2
             first(sorted_labels[i]) + 1 < first(sorted_labels[i+1]) || return false
         end
 
         # next check that after each label / bullet the following lines have the right indent
-        k = first(labelends[1])+1
+        k = first(labelends[0])+2
         rex = Regex('^' * " "^k * "\\w")
         for (i, le) in enumerate(labelends)
             if le === nothing
@@ -327,7 +327,7 @@ end
                 (isempty(strs[i]) || match(rex, strs[i]) !== nothing) || return false
             else
                 # determine indent for following lines
-                k = first(le)+1
+                k = first(le)+2
                 rex = Regex('^' * " "^k * "\\w")
             end
         end
@@ -839,41 +839,41 @@ end
 
     # Content Tests.
 
+    @test isa(m_1[1], Markdown.Admonition)
+    @test m_1[1].category == "note"
+    @test m_1[1].title == "Note"
+    @test m_1[1].content == []
+
     @test isa(m_1[2], Markdown.Admonition)
-    @test m_1[2].category == "note"
-    @test m_1[2].title == "Note"
+    @test m_1[2].category == "warning"
+    @test m_1[2].title == "custom title"
     @test m_1[2].content == []
 
-    @test isa(m_1[3], Markdown.Admonition)
-    @test m_1[3].category == "warning"
-    @test m_1[3].title == "custom title"
-    @test m_1[3].content == []
+    @test isa(m_1[4], Markdown.Admonition)
+    @test m_1[4].category == "danger"
+    @test m_1[4].title == ""
+    @test m_1[4].content == []
 
-    @test isa(m_1[5], Markdown.Admonition)
-    @test m_1[5].category == "danger"
-    @test m_1[5].title == ""
-    @test m_1[5].content == []
+    @test isa(m_1[5], Markdown.Paragraph)
 
-    @test isa(m_1[6], Markdown.Paragraph)
+    @test isa(m_2[0], Markdown.Admonition)
+    @test m_2[0].category == "note"
+    @test m_2[0].title == "Note"
+    @test isa(m_2[0].content[0], Markdown.Paragraph)
+    @test isa(m_2[0].content[1], Markdown.Paragraph)
 
     @test isa(m_2[1], Markdown.Admonition)
-    @test m_2[1].category == "note"
-    @test m_2[1].title == "Note"
+    @test m_2[1].category == "warning"
+    @test m_2[1].title == "custom title"
+    @test isa(m_2[1].content[0], Markdown.List)
     @test isa(m_2[1].content[1], Markdown.Paragraph)
-    @test isa(m_2[1].content[2], Markdown.Paragraph)
 
     @test isa(m_2[2], Markdown.Admonition)
-    @test m_2[2].category == "warning"
-    @test m_2[2].title == "custom title"
-    @test isa(m_2[2].content[1], Markdown.List)
-    @test isa(m_2[2].content[2], Markdown.Paragraph)
-
-    @test isa(m_2[3], Markdown.Admonition)
-    @test m_2[3].category == "danger"
-    @test m_2[3].title == ""
-    @test isa(m_2[3].content[1], Markdown.Code)
-    @test isa(m_2[3].content[2], Markdown.Code)
-    @test isa(m_2[3].content[3], Markdown.Header{1})
+    @test m_2[2].category == "danger"
+    @test m_2[2].title == ""
+    @test isa(m_2[2].content[0], Markdown.Code)
+    @test isa(m_2[2].content[1], Markdown.Code)
+    @test isa(m_2[2].content[2], Markdown.Header{1})
 
     # Rendering Tests.
     actual = Markdown.plain(m_1)
@@ -1048,20 +1048,20 @@ end
     # Content and structure tests.
 
     @test typeof.(md) == [Markdown.List, Markdown.List, Paragraph, Markdown.List, Markdown.List, Markdown.List]
+    @test length(md[0].items) == 1
+    @test typeof.(md[0].items[0]) == [Markdown.Paragraph, Markdown.Code, Markdown.BlockQuote]
     @test length(md[1].items) == 1
-    @test typeof.(md[1].items[1]) == [Markdown.Paragraph, Markdown.Code, Markdown.BlockQuote]
-    @test length(md[2].items) == 1
-    @test isa(md[2].items[1][1], Markdown.Paragraph)
-    @test isa(md[3], Markdown.Paragraph)
-    @test length(md[4].items) == 2
-    @test typeof.(md[4].items[1]) == [Paragraph, Paragraph]
-    @test typeof.(md[4].items[2]) == [Paragraph]
-    @test length(md[5].items) == 1
-    @test typeof.(md[5].items[1]) == [Code]
-    @test length(md[6].items) == 3
-    @test md[6].items[1][1].content[1] == "foo"
-    @test md[6].items[2][1].content[1] == "bar"
-    @test md[6].items[3][1].content[1] == "baz"
+    @test isa(md[1].items[0][0], Markdown.Paragraph)
+    @test isa(md[2], Markdown.Paragraph)
+    @test length(md[3].items) == 2
+    @test typeof.(md[3].items[0]) == [Paragraph, Paragraph]
+    @test typeof.(md[3].items[1]) == [Paragraph]
+    @test length(md[4].items) == 1
+    @test typeof.(md[4].items[0]) == [Code]
+    @test length(md[5].items) == 3
+    @test md[5].items[0][0].content[0] == "foo"
+    @test md[5].items[1][0].content[0] == "bar"
+    @test md[5].items[2][0].content[0] == "baz"
 
     # Rendering tests.
     expected =
@@ -1184,8 +1184,8 @@ end
     md = Markdown.parse(text)
 
     @test typeof.(md) == [Markdown.List, Markdown.List]
-    @test md[1].ordered == 42
-    @test md[2].ordered == -1
+    @test md[0].ordered == 42
+    @test md[1].ordered == -1
 
     expected =
             """
@@ -1251,7 +1251,7 @@ end
 
     word = "Markdown" # disable underline when wrapping lines
     buf = IOBuffer()
-    ctx = IOContext(buf, :color => true, :displaysize => (displaysize(buf)[1], length(word)))
+    ctx = IOContext(buf, :color => true, :displaysize => (displaysize(buf)[0], length(word)))
     long_italic_text = Markdown.parse('_' * join(fill(word, 10), ' ') * '_')
     show(ctx, MIME("text/plain"), long_italic_text)
     lines = split(String(take!(buf)), '\n')
@@ -1260,7 +1260,7 @@ end
 
     word = "Markdown" # pre is of size Markdown.margin when wrapping title
     buf = IOBuffer()
-    ctx = IOContext(buf, :color => true, :displaysize => (displaysize(buf)[1], length(word)))
+    ctx = IOContext(buf, :color => true, :displaysize => (displaysize(buf)[0], length(word)))
     long_title = Markdown.parse("# " * join(fill(word, 3)))
     show(ctx, MIME("text/plain"), long_title)
     lines = split(String(take!(buf)), '\n')
@@ -1275,7 +1275,7 @@ end
         print(io, Base.text_colors[:underline], "Struct 49454()", Base.text_colors[:normal])
 
     buf = IOBuffer()
-    ctx = IOContext(buf, :color => true, :displaysize => (displaysize(buf)[1], 10))
+    ctx = IOContext(buf, :color => true, :displaysize => (displaysize(buf)[0], 10))
     show(ctx, MIME("text/plain"), md"""
     text without $(Struct49454()) underline.
     """)
@@ -1357,9 +1357,9 @@ end
     @test typeof.(md) == [Markdown.Paragraph, Markdown.List,
                           Markdown.Paragraph, Markdown.List,
                           Markdown.Paragraph, Markdown.List]
-    @test md[2].loose
-    @test md[4].loose
-    @test !md[6].loose
+    @test md[1].loose
+    @test md[3].loose
+    @test !md[5].loose
 end
 
 @testset "issue #29995" begin
@@ -1722,11 +1722,11 @@ end
 
     @test !isempty(md)
     @test length(md) == 5
-    @test firstindex(md) == 1
-    @test lastindex(md) == 5
-    @test md[4] isa Markdown.HorizontalRule  # getindex!
-    md[4] = hr  # setindex!
-    @test md[4] === hr
+    @test firstindex(md) == 0
+    @test lastindex(md) == 4
+    @test md[3] isa Markdown.HorizontalRule  # getindex!
+    md[3] = hr  # setindex!
+    @test md[3] === hr
     # broadcast via iteration
     @test typeof.(md) == [Markdown.Header{1}, Markdown.Paragraph, Markdown.List, Markdown.HorizontalRule, Markdown.Paragraph]
     @test Base.IteratorSize(md) == Base.HasLength()
@@ -1735,9 +1735,9 @@ end
     push!(md, hr)
     @test !isempty(md)
     @test length(md) == 6
-    @test firstindex(md) == 1
-    @test lastindex(md) == 6
-    @test md[6] === hr
+    @test firstindex(md) == 0
+    @test lastindex(md) == 5
+    @test md[5] === hr
     @test typeof.(md) == [Markdown.Header{1}, Markdown.Paragraph, Markdown.List, Markdown.HorizontalRule, Markdown.Paragraph, Markdown.HorizontalRule]
 end
 
@@ -1774,9 +1774,9 @@ end
     8<BR />
     """)
 
-    @test length(md[1].content) == 16
-    @test all(i -> md[1].content[i] isa LineBreak, 2:2:16)
-    @test all(i -> md[1].content[i] isa String, 1:2:15)
+    @test length(md[0].content) == 16
+    @test all(i -> md[0].content[i] isa LineBreak, 1:2:15)
+    @test all(i -> md[0].content[i] isa String, 0:2:14)
 
 end
 
@@ -1787,3 +1787,34 @@ include("test_spec_roundtrip_julia.jl")
 include("test_spec_html_common.jl")
 include("test_spec_html_github.jl")
 include("test_spec_html_julia.jl")
+
+# Terminal rendering preserves the first character, line boundaries, and annotation spans.
+@testset "zero-origin terminal rendering" begin
+    wrap(s, n=80) = String.(Markdown.wraplines(Base.AnnotatedString(s), n))
+    @test wrap("") == String[]
+    @test wrap("abc") == ["abc"]
+    @test wrap("éβ") == ["éβ"]
+    @test wrap("a\nb") == ["a", "b"]
+    @test wrap("a\n") == ["a"]
+    @test wrap("abc def", 4) == ["abc", "def"]
+    @test wrap(" abc", 2) == ["", "abc"]
+    @test Markdown.cols(IOContext(IOBuffer(), :displaysize => (24, 80))) == 80
+    @test sprint(Markdown.term, Markdown.Paragraph(["abc"]), 80) == "  abc"
+    @test sprint(Markdown.term, Markdown.Paragraph(["abc def"]), 8) == "  abc\n  def"
+    @test sprint(Markdown.term, Markdown.parse("1. abc\n2. def"), 80) == "  1. abc\n  2. def"
+    aio = Base.AnnotatedIOBuffer()
+    Markdown.with_output_annotations(io -> print(io, "éa"), aio, :x => 1)
+    @test Base.annotations(aio) == [(region=0:2, label=:x, value=1)]
+    Markdown.with_output_annotations(io -> print(io, "b"), aio, :y => 2)
+    @test Base.annotations(aio)[1] == (region=3:3, label=:y, value=2)
+    @test String(read(seekstart(aio), Base.AnnotatedString)) == "éab"
+end
+
+# Zero-origin enumeration must not add a second newline after the final list line.
+@testset "zero-origin plain lists and warnings" begin
+    items = Any[Any[Markdown.Paragraph(Any["first"])], Any[Markdown.Paragraph(Any["second"])]]
+    @test Markdown.plain(Markdown.List(items, -1, false)) == "  * first\n  * second\n"
+    @test Markdown.plain(Markdown.List(items, 1, false)) == "1. first\n2. second\n"
+    warning = Markdown.Admonition("warning", "Warning", Any[Markdown.Paragraph(Any["text"])])
+    @test Markdown.plain(warning) == "!!! warning\n    text\n\n"
+end

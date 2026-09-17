@@ -141,18 +141,18 @@ function handle_message(logger::ConsoleLogger, level::LogLevel, message, _module
     nkwargs = length(kwargs)::Int
     if nkwargs > hasmaxlog
         valbuf = IOBuffer()
-        rows_per_value = max(1, dsize[1] ÷ (nkwargs + 1 - hasmaxlog))
+        rows_per_value = max(1, dsize[0] ÷ (nkwargs + 1 - hasmaxlog))
         valio = IOContext(IOContext(valbuf, stream),
                           :limit => logger.show_limited)
         for (key, val) in kwargs
             key === :maxlog && continue
             keyio = IOContext(valio,
                               :displaysize => (rows_per_value,
-                                               dsize[2] - 7 - textwidth(string(key))))
+                                               dsize[1] - 7 - textwidth(string(key))))
             showvalue(keyio, val)
             vallines = split(takestring!(valbuf), '\n')
             if length(vallines) == 1
-                push!(msglines, (indent=2, msg=SubString("$key = $(vallines[1])")))
+                push!(msglines, (indent=2, msg=SubString("$key = $(vallines[0])")))
             else
                 push!(msglines, (indent=2, msg=SubString("$key =")))
                 append!(msglines, ((indent=3, msg=line) for line in vallines))
@@ -169,7 +169,7 @@ function handle_message(logger::ConsoleLogger, level::LogLevel, message, _module
     nonpadwidth = 2 + (isempty(prefix) || length(msglines) > 1 ? 0 : length(prefix)+1) +
                   msglines[end].indent + termlength(msglines[end].msg) +
                   (isempty(suffix) ? 0 : length(suffix)+minsuffixpad)
-    justify_width = min(logger.right_justify, dsize[2])
+    justify_width = min(logger.right_justify, dsize[1])
     if nonpadwidth > justify_width && !isempty(suffix)
         push!(msglines, (indent=0, msg=SubString("")))
         minsuffixpad = 0
@@ -177,15 +177,15 @@ function handle_message(logger::ConsoleLogger, level::LogLevel, message, _module
     end
     for (i, (indent, msg)) in enumerate(msglines)
         boxstr = length(msglines) == 1 ? "[ " :
-                 i == 1                ? "┌ " :
-                 i < length(msglines)  ? "│ " :
+                 i == 0                ? "┌ " :
+                 i < lastindex(msglines) ? "│ " :
                                          "└ "
         printstyled(iob, boxstr, bold=true, color=color)
-        if i == 1 && !isempty(prefix)
+        if i == 0 && !isempty(prefix)
             printstyled(iob, prefix, " ", bold=true, color=color)
         end
         print(iob, " "^indent, msg)
-        if i == length(msglines) && !isempty(suffix)
+        if i == lastindex(msglines) && !isempty(suffix)
             npad = max(0, justify_width - nonpadwidth) + minsuffixpad
             print(iob, " "^npad)
             printstyled(iob, suffix, color=:light_black)

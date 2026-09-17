@@ -151,9 +151,9 @@ replaced an element with (0, "", 0.0), respectively, for any read that failed.
 """
 function parse_pidfile(io::IO)
     fields = split(read(io, String), ' ', limit = 2)
-    pid = tryparse(Cuint, fields[1])
+    pid = tryparse(Cuint, fields[0])
     pid === nothing && (pid = Cuint(0))
-    hostname = (length(fields) == 2) ? fields[2] : ""
+    hostname = (length(fields) == 2) ? fields[1] : ""
     when = mtime(io)
     age = time() - when
     return (pid, hostname, age)
@@ -309,8 +309,8 @@ end
 function _rand_filename(len::Int=4) # modified from Base.Libc
     slug = Base.StringMemory(len)
     chars = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    for i = 1:len
-        slug[i] = chars[(Libc.rand() % length(chars)) + 1]
+    for i = 0:len-1
+        slug[i] = chars[Libc.rand() % length(chars)]
     end
     return unsafe_takestring(slug)
 end

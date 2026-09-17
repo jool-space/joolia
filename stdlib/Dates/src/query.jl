@@ -19,10 +19,11 @@ function locale_dict(names::Vector{<:AbstractString})
     # Keep both the common case-sensitive version of the name and an all lowercase
     # version for case-insensitive matches. Storing both allows us to avoid using the
     # lowercase function during parsing.
-    for i in 1:length(names)
+    for i in eachindex(names)
         name = names[i]
-        result[name] = i
-        result[lowercase(name)] = i
+        # Calendar month and weekday values retain their conventional numbering.
+        result[name] = i + 1
+        result[lowercase(name)] = i + 1
     end
     return result
 end
@@ -104,7 +105,7 @@ daysinyear(y) = 365 + isleapyear(y)
 
 # Day of the year
 const MONTHDAYS = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
-dayofyear(y, m, d) = MONTHDAYS[m] + d + (m > 2 && isleapyear(y))
+dayofyear(y, m, d) = MONTHDAYS[m - 1] + d + (m > 2 && isleapyear(y))
 
 ### Days of the Week
 """
@@ -145,8 +146,8 @@ for (ii, day_ind, short_day, long_day) in ((1, "first", :Mon, :Monday), (2, "sec
         """ ($long_day, $short_day)
    end
 end
-dayname(day::Integer, locale::DateLocale) = locale.days_of_week[day]
-dayabbr(day::Integer, locale::DateLocale) = locale.days_of_week_abbr[day]
+dayname(day::Integer, locale::DateLocale) = locale.days_of_week[day - 1]
+dayabbr(day::Integer, locale::DateLocale) = locale.days_of_week_abbr[day - 1]
 dayname(day::Integer; locale::AbstractString="english") = dayname(day, LOCALES[locale])
 dayabbr(day::Integer; locale::AbstractString="english") = dayabbr(day, LOCALES[locale])
 
@@ -555,8 +556,8 @@ julia> Dec
 """
 const Dec = 12
 
-monthname(month::Integer, locale::DateLocale) = locale.months[month]
-monthabbr(month::Integer, locale::DateLocale) = locale.months_abbr[month]
+monthname(month::Integer, locale::DateLocale) = locale.months[month - 1]
+monthabbr(month::Integer, locale::DateLocale) = locale.months_abbr[month - 1]
 monthname(month::Integer; locale::AbstractString="english") = monthname(month, LOCALES[locale])
 monthabbr(month::Integer; locale::AbstractString="english") = monthabbr(month, LOCALES[locale])
 
@@ -661,5 +662,5 @@ Return the day of the current quarter of `dt`. Range of value is 1:92.
 """
 function dayofquarter(dt::TimeType)
     (y, m, d) = yearmonthday(dt)
-    return QUARTERDAYS[m] + d + (m == 3 && isleapyear(y))
+    return QUARTERDAYS[m - 1] + d + (m == 3 && isleapyear(y))
 end

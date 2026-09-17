@@ -2,7 +2,7 @@
 
 # Generate encode table.
 const BASE64_ENCODE = [UInt8(x) for x in append!(['A':'Z'; 'a':'z'; '0':'9'], ['+', '/'])]
-encode(x::UInt8) = @inbounds return BASE64_ENCODE[(x & 0x3f) + 1]
+encode(x::UInt8) = @inbounds return BASE64_ENCODE[x & 0x3f]
 encodepadding()  = UInt8('=')
 
 """
@@ -57,11 +57,11 @@ function Base.unsafe_write(pipe::Base64EncodePipe, ptr::Ptr{UInt8}, n::UInt)::In
     p = ptr + k - m
     if k < 3
         if k == 1
-            buffer[1] = b1
+            buffer[0] = b1
             buffer.size = 1
         elseif k == 2
-            buffer[1] = b1
-            buffer[2] = b2
+            buffer[0] = b1
+            buffer[1] = b2
             buffer.size = 2
         end
         return p - ptr
@@ -71,15 +71,15 @@ function Base.unsafe_write(pipe::Base64EncodePipe, ptr::Ptr{UInt8}, n::UInt)::In
     i = 0
     p_end = ptr + n
     while true
-        buffer[i+1] = encode(b1 >> 2          )
-        buffer[i+2] = encode(b1 << 4 | b2 >> 4)
-        buffer[i+3] = encode(b2 << 2 | b3 >> 6)
-        buffer[i+4] = encode(          b3     )
+        buffer[i] = encode(b1 >> 2          )
+        buffer[i+1] = encode(b1 << 4 | b2 >> 4)
+        buffer[i+2] = encode(b2 << 2 | b3 >> 6)
+        buffer[i+3] = encode(          b3     )
         i += 4
         if p + 2 < p_end
-            b1 = unsafe_load(p, 1)
-            b2 = unsafe_load(p, 2)
-            b3 = unsafe_load(p, 3)
+            b1 = unsafe_load(p, 0)
+            b2 = unsafe_load(p, 1)
+            b3 = unsafe_load(p, 2)
             p += 3
         else
             break
@@ -94,7 +94,8 @@ function Base.unsafe_write(pipe::Base64EncodePipe, ptr::Ptr{UInt8}, n::UInt)::In
     end
 
     while p < p_end
-        buffer[buffer.size+=1] = unsafe_load(p)
+        buffer[buffer.size] = unsafe_load(p)
+        buffer.size += 1
         p += 1
     end
     return p - ptr
@@ -102,7 +103,8 @@ end
 
 function Base.write(pipe::Base64EncodePipe, x::UInt8)
     buffer = pipe.buffer
-    buffer[buffer.size+=1] = x
+    buffer[buffer.size] = x
+    buffer.size += 1
     if buffer.size == 3
         unsafe_write(pipe, C_NULL, 0)
     end
@@ -143,44 +145,44 @@ function loadtriplet!(buffer::Buffer, ptr::Ptr{UInt8}, n::UInt)
         if n == 0
             k = 0
         elseif n == 1
-            b1 = unsafe_load(ptr, 1)
+            b1 = unsafe_load(ptr, 0)
             k = 1
         elseif n == 2
-            b1 = unsafe_load(ptr, 1)
-            b2 = unsafe_load(ptr, 2)
-            k = 2
-        else
-            b1 = unsafe_load(ptr, 1)
-            b2 = unsafe_load(ptr, 2)
-            b3 = unsafe_load(ptr, 3)
-            k = 3
-        end
-    elseif buffer.size == 1
-        b1 = buffer[1]
-        if n == 0
-            k = 1
-        elseif n == 1
+            b1 = unsafe_load(ptr, 0)
             b2 = unsafe_load(ptr, 1)
             k = 2
         else
+            b1 = unsafe_load(ptr, 0)
             b2 = unsafe_load(ptr, 1)
             b3 = unsafe_load(ptr, 2)
             k = 3
         end
+    elseif buffer.size == 1
+        b1 = buffer[0]
+        if n == 0
+            k = 1
+        elseif n == 1
+            b2 = unsafe_load(ptr, 0)
+            k = 2
+        else
+            b2 = unsafe_load(ptr, 0)
+            b3 = unsafe_load(ptr, 1)
+            k = 3
+        end
     elseif buffer.size == 2
-        b1 = buffer[1]
-        b2 = buffer[2]
+        b1 = buffer[0]
+        b2 = buffer[1]
         if n == 0
             k = 2
         else
-            b3 = unsafe_load(ptr, 1)
+            b3 = unsafe_load(ptr, 0)
             k = 3
         end
     else
         @assert buffer.size == 3
-        b1 = buffer[1]
-        b2 = buffer[2]
-        b3 = buffer[3]
+        b1 = buffer[0]
+        b2 = buffer[1]
+        b3 = buffer[2]
         k = 3
     end
     empty!(buffer)

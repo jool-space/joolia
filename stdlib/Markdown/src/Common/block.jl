@@ -67,7 +67,7 @@ function hashheader(stream::IO, md::MD)
 
         if c != '\n' # Non-empty header
             h = strip(readline(stream))
-            h = (match(r"(.*?)( +#+)?$", h)::AbstractMatch).captures[1]
+            h = (match(r"(.*?)( +#+)?$", h)::AbstractMatch).captures[0]
             buffer = IOBuffer()
             print(buffer, h)
             push!(md.content, Header(parseinline(seek(buffer, 0), md), level))
@@ -87,7 +87,7 @@ function setextheader(stream::IO, md::MD)
         eatindent(stream) || return false
         underline = strip(readline(stream))
         length(underline) < 3 && return false
-        u = underline[1]
+        u = underline[0]
         u in "-=" || return false
         all(c -> c == u, underline) || return false
         level = (u == '=') ? 1 : 2
@@ -189,7 +189,7 @@ function footnote(stream::IO, block::MD)
         if m === nothing
             return false
         else
-            ref = m.captures[1]
+            ref = m.captures[0]
             buffer = IOBuffer()
             write(buffer, readline(stream, keep=true))
             while !eof(stream)
@@ -266,11 +266,11 @@ function admonition(stream::IO, block::MD)
                 if occursin(untitled, line)
                     m = match(untitled, line)::AbstractMatch
                     # When no title is provided we use CATEGORY_NAME, capitalising it.
-                    m.captures[1], uppercasefirst(m.captures[1])
+                    m.captures[0], uppercasefirst(m.captures[0])
                 elseif occursin(titled, line)
                     m = match(titled, line)::AbstractMatch
                     # To have a blank TITLE provide an explicit empty string as TITLE.
-                    m.captures[1], m.captures[2]
+                    m.captures[0], m.captures[1]
                 else
                     # Admonition header is invalid so we give up parsing here and move
                     # on to the next parser.
@@ -322,15 +322,15 @@ function list(stream::IO, block::MD)
         indent = length(m.match)
         # Calculate the starting number and regex to use for bullet matching.
         initial, regex =
-            if m.captures[3] === nothing
+            if m.captures[2] === nothing
                 # An unordered list. Use `-1` to flag the list as unordered.
-                -1, Regex("^ {0,3}(\\$(m.captures[1]))( |\$)")
-            elseif m.captures[3] == "."
+                -1, Regex("^ {0,3}(\\$(m.captures[0]))( |\$)")
+            elseif m.captures[2] == "."
                 # An ordered list with `1. ` style numbering.
-                Base.parse(Int, m.captures[2]), r"^ {0,3}(\d+)\.( |$)"
-            elseif m.captures[3] == ")"
+                Base.parse(Int, m.captures[1]), r"^ {0,3}(\d+)\.( |$)"
+            elseif m.captures[2] == ")"
                 # An ordered list with `1) ` style numbering.
-                Base.parse(Int, m.captures[2]), r"^ {0,3}(\d+)\)( |$)"
+                Base.parse(Int, m.captures[1]), r"^ {0,3}(\d+)\)( |$)"
             else
                 # Failed to match any list marker. This branch shouldn't actually be needed
                 # since the `NUM_OR_BULLETS` regex should cover this, but we include it

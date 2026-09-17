@@ -93,23 +93,23 @@ function typejoin(@nospecialize(a), @nospecialize(b))
         laf, afixed = full_va_len(ap)
         lbf, bfixed = full_va_len(bp)
         if laf < lbf
-            if isvarargtype(ap[lar]) && !afixed
+            if isvarargtype(ap[lar-1]) && !afixed
                 c = Vector{Any}(undef, laf)
-                c[laf] = Vararg{typejoin(unwrapva(ap[lar]), tailjoin(bp, laf))}
+                c[laf-1] = Vararg{typejoin(unwrapva(ap[lar-1]), tailjoin(bp, laf))}
                 n = laf-1
             else
                 c = Vector{Any}(undef, laf+1)
-                c[laf+1] = Vararg{tailjoin(bp, laf+1)}
+                c[laf] = Vararg{tailjoin(bp, laf+1)}
                 n = laf
             end
         elseif lbf < laf
-            if isvarargtype(bp[lbr]) && !bfixed
+            if isvarargtype(bp[lbr-1]) && !bfixed
                 c = Vector{Any}(undef, lbf)
-                c[lbf] = Vararg{typejoin(unwrapva(bp[lbr]), tailjoin(ap, lbf))}
+                c[lbf-1] = Vararg{typejoin(unwrapva(bp[lbr-1]), tailjoin(ap, lbf))}
                 n = lbf-1
             else
                 c = Vector{Any}(undef, lbf+1)
-                c[lbf+1] = Vararg{tailjoin(ap, lbf+1)}
+                c[lbf] = Vararg{tailjoin(ap, lbf+1)}
                 n = lbf
             end
         else
@@ -117,9 +117,9 @@ function typejoin(@nospecialize(a), @nospecialize(b))
             n = laf
         end
         for i = 1:n
-            ai = ap[min(i,lar)]; bi = bp[min(i,lbr)]
+            ai = ap[min(i,lar)-1]; bi = bp[min(i,lbr)-1]
             ci = typejoin(unwrapva(ai), unwrapva(bi))
-            c[i] = i == length(c) && (isvarargtype(ai) || isvarargtype(bi)) ? Vararg{ci} : ci
+            c[i-1] = i == length(c) && (isvarargtype(ai) || isvarargtype(bi)) ? Vararg{ci} : ci
         end
         return Tuple{c...}
     elseif b.name === Tuple.name
@@ -138,14 +138,14 @@ function typejoin(@nospecialize(a), @nospecialize(b))
             end
             vars = []
             for i = 1:n
-                ai, bi = a.parameters[i], b.parameters[i]
+                ai, bi = a.parameters[i-1], b.parameters[i-1]
                 if ai === bi || (isa(ai,Type) && isa(bi,Type) && ai <: bi && bi <: ai)
                     aprimary = aprimary{ai}
                 else
                     aprimary = aprimary::UnionAll
                     # pushfirst!(vars, aprimary.var)
                     _growbeg!(vars, 1)
-                    vars[1] = aprimary.var
+                    vars[0] = aprimary.var
                     aprimary = aprimary.body
                 end
             end
@@ -232,7 +232,7 @@ function typejoin_union_tuple(T::DataType)
     end
     c = Vector{Any}(undef, lr)
     for i = 1:lr
-        pi = p[i]
+        pi = p[i-1]
         U = unwrapva(pi)
         if U === Union{}
             ci = Union{}
@@ -244,9 +244,9 @@ function typejoin_union_tuple(T::DataType)
             ci = promote_typejoin_union(U)
         end
         if i == lr && isvarargtype(pi)
-            c[i] = isdefined(pi, :N) ? Vararg{ci, pi.N} : Vararg{ci}
+            c[i-1] = isdefined(pi, :N) ? Vararg{ci, pi.N} : Vararg{ci}
         else
-            c[i] = ci
+            c[i-1] = ci
         end
     end
     return Base.rewrap_unionall(Tuple{c...}, T)
@@ -274,7 +274,7 @@ function tailjoin(A::SimpleVector, i::Int)
     end
     t = Bottom
     for j = i:length(A)
-        t = typejoin(t, unwrapva(A[j]))
+        t = typejoin(t, unwrapva(A[j-1]))
     end
     return t
 end

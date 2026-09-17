@@ -23,6 +23,23 @@ end
     @test_throws "cycle detected" JuliaLowering.assert_syntaxtree(cyc_2)
 end
 
+@testset "zero-origin AST positions" begin
+    st = @ast_ [K"call" [K"parameters"] [K"Identifier" "x"]]
+    @test firstindex(st) == 0
+    @test lastindex(st) == 1
+    @test kind(st[0]) == K"parameters"
+    @test kind(st[1]) == K"Identifier"
+    @test JuliaLowering.find_parameters_ind(children(st)) == 0
+    @test JuliaLowering.has_parameters(st)
+
+    plain = @ast_ [K"call" [K"Identifier" "x"]]
+    @test JuliaLowering.find_parameters_ind(children(plain)) == -1
+    @test !JuliaLowering.has_parameters(plain)
+
+    empty = @ast_ [K"call" [K"parameters"]]
+    @test isempty(JuliaLowering.remove_empty_parameters(children(empty)))
+end
+
 @testset "flatten_blocks" begin
     let
         st = @ast_ [K"block"]

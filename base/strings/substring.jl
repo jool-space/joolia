@@ -6,7 +6,7 @@
 
 Create a substring of `s` spanning the codeunits `first_index:(first_index + n_codeunits - 1)`.
 
-If `first_index` < 1, or `first_index + n_codeunits - 1 > ncodeunits(s)`, throw a `BoundsError`.
+If `first_index` < 0, or `first_index + n_codeunits > ncodeunits(s)`, throw a `BoundsError`.
 
 This function does check bounds, but does not validate that the arguments correspond to valid
 start and end indices in `s`, and so the resulting substring may contain truncated characters.
@@ -23,19 +23,19 @@ may throw a `StringIndexError`.
 ```jldoctest
 julia> s = "Hello, Bjørn!";
 
-julia> ss = Base.raw_substring(s, 3, 10)
+julia> ss = Base.raw_substring(s, 2, 10)
 "llo, Bjør"
 
 julia> typeof(ss)
 SubString{String}
 
-julia> ss2 = Base.raw_substring(ss, 3, 7)
+julia> ss2 = Base.raw_substring(ss, 2, 7)
 "o, Bjø"
 
 julia> typeof(ss2)
 SubString{String}
 
-julia> ss3 = Base.raw_substring(s, 11, 4); ss3[1]
+julia> ss3 = Base.raw_substring(s, 10, 4); ss3[0]
 ERROR: StringIndexError:
 [...]
 ```
@@ -58,13 +58,13 @@ substrings `SubString(s, i, j)` in a block of code.
 
 # Examples
 ```jldoctest
-julia> SubString("abc", 1, 2)
+julia> SubString("abc", 0, 1)
 "ab"
 
-julia> SubString("abc", 1:2)
+julia> SubString("abc", 0:1)
 "ab"
 
-julia> SubString("abc", 2)
+julia> SubString("abc", 1)
 "bc"
 ```
 """
@@ -80,21 +80,21 @@ struct SubString{T<:AbstractString} <: AbstractString
             @inbounds isvalid(s, i) || string_index_err(s, i)
             @inbounds isvalid(s, j) || string_index_err(s, j)
         end
-        return new(s, i-1, nextind(s,j)-i)
+        return new(s, i, nextind(s,j)-i)
     end
 
     global function raw_substring(s::T, first_index::Int, n_codeunits::Int) where {T <: AbstractString}
-        @boundscheck if n_codeunits < 0 || first_index < 1 || (n_codeunits > ncodeunits(s) - first_index + 1)
+        @boundscheck if n_codeunits < 0 || first_index < 0 || (n_codeunits > ncodeunits(s) - first_index)
             throw(BoundsError(s, first_index:(first_index+n_codeunits-1)))
         end
-        new{T}(s, first_index - 1, n_codeunits)
+        new{T}(s, first_index, n_codeunits)
     end
 
     global function raw_substring(s::SubString{T}, first_index::Int, n_codeunits::Int) where {T <: AbstractString}
-        @boundscheck if n_codeunits < 0 || first_index < 1 || (n_codeunits > ncodeunits(s) - first_index + 1)
+        @boundscheck if n_codeunits < 0 || first_index < 0 || (n_codeunits > ncodeunits(s) - first_index)
             throw(BoundsError(s, first_index:(first_index+n_codeunits-1)))
         end
-        new{T}(s.string, first_index + s.offset - 1, n_codeunits)
+        new{T}(s.string, first_index + s.offset, n_codeunits)
     end
 
     # Unlike the un-parameterized SubString constructor, this function must allow creating
@@ -114,7 +114,7 @@ end
     SubString(s.string, s.offset+i, s.offset+j)
 end
 
-SubString(s::AbstractString) = @inbounds raw_substring(s, 1, Int(ncodeunits(s))::Int)
+SubString(s::AbstractString) = @inbounds raw_substring(s, 0, Int(ncodeunits(s))::Int)
 SubString(s::SubString) = s
 
 @propagate_inbounds view(s::AbstractString, r::AbstractUnitRange{<:Integer}) = SubString(s, r)
@@ -132,16 +132,16 @@ convert(::Type{Union{String, SubString{String}}}, s::AbstractString) = convert(S
 
 function String(s::SubString{String})
     parent = s.string
-    copy = GC.@preserve parent unsafe_string(pointer(parent, s.offset+1), s.ncodeunits)
+    copy = GC.@preserve parent unsafe_string(pointer(parent, s.offset), s.ncodeunits)
     return copy
 end
 
 ncodeunits(s::SubString) = s.ncodeunits
 codeunit(s::SubString) = codeunit(s.string)::CodeunitType
-length(s::SubString) = length(s.string, s.offset+1, s.offset+s.ncodeunits)
+length(s::SubString) = length(s.string, s.offset, s.offset+s.ncodeunits-1)
 # nothrow: SubString invariants guarantee 0 ≤ offset and offset+ncodeunits ≤ ncodeunits(string),
 # so the bounds-check inside the 3-arg `length(::String, i, j)` cannot fail.
-@assume_effects :nothrow length(s::SubString{String}) = length(s.string, s.offset+1, s.offset+s.ncodeunits)
+@assume_effects :nothrow length(s::SubString{String}) = length(s.string, s.offset, s.offset+s.ncodeunits-1)
 
 function codeunit(s::SubString, i::Integer)
     @boundscheck checkbounds(s, i)
@@ -149,7 +149,7 @@ function codeunit(s::SubString, i::Integer)
 end
 
 function iterate(s::SubString, i::Integer=firstindex(s))
-    i == ncodeunits(s)+1 && return nothing
+    i == ncodeunits(s) && return nothing
     @boundscheck checkbounds(s, i)
     y = iterate(s.string, s.offset + i)
     y === nothing && return nothing
@@ -174,11 +174,11 @@ end
 @propagate_inbounds thisind(s::SubString{String}, i::Int) = _thisind_str(s, i)
 @propagate_inbounds nextind(s::SubString{String}, i::Int) = _nextind_str(s, i)
 
-# nothrow: i == ncodeunits(s) always satisfies the bounds check inside _thisind_str.
-@assume_effects :nothrow lastindex(s::SubString{String}) = thisind(s, ncodeunits(s)::Int)
+# nothrow: i == ncodeunits(s)-1 always satisfies the bounds check inside _thisind_str.
+@assume_effects :nothrow lastindex(s::SubString{String}) = thisind(s, ncodeunits(s)::Int - 1)
 
 parent(s::SubString) = s.string
-parentindices(s::SubString) = (s.offset + 1 : thisind(s.string, s.offset + s.ncodeunits),)
+parentindices(s::SubString) = (s.offset : thisind(s.string, s.offset + s.ncodeunits - 1),)
 
 function ==(a::Union{String, SubString{String}}, b::Union{String, SubString{String}})
     sizeof(a) == sizeof(b) && _memcmp(a, b) == 0
@@ -198,7 +198,7 @@ function unsafe_convert(::Type{Ptr{R}}, s::SubString{String}) where R<:Union{Int
 end
 
 pointer(x::SubString{String}) = pointer(x.string) + x.offset
-pointer(x::SubString{String}, i::Integer) = pointer(x.string) + x.offset + (i-1)
+pointer(x::SubString{String}, i::Integer) = pointer(x.string) + x.offset + i
 
 hash(data::SubString{String}, h::UInt) =
     GC.@preserve data hash_bytes(pointer(data), sizeof(data), UInt64(h), HASH_SECRET) % UInt
@@ -269,7 +269,7 @@ function _string(a::Union{Char, String, SubString{String}, Symbol}...)
         end
     end
     out = _string_n(n)
-    offs = 1
+    offs = 0
     for v in a
         if v isa Char
             offs += __unsafe_string!(out, v, offs)
@@ -296,11 +296,11 @@ function repeat(s::Union{String, SubString{String}}, r::Integer)
     r > typemax(UInt) ÷ UInt(n) && throw(OutOfMemoryError())
     out = _string_n(n*r)
     if n == 1 # common case: repeating a single-byte string
-        @inbounds b = codeunit(s, 1)
+        @inbounds b = codeunit(s, 0)
         memset(unsafe_convert(Ptr{UInt8}, out), b, r)
     else
         for i = 0:r-1
-            GC.@preserve s out unsafe_copyto!(pointer(out, i*n+1), pointer(s), n)
+            GC.@preserve s out unsafe_copyto!(pointer(out, i*n), pointer(s), n)
         end
     end
     return out
@@ -308,14 +308,14 @@ end
 
 function filter(f, s::Union{String, SubString{String}})
     out = StringVector(sizeof(s))
-    offset = 1
+    offset = 0
     for c in s
         if f(c)
             offset += __unsafe_string!(out, c, offset)
         end
     end
-    resize!(out, offset-1)
-    sizehint!(out, offset-1)
+    resize!(out, offset)
+    sizehint!(out, offset)
     return String(out)
 end
 

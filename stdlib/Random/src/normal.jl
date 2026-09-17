@@ -75,8 +75,8 @@ julia> randn(rng, ComplexF32, (2, 3))
         # the following code is identical to the one in `_randn(rng::AbstractRNG, r::UInt64)`
         rabs = Int64(r>>1) # One bit for the sign
         idx = rabs & 0xFF
-        x = ifelse(r % Bool, -rabs, rabs)*wi[idx+1]
-        rabs < ki[idx+1] && return x # 99.3% of the time we return here 1st try
+        x = ifelse(r % Bool, -rabs, rabs)*wi[idx]
+        rabs < ki[idx] && return x # 99.3% of the time we return here 1st try
         return randn_unlikely(rng, idx, rabs, x)
     end
 end
@@ -86,8 +86,8 @@ end
         r &= 0x000fffffffffffff
         rabs = Int64(r>>1) # One bit for the sign
         idx = rabs & 0xFF
-        x = ifelse(r % Bool, -rabs, rabs)*wi[idx+1]
-        rabs < ki[idx+1] && return x # 99.3% of the time we return here 1st try
+        x = ifelse(r % Bool, -rabs, rabs)*wi[idx]
+        rabs < ki[idx] && return x # 99.3% of the time we return here 1st try
         return randn_unlikely(rng, idx, rabs, x)
     end
 end
@@ -101,7 +101,7 @@ end
             yy+yy > xx*xx &&
                 return (rabs >> 8) % Bool ? -ziggurat_nor_r-xx : ziggurat_nor_r+xx
         end
-    elseif (fi[idx] - fi[idx+1])*rand(rng) + fi[idx+1] < exp(-0.5*x*x)
+    elseif (fi[idx-1] - fi[idx])*rand(rng) + fi[idx] < exp(-0.5*x*x)
         return x # return from the triangular area
     else
         return randn(rng)
@@ -156,8 +156,8 @@ function _randexp(rng::AbstractRNG, ri::UInt64)
     @inbounds begin
         ri &= 0x000fffffffffffff
         idx = ri & 0xFF
-        x = ri*we[idx+1]
-        ri < ke[idx+1] && return x # 98.9% of the time we return here 1st try
+        x = ri*we[idx]
+        ri < ke[idx] && return x # 98.9% of the time we return here 1st try
         return randexp_unlikely(rng, idx, x)
     end
 end
@@ -165,7 +165,7 @@ end
 @noinline function randexp_unlikely(rng, idx, x)
     @inbounds if idx == 0
         return ziggurat_exp_r - log1p(-rand(rng))
-    elseif (fe[idx] - fe[idx+1])*rand(rng) + fe[idx+1] < exp(-x)
+    elseif (fe[idx-1] - fe[idx])*rand(rng) + fe[idx] < exp(-x)
         return x # return from the triangular area
     else
         return randexp(rng)

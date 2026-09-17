@@ -14,24 +14,24 @@ let
     # Basic tests.
     @assert length(stack) >= 3 "Compiler has unexpectedly inlined functions"
 
-    @test [:child, :parent, :grandparent] == [f.func for f in stack[1:3]]
-    for (line, frame) in zip(line_numbers, stack[1:3])
+    @test [:child, :parent, :grandparent] == [f.func for f in stack[0:2]]
+    for (line, frame) in zip(line_numbers, stack[0:2])
         @test [Symbol(@__FILE__), line] == [frame.file, frame.line]
     end
-    @test [false, false, false] == [f.from_c for f in stack[1:3]]
+    @test [false, false, false] == [f.from_c for f in stack[0:2]]
 
     # Test remove_frames!
     stack = StackTraces.remove_frames!(grandparent(), :parent)
-    @test stack[1] == StackFrame(:grandparent, @__FILE__, line_numbers[3])
+    @test stack[0] == StackFrame(:grandparent, @__FILE__, line_numbers[2])
 
     stack = StackTraces.remove_frames!(grandparent(), [:child, :something_nonexistent])
-    @test stack[1:2] == [
-        StackFrame(:parent, @__FILE__, line_numbers[2]),
-        StackFrame(:grandparent, @__FILE__, line_numbers[3])
+    @test stack[0:1] == [
+        StackFrame(:parent, @__FILE__, line_numbers[1]),
+        StackFrame(:grandparent, @__FILE__, line_numbers[2])
     ]
 
     b = PipeBuffer()
-    frame = stack[1]
+    frame = stack[0]
     serialize(b, frame)
     frame2 = deserialize(b)
     @test frame !== frame2
@@ -73,12 +73,12 @@ let ct = current_task()
     line_numbers = @__LINE__() .- [15, 10, 5]
 
     # Test try...catch with stacktrace
-    @test try_stacktrace()[1] == StackFrame(:try_stacktrace, @__FILE__, line_numbers[2])
+    @test try_stacktrace()[0] == StackFrame(:try_stacktrace, @__FILE__, line_numbers[1])
 
     # Test try...catch with catch_backtrace
-    @test try_catch()[1:2] == [
-        StackFrame(:bad_function, @__FILE__, line_numbers[1]),
-        StackFrame(:try_catch, @__FILE__, line_numbers[3])
+    @test try_catch()[0:1] == [
+        StackFrame(:bad_function, @__FILE__, line_numbers[0]),
+        StackFrame(:try_catch, @__FILE__, line_numbers[2])
     ]
 end
 
@@ -87,7 +87,7 @@ using Test
 @inline g(x) = (x == 3 && throw("a"); x)
 @inline h(x) = (x == 3 && g(x); x)
 f(x) = (y = h(x); y)
-trace = (try; f(3); catch; stacktrace(catch_backtrace()); end)[1:3]
+trace = (try; f(3); catch; stacktrace(catch_backtrace()); end)[0:2]
 can_inline = Bool(Base.JLOptions().can_inline)
 for (frame, func, inlined) in zip(trace, [g,h,f], (can_inline, can_inline, false))
     @test frame.func === typeof(func).name.singletonname
@@ -100,7 +100,7 @@ for (frame, func, inlined) in zip(trace, [g,h,f], (can_inline, can_inline, false
 end
 end
 
-let src = Meta.lower(Main, quote let x = 1 end end).args[1]::Core.CodeInfo
+let src = Meta.lower(Main, quote let x = 1 end end).args[0]::Core.CodeInfo
     li = ccall(:jl_method_instance_for_thunk, Ref{Core.MethodInstance}, (Any, Any), src, @__MODULE__)
     sf = StackFrame(:a, :b, 3, li, false, false, 0)
     repr = string(sf)
@@ -116,10 +116,10 @@ let ctestptr = cglobal((:ctest, "libccalltest")),
     ctest = StackTraces.lookup(ctestptr)
 
     @test length(ctest) == 1
-    @test ctest[1].func === :ctest
-    @test ctest[1].linfo === nothing
-    @test ctest[1].from_c
-    @test ctest[1].pointer === UInt64(ctestptr)
+    @test ctest[0].func === :ctest
+    @test ctest[0].linfo === nothing
+    @test ctest[0].from_c
+    @test ctest[0].pointer === UInt64(ctestptr)
 end
 
 # issue #19655
@@ -150,7 +150,7 @@ try
 catch
     bt = stacktrace(catch_backtrace())
 end
-@test bt[1].line == topline+4
+@test bt[0].line == topline+4
 end
 
 # Accidental incorrect phi block computation in interpreter
@@ -166,7 +166,7 @@ let bt, topline = @__LINE__
     catch
         bt = stacktrace(catch_backtrace())
     end
-    @test bt[1].line == topline+6
+    @test bt[0].line == topline+6
 end
 
 # issue #28990
@@ -176,8 +176,8 @@ try
 catch
     bt = stacktrace(catch_backtrace())
 end
-@test bt[2].line == 42
-@test bt[2].file === :foo
+@test bt[1].line == 42
+@test bt[1].file === :foo
 end
 
 @noinline f33065(x; b=1.0, a="") = error()
@@ -209,7 +209,7 @@ struct F49231{a,b,c,d,e,f,g} end
 @testset "type_depth_limit" begin
     tdl = Base.type_depth_limit
 
-    str = repr(typeof(view([1, 2, 3], 1:2)))
+    str = repr(typeof(view([1, 2, 3], 0:1)))
     @test tdl(str, 0, maxdepth = 1) == "SubArray{…}"
     @test tdl(str, 0, maxdepth = 2) == "SubArray{$Int, 1, Vector{…}, Tuple{…}, true}"
     @test tdl(str, 0, maxdepth = 3) == "SubArray{$Int, 1, Vector{$Int}, Tuple{UnitRange{…}}, true}"
@@ -235,7 +235,7 @@ struct F49231{a,b,c,d,e,f,g} end
 
     # Stacktrace
     a = UInt8(81):UInt8(160)
-    b = view(a, 1:64)
+    b = view(a, 0:63)
     c = reshape(b, (8, 8))
     d = reinterpret(reshape, Float64, c)
     sqrteach(a) = [sqrt(x) for x in a]
@@ -260,7 +260,7 @@ end
 # nonsense frame
 let st = nothing
     try
-        [undef_var for _ in 1:10]
+        [undef_var for _ in 0:9]
     catch _
         st = stacktrace(catch_backtrace())
     end
@@ -272,7 +272,7 @@ end
 
 let st = nothing
     try
-        collect(undef_var for _ in 1:10)
+        collect(undef_var for _ in 0:9)
     catch _
         st = stacktrace(catch_backtrace())
     end
@@ -303,18 +303,18 @@ end
     fl = Symbol(@__FILE__())
     @test length(dispatch_backtraces) == 4  # 2 ci-backtrace pairs, stored as 4 separate elements
     mcallee, mcaller = only(methods(callee)), only(methods(caller))
-    # Extract pairs from the flattened array format: ci at odd indices, backtrace at even indices
-    pairs = [(dispatch_backtraces[i], dispatch_backtraces[i+1]) for i in 1:2:length(dispatch_backtraces)]
+    # Extract pairs from the flattened array format: ci at even indices, backtrace at odd indices
+    pairs = [(dispatch_backtraces[i], dispatch_backtraces[i+1]) for i in 0:2:length(dispatch_backtraces)-2]
     @test any(pairs) do (ci, trace)
         # trace is a SimpleVector from jl_backtrace_from_here, need to reformat before stacktrace
-        bt = Base._reformat_bt(trace[1], trace[2])
+        bt = Base._reformat_bt(trace[0], trace[1])
         ci.def.def === mcallee && any(stacktrace(bt)) do sf
             sf.file == fl && sf.line == ln
         end
     end
     @test any(pairs) do (ci, trace)
         # trace is a SimpleVector from jl_backtrace_from_here, need to reformat before stacktrace
-        bt = Base._reformat_bt(trace[1], trace[2])
+        bt = Base._reformat_bt(trace[0], trace[1])
         ci.def.def === mcaller && any(stacktrace(bt)) do sf
             sf.file == fl && sf.line == ln
         end
@@ -391,4 +391,26 @@ let st = try f_parent3(1, 2, 3, -10) catch; stacktrace(catch_backtrace()) end
     sf = only(filter(sf -> sf.func === :f_inner3 && sf.inlined, st))
     @test sf.linfo isa Core.MethodInstance
     @test sf.linfo.def === which(f_inner3, (Int,))
+end
+
+# Type elision keeps byte positions separate from nesting-depth counts.
+@testset "zero-origin type depth" begin
+    tdl = Base.type_depth_limit
+    @test tdl("", 10) == ""
+    @test tdl("Int", 10) == "Int"
+    @test tdl("Tuple{Int, String}", 0; maxdepth=1) == "Tuple{…}"
+    @test tdl("Tuple{Int, Vector{String}}", 0; maxdepth=2) == "Tuple{Int, Vector{…}}"
+    @test tdl("Δ{Vector{α}}", 0; maxdepth=1) == "Δ{…}"
+    @test tdl("Δ{Vector{α}}", 100) == "Δ{Vector{α}}"
+    @test tdl("Val{'}'}", 100) == "Val{'}'}"
+    @test tdl("\e[31mTuple{Int}\e[0m", 0; maxdepth=1) == "\e[31mTuple{…}\e[0m"
+    f(x) = x[9]
+    trace = try
+        f([1])
+    catch
+        catch_backtrace()
+    end
+    rendered = sprint(Base.show_backtrace, trace; context=(:limit=>true, :stacktrace_types_limited=>Ref(false), :color=>true, :displaysize=>(24, 80)))
+    @test occursin("BoundsError", sprint(showerror, BoundsError([1], 9)))
+    @test occursin("getindex", rendered)
 end

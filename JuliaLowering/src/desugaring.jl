@@ -67,7 +67,7 @@ end
 
 function check_no_parameters(ex::SyntaxTree, msg)
     i = find_parameters_ind(children(ex))
-    if i > 0
+    if i >= 0
         throw(LoweringError(ex[i], msg))
     end
 end

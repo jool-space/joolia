@@ -1,6 +1,6 @@
 function _unwrap_parse_error(core_hook_result)
-    @test Meta.isexpr(core_hook_result[1], :error, 1)
-    err = core_hook_result[1].args[1]
+    @test Meta.isexpr(core_hook_result[0], :error, 1)
+    err = core_hook_result[0].args[0]
     if JuliaSyntax._has_v1_10_hooks
         @test err isa Meta.ParseError
         return err.detail
@@ -12,7 +12,6 @@ end
 
 @testset "Hooks for Core integration" begin
     @testset "whitespace and comment parsing" begin
-        @test JuliaSyntax.core_parser_hook("", "somefile", 1, 0, :statement) == Core.svec(nothing, 0)
         @test JuliaSyntax.core_parser_hook("", "somefile", 1, 0, :statement) == Core.svec(nothing, 0)
 
         @test JuliaSyntax.core_parser_hook("  ", "somefile", 1, 2, :statement) == Core.svec(nothing,2)
@@ -29,16 +28,25 @@ end
             # Issue #81
             f() = nothing
             """
-        @test JuliaSyntax.core_parser_hook(stmtstr, "somefile", 1, 0, :statement)[2] == 19
+        @test JuliaSyntax.core_parser_hook(stmtstr, "somefile", 1, 0, :statement)[1] == 19
+    end
+
+    @testset "zero-origin consumed offsets" begin
+        for text in ("", "  ", "α + 1", SubString("α + 1", 0, lastindex("α + 1")))
+            result = JuliaSyntax.core_parser_hook(text, "offsets.jl", 1, 0, :statement)
+            @test result[1] == ncodeunits(text)
+        end
+        @test JuliaSyntax.core_parser_hook("x\ny", "offsets.jl", 1, 0, :statement)[1] == 2
+        @test JuliaSyntax.core_parser_hook("x\ny", "offsets.jl", 1, 2, :statement)[1] == 3
     end
 
     @testset "filename and lineno" begin
-        ex = JuliaSyntax.core_parser_hook("@a", "somefile", 1, 0, :statement)[1]
+        ex = JuliaSyntax.core_parser_hook("@a", "somefile", 1, 0, :statement)[0]
         @test Meta.isexpr(ex, :macrocall)
-        @test ex.args[2] == LineNumberNode(1, "somefile")
+        @test ex.args[1] == LineNumberNode(1, "somefile")
 
-        ex = JuliaSyntax.core_parser_hook("@a", "otherfile", 2, 0, :statement)[1]
-        @test ex.args[2] == LineNumberNode(2, "otherfile")
+        ex = JuliaSyntax.core_parser_hook("@a", "otherfile", 2, 0, :statement)[0]
+        @test ex.args[1] == LineNumberNode(2, "otherfile")
 
         # Errors also propagate file & lineno
         err = _unwrap_parse_error(
@@ -60,40 +68,40 @@ end
         )
         @test err isa JuliaSyntax.ParseError
         @test err.source.first_line == 1
-        @test err.diagnostics[1].first_byte == 6
-        @test err.diagnostics[1].last_byte == 5
-        @test err.diagnostics[1].message == "Expected `}` or `,`"
+        @test err.diagnostics[0].first_byte == 5
+        @test err.diagnostics[0].last_byte == 4
+        @test err.diagnostics[0].message == "Expected `}` or `,`"
     end
 
     @testset "toplevel errors" begin
-        ex = JuliaSyntax.core_parser_hook("a\nb\n[x,\ny)", "somefile", 1, 0, :all)[1]
+        ex = JuliaSyntax.core_parser_hook("a\nb\n[x,\ny)", "somefile", 1, 0, :all)[0]
         @test ex.head == :toplevel
-        @test ex.args[1:5] == [
+        @test ex.args[0:4] == [
             LineNumberNode(1, "somefile"),
             :a,
             LineNumberNode(2, "somefile"),
             :b,
             LineNumberNode(4, "somefile"),
         ]
-        @test Meta.isexpr(ex.args[6], :error)
+        @test Meta.isexpr(ex.args[5], :error)
 
-        ex = JuliaSyntax.core_parser_hook("x.", "somefile", 0, 0, :all)[1]
+        ex = JuliaSyntax.core_parser_hook("x.", "somefile", 0, 0, :all)[0]
         @test ex.head == :toplevel
-        @test ex.args[2].head == :incomplete
+        @test ex.args[1].head == :incomplete
     end
 
     @testset "enable_in_core!" begin
         JuliaSyntax.enable_in_core!()
 
         @test Meta.parse("x + 1") == :(x + 1)
-        @test Meta.parse("x + 1", 1) == (:(x + 1), 6)
+        @test Meta.parse("x + 1", 0) == (:(x + 1), 5)
 
         # Test that parsing statements incrementally works and stops after
         # whitespace / comment trivia
-        @test Meta.parse("x + 1\n(y)\n", 1) == (:(x + 1), 7)
-        @test Meta.parse("x + 1\n(y)\n", 7) == (:y, 11)
-        @test Meta.parse(" x#==#", 1) == (:x, 7)
-        @test Meta.parse(" #==# ", 1) == (nothing, 7)
+        @test Meta.parse("x + 1\n(y)\n", 0) == (:(x + 1), 6)
+        @test Meta.parse("x + 1\n(y)\n", 6) == (:y, 10)
+        @test Meta.parse(" x#==#", 0) == (:x, 6)
+        @test Meta.parse(" #==# ", 0) == (nothing, 6)
 
         # Check the exception type that Meta.parse throws
         if JuliaSyntax._has_v1_10_hooks
@@ -120,13 +128,13 @@ end
         err = Meta.parse("\"")
         @test Meta.isexpr(err, :incomplete)
         if JuliaSyntax._has_v1_10_hooks
-            @test err.args[1] isa Meta.ParseError
-            exc = err.args[1]
+            @test err.args[0] isa Meta.ParseError
+            exc = err.args[0]
             @test exc.msg == "ParseError:\n# Error @ none:1:2\n\"\n#└ ── unterminated string literal"
             @test exc.detail isa JuliaSyntax.ParseError
             @test exc.detail.incomplete_tag === :string
         else
-            @test err.args[1] isa String
+            @test err.args[0] isa String
         end
 
         JuliaSyntax.enable_in_core!(false)
@@ -501,16 +509,16 @@ end
             ]
             @testset "$(repr(str))" begin
                 # Test :statement parsing
-                ex = JuliaSyntax.core_parser_hook(str, "somefile", 1, 0, :statement)[1]
+                ex = JuliaSyntax.core_parser_hook(str, "somefile", 1, 0, :statement)[0]
                 @test Base.incomplete_tag(ex) == tag
                 # Test :all parsing - this is what the REPL uses to parse user input.
-                ex = JuliaSyntax.core_parser_hook(str, "somefile", 1, 0, :all)[1]
+                ex = JuliaSyntax.core_parser_hook(str, "somefile", 1, 0, :all)[0]
                 @test ex.head == :toplevel
                 @test Base.incomplete_tag(ex.args[end]) == tag
             end
         end
 
         # Should not throw
-        @test JuliaSyntax.core_parser_hook("+=", "somefile", 1, 0, :statement)[1] isa Expr
+        @test JuliaSyntax.core_parser_hook("+=", "somefile", 1, 0, :statement)[0] isa Expr
     end
 end

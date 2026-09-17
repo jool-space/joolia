@@ -758,14 +758,14 @@ macro big_str(s::String)
     message = "invalid number format $s for BigInt or BigFloat"
     throw_error =  :(throw(ArgumentError($message)))
     if '_' in s
-        # remove _ in s[2:end-1].
+        # remove _ between the first and last characters.
         # Do not allow '_' right before or after dot.
         bf = IOBuffer(sizehint=ncodeunits(s))
-        c = s[1]
+        c = s[0]
         print(bf, c)
         is_prev_underscore = (c == '_')
         is_prev_dot = (c == '.')
-        for c in SubString(s, nextind(s, 1), prevind(s, lastindex(s)))
+        for c in SubString(s, nextind(s, firstindex(s)), prevind(s, lastindex(s)))
             c != '_' && print(bf, c)
             c == '_' && is_prev_dot && return throw_error
             c == '.' && is_prev_underscore && return throw_error
@@ -1012,7 +1012,7 @@ if Core.sizeof(Int) == 4
         (x == typemin(Int128)) & (y == -1) && throw(DivideError())
         return Int128(div(BigInt(x), BigInt(y)))::Int128
     end
-    div(x::UInt128, y::UInt128) = divrem(x, y)[1]
+    div(x::UInt128, y::UInt128) = divrem(x, y)[0]
 
     function rem(x::Int128, y::Int128)
         return Int128(rem(BigInt(x), BigInt(y)))::Int128

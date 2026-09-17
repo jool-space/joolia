@@ -52,6 +52,18 @@ STDLIBS_EXT = Pkg Statistics LazyArtifacts LibCURL DelimitedFiles Downloads ArgT
 
 $(foreach module, $(STDLIBS_EXT), $(eval $(call stdlib-external,$(module),$(shell echo $(module) | tr a-z A-Z))))
 
+# Keep Joolia changes to fetched stdlibs reproducible after a fresh extraction.
+# Add successive patches in lexical order; already applied patches are accepted.
+define joolia-stdlib-patches
+ifneq ($$(wildcard $$(SRCDIR)/patches/$1/*.patch),)
+$$(BUILDDIR)/$$($2_SRC_DIR)/source-patched-joolia: $$(BUILDDIR)/$$($2_SRC_DIR)/source-extracted $$(sort $$(wildcard $$(SRCDIR)/patches/$1/*.patch)) $$(JULIAHOME)/contrib/apply-stdlib-patches.sh
+	@sh $$(JULIAHOME)/contrib/apply-stdlib-patches.sh $$(BUILDDIR)/$$($2_SRC_DIR) $$(sort $$(wildcard $$(SRCDIR)/patches/$1/*.patch))
+	touch $$@
+$$(BUILDDIR)/$$($2_SRC_DIR)/build-compiled: $$(BUILDDIR)/$$($2_SRC_DIR)/source-patched-joolia
+endif
+endef
+$(foreach module, $(STDLIBS_EXT), $(eval $(call joolia-stdlib-patches,$(module),$(shell echo $(module) | tr a-z A-Z))))
+
 ifneq ($(filter $(STDLIBS),$(STDLIBS_EXT)),)
 $(error ERROR duplicated STDLIBS in list)
 endif

@@ -1078,3 +1078,13 @@ end
     @test sizehint!(set, 1; shrink = true) === set
     @test sizehint!(set, 1; shrink = false) === set
 end
+
+# Grouped deduplication must unpack iteration results with zero-origin tuple indices.
+@testset "zero-origin grouped unique" begin
+    for values in (Int[], [1], [1,1], [1,1,2,2,3], [3,3,2,2,1], [2,1,2,1], ["a","a","b"])
+        expected = unique(values)
+        actual = copy(values)
+        @test unique!(actual) === actual
+        @test actual == expected
+    end
+end

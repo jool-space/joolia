@@ -6,7 +6,7 @@ function show(io::IO, t::AbstractDict{K,V}) where V where K
 
     limit = get(io, :limit, false)::Bool
     # show in a Julia-syntax-like form: Dict(k=>v, ...)
-    print(io, typeinfo_prefix(io, t)[1])
+    print(io, typeinfo_prefix(io, t)[0])
     print(io, '(')
     if !isempty(t) && !show_circular(io, t)
         first = true
@@ -77,7 +77,7 @@ mutable struct Dict{K,V} <: AbstractDict{K,V}
         n = 0
         slots = Memory{UInt8}(undef,n)
         fill!(slots, 0x0)
-        new(slots, Memory{K}(undef, n), Memory{V}(undef, n), 0, 0, 0, max(1, n), 0)
+        new(slots, Memory{K}(undef, n), Memory{V}(undef, n), 0, 0, 0, 0, 0)
     end
     function Dict{K,V}(d::Dict{K,V}) where V where K
         new(copy(d.slots), copy(d.keys), copy(d.vals), d.ndel, d.count, d.age,
@@ -127,7 +127,7 @@ _shorthash7(hsh::UInt) = (hsh >> (8sizeof(UInt)-7))%UInt8 | 0x80
 function hashindex(key, sz::Integer)
     sz = Int(sz)::Int
     hsh = hash(key)::UInt
-    idx = ((hsh % Int) & (sz-1)) + 1
+    idx = (hsh % Int) & (sz-1)
     return idx, _shorthash7(hsh)
 end
 
@@ -142,7 +142,7 @@ end
     sz = length(olds)
     newsz = _tablesz(newsz)
     h.age += 1
-    h.idxfloor = 1
+    h.idxfloor = 0
     if h.count == 0
         # TODO: tryresize
         h.slots = Memory{UInt8}(undef, newsz)
@@ -162,14 +162,14 @@ end
     count = 0
     maxprobe = 0
 
-    for i = 1:sz
+    for i = 0:sz-1
         @inbounds if (olds[i] & 0x80) != 0
             k = oldk[i]
             v = oldv[i]
             index, _ = hashindex(k, newsz)
             index0 = index
             while slots[index] != 0
-                index = (index & (newsz-1)) + 1
+                index = (index + 1) & (newsz-1)
             end
             probe = (index - index0) & (newsz-1)
             probe > maxprobe && (maxprobe = probe)
@@ -222,7 +222,7 @@ Dict{String, Int64}()
 function empty!(h::Dict{K,V}) where V where K
     fill!(h.slots, 0x0)
     sz = length(h.slots)
-    for i in 1:sz
+    for i in 0:sz-1
         unsetindex!(h.keys, i)
         unsetindex!(h.vals, i)
     end
@@ -230,7 +230,7 @@ function empty!(h::Dict{K,V}) where V where K
     h.count = 0
     h.maxprobe = 0
     h.age += 1
-    h.idxfloor = max(1, sz)
+    h.idxfloor = 0
     return h
 end
 
@@ -253,7 +253,7 @@ function ht_keyindex(h::Dict{K,V}, key) where V where K
             end
         end
 
-        index = (index & (sz-1)) + 1
+        index = (index + 1) & (sz-1)
         (iter += 1) > maxprobe && return -1
     end
     # This line is unreachable
@@ -269,7 +269,7 @@ function ht_keyindex2_shorthash!(h::Dict{K,V}, key) where V where K
     if sz == 0 # if Dict was empty resize and then return location to insert
         rehash!(h, 4)
         index, sh = hashindex(key, length(h.keys))
-        return -index, sh
+        return -(index + 1), sh
     end
     iter = 0
     maxprobe = h.maxprobe
@@ -279,14 +279,14 @@ function ht_keyindex2_shorthash!(h::Dict{K,V}, key) where V where K
 
     @inbounds while true
         if isslotempty(h,index)
-            return (avail < 0 ? avail : -index), sh
+            return (avail < 0 ? avail : -(index + 1)), sh
         end
 
         if isslotmissing(h,index)
             if avail == 0
                 # found an available slot, but need to keep scanning
                 # in case "key" already exists in a later collided slot.
-                avail = -index
+                avail = -(index + 1)
             end
         elseif h.slots[index] == sh
             k = keys[index]
@@ -295,7 +295,7 @@ function ht_keyindex2_shorthash!(h::Dict{K,V}, key) where V where K
             end
         end
 
-        index = (index & (sz-1)) + 1
+        index = (index + 1) & (sz-1)
         iter += 1
         iter > maxprobe && break
     end
@@ -307,9 +307,9 @@ function ht_keyindex2_shorthash!(h::Dict{K,V}, key) where V where K
     @inbounds while iter < maxallowed
         if !isslotfilled(h,index)
             h.maxprobe = iter
-            return -index, sh
+            return -(index + 1), sh
         end
-        index = (index & (sz-1)) + 1
+        index = (index + 1) & (sz-1)
         iter += 1
     end
 
@@ -357,12 +357,12 @@ function setindex!(h::Dict{K,V}, v0, key::K) where V where K
     v = v0 isa V ? v0 : convert(V, v0)::V
     index, sh = ht_keyindex2_shorthash!(h, key)
 
-    if index > 0
+    if index >= 0
         h.age += 1
         @inbounds h.keys[index] = key
         @inbounds h.vals[index] = v
     else
-        @inbounds _setindex!(h, v, key, -index, sh)
+        @inbounds _setindex!(h, v, key, -index - 1, sh)
     end
 
     return h
@@ -372,12 +372,12 @@ function setindex!(h::Dict{K,Any}, v, key::K) where K
     @nospecialize v
     index, sh = ht_keyindex2_shorthash!(h, key)
 
-    if index > 0
+    if index >= 0
         h.age += 1
         @inbounds h.keys[index] = key
         @inbounds h.vals[index] = v
     else
-        @inbounds _setindex!(h, v, key, -index, sh)
+        @inbounds _setindex!(h, v, key, -index - 1, sh)
     end
 
     return h
@@ -454,7 +454,7 @@ end
 function get!(default::Callable, h::Dict{K,V}, key::K) where V where K
     index, sh = ht_keyindex2_shorthash!(h, key)
 
-    index > 0 && return h.vals[index]
+    index >= 0 && return h.vals[index]
 
     age0 = h.age
     v = default()
@@ -464,12 +464,12 @@ function get!(default::Callable, h::Dict{K,V}, key::K) where V where K
     if h.age != age0
         index, sh = ht_keyindex2_shorthash!(h, key)
     end
-    if index > 0
+    if index >= 0
         h.age += 1
         @inbounds h.keys[index] = key
         @inbounds h.vals[index] = v
     else
-        @inbounds _setindex!(h, v, key, -index, sh)
+        @inbounds _setindex!(h, v, key, -index - 1, sh)
     end
     return v
 end
@@ -582,7 +582,7 @@ end
 
 function pop!(h::Dict, key)
     index = ht_keyindex(h, key)
-    return index > 0 ? _pop!(h, index) : throw(KeyError(key))
+    return index >= 0 ? _pop!(h, index) : throw(KeyError(key))
 end
 
 """
@@ -611,7 +611,7 @@ pop!(collection, key, default)
 
 function pop!(h::Dict, key, default)
     index = ht_keyindex(h, key)
-    return index > 0 ? _pop!(h, index) : default
+    return index >= 0 ? _pop!(h, index) : default
 end
 
 function pop!(h::Dict)
@@ -632,12 +632,12 @@ function _delete!(h::Dict{K,V}, index) where {K,V}
     # if the next slot is empty we don't need a tombstone
     # and can remove all tombstones that were required by the element we just deleted
     ndel = 1
-    nextind = (index & (sz-1)) + 1
+    nextind = (index + 1) & (sz-1)
     if isslotempty(h, nextind)
         while true
             ndel -= 1
             slots[index] = 0x00
-            index = ((index - 2) & (sz-1)) + 1
+            index = (index - 1) & (sz-1)
             isslotmissing(h, index) || break
         end
     else
@@ -675,7 +675,7 @@ delete!(collection, key)
 
 function delete!(h::Dict, key)
     index = ht_keyindex(h, key)
-    if index > 0
+    if index >= 0
         _delete!(h, index)
     end
     return h
@@ -683,22 +683,23 @@ end
 
 function skip_deleted(h::Dict, i)
     L = length(h.slots)
-    for i = i:L
+    (i < 0 || i >= L) && return -1
+    for i = i:L-1
         @inbounds if isslotfilled(h,i)
-            return  i
+            return i
         end
     end
-    return 0
+    return -1
 end
 function skip_deleted_floor!(h::Dict)
     idx = skip_deleted(h, h.idxfloor)
-    if idx != 0
+    if idx >= 0
         h.idxfloor = idx
     end
     idx
 end
 
-@propagate_inbounds _iterate_dict(t::Dict{K,V}, i) where {K,V} = i == 0 ? nothing : (Pair{K,V}(t.keys[i],t.vals[i]), i == typemax(Int) ? 0 : i+1)
+@propagate_inbounds _iterate_dict(t::Dict{K,V}, i) where {K,V} = i < 0 ? nothing : (Pair{K,V}(t.keys[i],t.vals[i]), i == typemax(Int) ? -1 : i+1)
 @propagate_inbounds function iterate(t::Dict)
     _iterate_dict(t, skip_deleted(t, t.idxfloor))
 end
@@ -710,16 +711,16 @@ length(t::Dict) = t.count
 @propagate_inbounds Iterators.only(t::Dict) = Iterators._only(t, first)
 
 @propagate_inbounds function Base.iterate(v::T, i::Int = v.dict.idxfloor) where T <: Union{KeySet{<:Any, <:Dict}, ValueIterator{<:Dict}}
-    i == 0 && return nothing
+    i < 0 && return nothing
     i = skip_deleted(v.dict, i)
-    i == 0 && return nothing
+    i < 0 && return nothing
     vals = T <: KeySet ? v.dict.keys : v.dict.vals
-    (@inbounds vals[i], i == typemax(Int) ? 0 : i+1)
+    (@inbounds vals[i], i == typemax(Int) ? -1 : i+1)
 end
 
 function filter!(pred, h::Dict{K,V}) where {K,V}
     h.count == 0 && return h
-    @inbounds for i=1:length(h.slots)
+    @inbounds for i=0:length(h.slots)-1
         if ((h.slots[i] & 0x80) != 0) && !pred(Pair{K,V}(h.keys[i], h.vals[i]))
             _delete!(h, i)
         end
@@ -737,7 +738,7 @@ function map!(f, iter::ValueIterator{<:Dict})
     dict = iter.dict
     vals = dict.vals
     # @inbounds is here so that it gets propagated to isslotfilled
-    @inbounds for i = dict.idxfloor:lastindex(vals)
+    @inbounds for i = dict.idxfloor:length(vals)-1
         if isslotfilled(dict, i)
             vals[i] = f(vals[i])
         end
@@ -749,7 +750,7 @@ function mergewith!(combine, d1::Dict{K, V}, d2::AbstractDict) where {K, V}
     haslength(d2) && sizehint!(d1, length(d1) + length(d2), shrink=false)
     for (k, v) in d2
         i, sh = ht_keyindex2_shorthash!(d1, k)
-        if i > 0
+        if i >= 0
             d1.vals[i] = combine(d1.vals[i], v)
         else
             if !(k isa K)
@@ -762,7 +763,7 @@ function mergewith!(combine, d1::Dict{K, V}, d2::AbstractDict) where {K, V}
             if !isa(v, V)
                 v = convert(V, v)::V
             end
-            @inbounds _setindex!(d1, v, k, -i, sh)
+            @inbounds _setindex!(d1, v, k, -i - 1, sh)
         end
     end
     return d1
@@ -803,8 +804,8 @@ Return a new `ImmutableDict` containing all of the `key => value` pairs of `d`
 as well as new entries for the provided `key => value` pairs.
 """
 ImmutableDict
-ImmutableDict(KV::Pair{K,V}) where {K,V} = ImmutableDict{K,V}(KV[1], KV[2])
-ImmutableDict(t::ImmutableDict{K,V}, KV::Pair) where {K,V} = ImmutableDict{K,V}(t, KV[1], KV[2])
+ImmutableDict(KV::Pair{K,V}) where {K,V} = ImmutableDict{K,V}(KV[0], KV[1])
+ImmutableDict(t::ImmutableDict{K,V}, KV::Pair) where {K,V} = ImmutableDict{K,V}(t, KV[0], KV[1])
 ImmutableDict(t::ImmutableDict{K,V}, KV::Pair, rest::Pair...) where {K,V} =
     ImmutableDict(ImmutableDict(t, KV), rest...)
 ImmutableDict(KV::Pair, rest::Pair...) = ImmutableDict(ImmutableDict(KV), rest...)

@@ -123,7 +123,7 @@ function uv_pollcb(handle::Ptr{Cvoid}, status::Int32, events::Int32)
             notify_error(t.notify, _UVError("FDWatcher", status))
         else
             t.events |= events
-            if t.active[1] || t.active[2]
+            if t.active[0] || t.active[1]
                 if isempty(t.notify)
                     # if we keep hearing about events when nobody appears to be listening,
                     # stop the poll to save cycles
@@ -341,21 +341,21 @@ mutable struct _FDWatcher
         @static if Sys.isunix()
             _FDWatcher(fd::RawFD, mask::FDEvent) = _FDWatcher(fd, mask.readable, mask.writable)
             function _FDWatcher(fd::RawFD, readable::Bool, writable::Bool)
-                fdnum = Core.Intrinsics.bitcast(Int32, fd) + 1
-                if fdnum <= 0
+                fdnum = Core.Intrinsics.bitcast(Int32, fd)
+                if fdnum < 0
                     throw(ArgumentError("Passed file descriptor fd=$(fd) is not a valid file descriptor"))
                 elseif !readable && !writable
                     throw(ArgumentError("must specify at least one of readable or writable to create a FDWatcher"))
                 end
 
                 iolock_begin()
-                if fdnum > length(FDWatchers)
+                if fdnum >= length(FDWatchers)
                     old_len = length(FDWatchers)
-                    resize!(FDWatchers, fdnum)
-                    FDWatchers[(old_len + 1):fdnum] .= nothing
+                    resize!(FDWatchers, fdnum + 1)
+                    FDWatchers[old_len:fdnum] .= nothing
                 elseif FDWatchers[fdnum] !== nothing
                     this = FDWatchers[fdnum]::_FDWatcher
-                    this.refcount = (this.refcount[1] + Int(readable), this.refcount[2] + Int(writable))
+                    this.refcount = (this.refcount[0] + Int(readable), this.refcount[1] + Int(writable))
                     iolock_end()
                     return this
                 end
@@ -412,8 +412,8 @@ mutable struct _FDWatcher
     @static if Sys.iswindows()
         _FDWatcher(fd::RawFD, mask::FDEvent) = _FDWatcher(fd, mask.readable, mask.writable)
         function _FDWatcher(fd::RawFD, readable::Bool, writable::Bool)
-            fdnum = Core.Intrinsics.bitcast(Int32, fd) + 1
-            if fdnum <= 0
+            fdnum = Core.Intrinsics.bitcast(Int32, fd)
+            if fdnum < 0
                 throw(ArgumentError("Passed file descriptor fd=$(fd) is not a valid file descriptor"))
             end
 
@@ -505,7 +505,7 @@ close(t::_FDWatcher, mask::FDEvent) = close(t, mask.readable, mask.writable)
 function close(t::_FDWatcher, readable::Bool, writable::Bool)
     iolock_begin()
     if t.refcount != (0, 0)
-        t.refcount = (t.refcount[1] - Int(readable), t.refcount[2] - Int(writable))
+        t.refcount = (t.refcount[0] - Int(readable), t.refcount[1] - Int(writable))
     end
     if t.refcount == (0, 0)
         uvfinalize(t)
@@ -606,9 +606,9 @@ function _wait(fdw::_FDWatcher, mask::FDEvent, tok::Base.MaybeToken)
         elseif events.timedout
             fdw.handle == C_NULL && throw(ArgumentError("FDWatcher is closed"))
             # start_watching to make sure the poll is active
-            readable = fdw.refcount[1] > 0
-            writable = fdw.refcount[2] > 0
-            if fdw.active[1] != readable || fdw.active[2] != writable
+            readable = fdw.refcount[0] > 0
+            writable = fdw.refcount[1] > 0
+            if fdw.active[0] != readable || fdw.active[1] != writable
                 # make sure the READABLE / WRITEABLE state is updated
                 uv_jl_pollcb = @cfunction(uv_pollcb, Cvoid, (Ptr{Cvoid}, Cint, Cint))
                 uv_error("FDWatcher (start)",

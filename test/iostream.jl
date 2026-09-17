@@ -194,3 +194,46 @@ end
 @testset "fd" begin
     @test open(fd, tempname(), "w") isa RawFD
 end
+
+# File reads and delimiter copies start at byte zero and preserve unused buffer space.
+@testset "zero-origin buffered file IO" begin
+    mktemp() do path, io
+        data = collect(UInt8(0):UInt8(255))
+        write(io, data)
+        flush(io)
+        @test read(path) == data
+        seekstart(io)
+        b = fill(UInt8(0xaa), 258)
+        @test readbytes!(io, b, 256) == 256
+        @test b[0:255] == data && b[256:257] == UInt8[0xaa, 0xaa]
+        @test eof(io) && position(io) == 256
+        seekstart(io)
+        b = UInt8[]
+        @test readbytes!(io, b, 300) == 256 && b == data
+        seekstart(io)
+        b = fill(UInt8(0xaa), 8)
+        @test readbytes!(io, b, 4; all=false) == 4 && b[0:3] == UInt8[0, 1, 2, 3] && b[4] == 0xaa
+        for _ in 1:4
+            @test read(path) == data
+            GC.gc()
+        end
+    end
+    mktemp() do path, io
+        @test isempty(read(path))
+        write(io, "abc|rest\nlast")
+        flush(io)
+        @test read(path, String) == "abc|rest\nlast"
+        seekstart(io)
+        out = IOBuffer(sizehint=1)
+        copyuntil(out, io, UInt8('|'))
+        @test position(out) == 3 && String(take!(out)) == "abc" && position(io) == 4
+        seekstart(io)
+        out = IOBuffer(; append=true)
+        write(out, "xy")
+        seekstart(out)
+        copyuntil(out, io, UInt8('|'); keep=true)
+        @test String(take!(out)) == "xyabc|"
+        seekstart(io)
+        @test readuntil(io, '|') == "abc" && readline(io) == "rest" && read(io, String) == "last"
+    end
+end

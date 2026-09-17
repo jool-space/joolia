@@ -86,8 +86,8 @@ end
 
 end # module HistorySearchDynamicMode
 
-charseek(buf, i) = seek(buf, nextind(content(buf), 0, i+1)-1)
-charpos(buf, pos=position(buf)) = length(content(buf), 1, pos)
+charseek(buf, i) = seek(buf, nextind(content(buf), 0, i))
+charpos(buf, pos=position(buf)) = pos == 0 ? 0 : length(content(buf), 0, pos - 1)
 
 function transform!(f, s, i = -1) # i is char-based (not bytes) buffer position
     buf = buffer(s)
@@ -467,7 +467,7 @@ end
     buf = IOBuffer()
     mode = Ref{Symbol}()
     transpose!(i) = transform!(buf -> LineEdit.edit_transpose_words(buf, mode[]),
-                               buf, i)[1:2]
+                               buf, i)[0:1]
 
     mode[] = :readline
     edit_insert(buf, "àbç def  gh ")
@@ -514,9 +514,9 @@ let s = new_state(),
 
     seekend(buf)
     LineEdit.move_line_start(s)
-    @test position(buf) == sizeof("first line\nsecond line\n")
+    @test position(buf) == sizeof("first line\nsecond line\n") - 1
     LineEdit.move_line_start(s)
-    @test position(buf) == sizeof("first line\nsecond line\n")
+    @test position(buf) == sizeof("first line")
     s.key_repeats = 1 # Manually flag a repeated keypress
     LineEdit.move_line_start(s)
     s.key_repeats = 0
@@ -561,7 +561,7 @@ end
     @test ps.indent == -1
     # the prompt is modified afterwards to a function
     ps.p.prompt = let i = 0
-        () -> ["Julia is Fun! > ", "> "][mod1(i+=1, 2)] # lengths are 16 and 2
+        () -> ("Julia is Fun! > ", "> ")[mod(i+=1, 2)] # lengths are 16 and 2
     end
     buf = buffer(ps)
     write(buf, "begin\n    julia = :fun\nend")
@@ -608,6 +608,70 @@ end
         s.current_action = :unknown
         edit_move(s)
         @test !LineEdit.is_region_active(s)
+    end
+end
+
+# Aligned backspace deletes whitespace without consuming adjacent text or UTF-8 bytes.
+@testset "zero-origin backspace boundaries" begin
+    for prefix in ("o", "α", "界", "abc", "abcd"), spaces in 1:3,
+            adjust in (false, true)
+        buf = IOBuffer()
+        write(buf, prefix * " "^spaces)
+        @test LineEdit.edit_backspace(buf, true, adjust)
+        result = String(take!(buf))
+        @test startswith(result, prefix)
+        @test isvalid(result)
+        if prefix == "o"
+            @test result == prefix * " "^(spaces-1)
+        end
+    end
+    for (input, cursor, adjust, expected, expected_cursor) in (
+            ("", 0, true, "", 0),
+            ("o   ", 0, true, "o   ", 0),
+            ("abcd X", 5, true, "abcdX", 4),
+            ("abcd α", 5, true, "abcdα", 4),
+            ("abcd X", 5, false, "abcdX", 4),
+            ("    x", 4, true, "x", 0),
+            ("        x", 7, true, "    x", 4),
+            ("        x", 3, true, "    x", 0),
+            ("        x", 3, false, "     x", 0),
+            ("          \nend", 3, true, "\nend", 0),
+            ("\no   ", 5, true, "\no  ", 4),
+            ("before\no  ", 10, true, "before\no ", 9),
+            ("α ", 3, false, "α", 2),
+            ("o    ", 5, true, "o   ", 4))
+        buf = IOBuffer()
+        write(buf, input)
+        seek(buf, cursor)
+        @test LineEdit.edit_backspace(buf, true, adjust) == (cursor != 0)
+        @test position(buf) == expected_cursor
+        @test String(take!(buf)) == expected
+    end
+    for (input, cursor, expected_cursor) in (("abc", 3, 0), ("\nx", 2, 1),
+            ("α\nx", 4, 3), ("a\nb\nc", 4, 4), ("a\nb\nc", 3, 2))
+        state = new_state()
+        edit_insert(state, input)
+        seek(buffer(state), cursor)
+        LineEdit.move_line_start(state)
+        @test position(buffer(state)) == expected_cursor
+        @test content(state) == input
+    end
+    for suffix in ("X", "α")
+        buf = IOBuffer()
+        write(buf, " "^10 * suffix)
+        truncate(buf, 10)
+        seek(buf, 3)
+        @test LineEdit.edit_insert_tab(buf, true, true)
+        @test position(buf) == 4
+        @test String(take!(buf)) == " "^4
+    end
+    for prompt in ("julia> ", "joolia> ", "long prompt> "), spaces in 1:3
+        term = FakeTerminal(IOBuffer(), IOBuffer(), IOBuffer())
+        state = LineEdit.init_state(term, LineEdit.Prompt(prompt))
+        edit_insert(state, "o" * " "^spaces)
+        LineEdit.edit_backspace(state)
+        @test content(state) == "o" * " "^(spaces-1)
+        @test position(buffer(state)) == spaces
     end
 end
 
@@ -728,7 +792,7 @@ end
     edit_insert(s, "ça ≡ nothing")
     @test @inferred transform!(LineEdit.edit_copy_region, s) == ("ça ≡ nothing", 12, 0)
     @test s.kill_ring[end] == "ça ≡ nothing"
-    @test @inferred transform!(LineEdit.edit_exchange_point_and_mark, s)[2:3] == (0, 12)
+    @test @inferred transform!(LineEdit.edit_exchange_point_and_mark, s)[1:2] == (0, 12)
     charseek(buf, 8); setmark(s)
     charseek(buf, 1)
     @test @inferred transform!(LineEdit.edit_kill_region, s) == ("çhing", 1, 1)
@@ -1384,4 +1448,48 @@ end
         props = receive("4;1;rgb:ff/00/00\a", awaiting = false)
         @test isempty(props.colors)
     end
+end
+
+@testset "zero-origin completion and undo storage" begin
+    @test LineEdit.common_prefix(["alpha", "alps"]) == "al"
+    @test LineEdit.common_prefix(["x", "x"]) == "x"
+
+    s = new_state()
+    ps = s.mode_state[s.current_mode]
+    LineEdit.push_undo(ps)
+    LineEdit.edit_insert(buffer(ps), 'a')
+    @test content(ps) == "a"
+    @test ps.undo_idx == 1
+    @test length(ps.undo_buffers) == 1
+    @test LineEdit.edit_undo!(ps)
+    @test content(ps) == ""
+    @test LineEdit.edit_redo!(ps)
+    @test content(ps) == "a"
+
+    # Newline delimiters are kept as buffer positions, so indentation starts
+    # immediately after the delimiter on non-first lines.
+    buf = IOBuffer("a\n    b")
+    @test LineEdit.leadingspaces(buf, 1) == 4
+    LineEdit._edit_indent(buf, 1, 1)
+    @test String(take!(buf)) == "a\n     b"
+end
+
+@testset "zero-origin styled refresh" begin
+    term = FakeTerminal(IOBuffer(), IOBuffer(), IOBuffer(), false)
+    repl = REPL.LineEditREPL(term, false)
+    repl.options.style_input = true
+    prompt = LineEdit.Prompt("julia> "; repl)
+    prompt.styling_passes = [LineEdit.SyntaxHighlightPass()]
+    buf = IOBuffer("x")
+    termbuf = REPL.Terminals.TerminalBuffer(IOBuffer())
+    @test_nowarn LineEdit.refresh_multi_line(termbuf, term, buf,
+        LineEdit.InputAreaState(0, 0), prompt)
+end
+
+@testset "zero-origin terminal palette response" begin
+    props = LineEdit.TerminalProperties()
+    props.awaiting_colors = true
+    LineEdit.receive_osc!(props, IOBuffer("4;1;rgb:aa/bb/cc\a"))
+    @test length(props.colors) == 1
+    @test first(props.colors).first == :red
 end

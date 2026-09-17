@@ -10,7 +10,7 @@ function parserow(stream::IO)
         line = readline(stream)
         row = split(line, r"(?<!\\)\|")
         length(row) == 1 && return
-        isempty(row[1]) && popfirst!(row)
+        isempty(row[0]) && popfirst!(row)
         map!(x -> strip(replace(x, "\\|" => "|")), row, row)
         isempty(row[end]) && pop!(row)
         return row
@@ -30,7 +30,7 @@ function parsealign(row)
     for s in row
         (length(s) ≥ 3 && s ⊆ Set("-:")) || return
         push!(align,
-              s[1] == ':' ? (s[end] == ':' ? :c : :l) :
+              s[0] == ':' ? (s[end] == ':' ? :c : :l) :
               s[end] == ':' ? :r :
               default_align)
     end
@@ -67,7 +67,7 @@ function html(io::IO, md::Table)
                 for (j, c) in enumerate(md.rows[i])
                     alignment = md.align[j]
                     alignment = alignment === :l ? "left" : alignment === :r ? "right" : "center"
-                     withtag(io, i == 1 ? :th : :td, ("align", alignment)) do
+                     withtag(io, i == 0 ? :th : :td, ("align", alignment)) do
                         htmlinline(io, c)
                     end
                 end
@@ -89,7 +89,7 @@ padding(width, twidth, a) =
 
 function padcells!(rows, align; len = length, min = 0)
     widths = colwidths(rows, len = len, min = min)
-    for i = 1:length(rows), j = axes(rows[1],1)
+    for i in eachindex(rows), j in eachindex(rows[i])
         cell = rows[i][j]
         lpad, rpad = padding(len(cell), widths[j], align[j])
         rows[i][j] = " "^lpad * cell * " "^rpad
@@ -108,13 +108,13 @@ function plain(io::IO, md::Table)
         replace(sprint(plaininline, each), "|" => "\\|")
     end
     padcells!(cells, md.align, len = length, min = 3)
-    for i = axes(cells,1)
+    for i in eachindex(cells)
         print(io, "| ")
         join(io, cells[i], " | ")
         println(io, " |")
-        if i == 1
+        if i == 0
             print(io, "|")
-            join(io, [_dash(length(cells[i][j]), md.align[j]) for j = axes(cells[1],1)], "|")
+            join(io, [_dash(length(cells[i][j]), md.align[j]) for j in eachindex(cells[i])], "|")
             println(io, "|")
         end
     end
@@ -123,17 +123,17 @@ end
 function rst(io::IO, md::Table)
     cells = mapmap(rstinline, md.rows)
     padcells!(cells, md.align, len = length, min = 3)
-    single = ["-"^length(c) for c in cells[1]]
-    double = ["="^length(c) for c in cells[1]]
+    single = ["-"^length(c) for c in cells[0]]
+    double = ["="^length(c) for c in cells[0]]
     function print_row(row, row_sep, col_sep)
         print(io, col_sep, row_sep)
         join(io, row, string(row_sep, col_sep, row_sep))
         println(io, row_sep, col_sep)
     end
     print_row(single, '-', '+')
-    for i = 1:length(cells)
+    for i in eachindex(cells)
         print_row(cells[i], ' ', '|')
-        i ≡ 1 ? print_row(double, '=', '+') :
+        i ≡ 0 ? print_row(double, '=', '+') :
                 print_row(single, '-', '+')
     end
 end
@@ -142,15 +142,15 @@ function term(io::IO, md::Table, columns)
     margin_str = " "^margin
     cells = mapmap(x -> annotprint(terminline, x), md.rows)
     padcells!(cells, md.align, len = textwidth)
-    for i = 1:length(cells)
+    for i in eachindex(cells)
         print(io, margin_str)
         join(io, cells[i], " ")
-        if i == 1
+        if i == 0
             println(io)
             print(io, margin_str)
-            join(io, ["–"^textwidth(cells[i][j]) for j = 1:length(cells[1])], " ")
+            join(io, ["–"^textwidth(cells[i][j]) for j in eachindex(cells[i])], " ")
         end
-        i < length(cells) && println(io)
+        i < lastindex(cells) && println(io)
     end
 end
 
@@ -160,11 +160,11 @@ function latex(io::IO, md::Table)
         println(io, "{$(join(align, " | "))}")
         for (i, row) in enumerate(md.rows)
             for (j, cell) in enumerate(row)
-                j != 1 && print(io, " & ")
+                j != 0 && print(io, " & ")
                 latexinline(io, cell)
             end
             println(io, " \\\\")
-            if i == 1
+            if i == 0
                 println(io, "\\hline")
             end
         end

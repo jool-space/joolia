@@ -17,16 +17,16 @@ julia> ntuple(i -> 2*i, 4)
 @inline function ntuple(f::F, n::Int) where F
     # marked inline since this benefits from constant propagation of `n`
     t = n == 0  ? () :
-        n == 1  ? (f(1),) :
-        n == 2  ? (f(1), f(2)) :
-        n == 3  ? (f(1), f(2), f(3)) :
-        n == 4  ? (f(1), f(2), f(3), f(4)) :
-        n == 5  ? (f(1), f(2), f(3), f(4), f(5)) :
-        n == 6  ? (f(1), f(2), f(3), f(4), f(5), f(6)) :
-        n == 7  ? (f(1), f(2), f(3), f(4), f(5), f(6), f(7)) :
-        n == 8  ? (f(1), f(2), f(3), f(4), f(5), f(6), f(7), f(8)) :
-        n == 9  ? (f(1), f(2), f(3), f(4), f(5), f(6), f(7), f(8), f(9)) :
-        n == 10 ? (f(1), f(2), f(3), f(4), f(5), f(6), f(7), f(8), f(9), f(10)) :
+        n == 1  ? (f(0),) :
+        n == 2  ? (f(0), f(1)) :
+        n == 3  ? (f(0), f(1), f(2)) :
+        n == 4  ? (f(0), f(1), f(2), f(3)) :
+        n == 5  ? (f(0), f(1), f(2), f(3), f(4)) :
+        n == 6  ? (f(0), f(1), f(2), f(3), f(4), f(5)) :
+        n == 7  ? (f(0), f(1), f(2), f(3), f(4), f(5), f(6)) :
+        n == 8  ? (f(0), f(1), f(2), f(3), f(4), f(5), f(6), f(7)) :
+        n == 9  ? (f(0), f(1), f(2), f(3), f(4), f(5), f(6), f(7), f(8)) :
+        n == 10 ? (f(0), f(1), f(2), f(3), f(4), f(5), f(6), f(7), f(8), f(9)) :
         _ntuple(f, n)
     return t
 end
@@ -36,13 +36,13 @@ ntuple(f::F, n::Integer) where F = ntuple(f, convert(Int, n)::Int)
 function _ntuple(f::F, n::Int) where F
     @noinline
     (n >= 0) || throw(ArgumentError(LazyString("tuple length should be ≥ 0, got ", n)))
-    ([f(i) for i = 1:n]...,)
+    ([f(i) for i = 0:n-1]...,)
 end
 
 function ntupleany(f, n)
     @noinline
     (n >= 0) || throw(ArgumentError(LazyString("tuple length should be ≥ 0, got ", n)))
-    (Any[f(i) for i = 1:n]...,)
+    (Any[f(i) for i = 0:n-1]...,)
 end
 
 """
@@ -66,9 +66,9 @@ julia> ntuple(i -> 2*i, Val(4))
     N::Int
     (N >= 0) || throw(ArgumentError(LazyString("tuple length should be ≥ 0, got ", N)))
     if @generated
-        :(@ntuple $N i -> f(i))
+        Expr(:tuple, Any[:(f($i)) for i in 0:N-1]...)
     else
-        Tuple(f(i) for i = 1:(N::Int))
+        ntupleany(f, N::Int)
     end
 end
 
@@ -89,6 +89,6 @@ end
 # Specialized extensions for NTuple
 function reverse(t::NTuple{N}) where N
     ntuple(Val{N}()) do i
-        t[end+1-i]
+        t[end-i]
     end::typeof(t)
 end

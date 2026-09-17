@@ -4,16 +4,16 @@ module Rounding
 
 let fenv_consts = Array{Cint,1}(undef, 9)
     ccall(:jl_get_fenv_consts, Cvoid, (Ptr{Cint},), fenv_consts)
-    global const JL_FE_INEXACT = fenv_consts[1]
-    global const JL_FE_UNDERFLOW = fenv_consts[2]
-    global const JL_FE_OVERFLOW = fenv_consts[3]
-    global const JL_FE_DIVBYZERO = fenv_consts[4]
-    global const JL_FE_INVALID = fenv_consts[5]
+    global const JL_FE_INEXACT = fenv_consts[0]
+    global const JL_FE_UNDERFLOW = fenv_consts[1]
+    global const JL_FE_OVERFLOW = fenv_consts[2]
+    global const JL_FE_DIVBYZERO = fenv_consts[3]
+    global const JL_FE_INVALID = fenv_consts[4]
 
-    global const JL_FE_TONEAREST = fenv_consts[6]
-    global const JL_FE_UPWARD = fenv_consts[7]
-    global const JL_FE_DOWNWARD = fenv_consts[8]
-    global const JL_FE_TOWARDZERO = fenv_consts[9]
+    global const JL_FE_TONEAREST = fenv_consts[5]
+    global const JL_FE_UPWARD = fenv_consts[6]
+    global const JL_FE_DOWNWARD = fenv_consts[7]
+    global const JL_FE_TOWARDZERO = fenv_consts[8]
 end
 
 export

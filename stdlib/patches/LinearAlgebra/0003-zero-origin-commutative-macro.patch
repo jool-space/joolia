@@ -1,0 +1,34 @@
+--- a/src/special.jl
++++ b/src/special.jl
+@@ -79,9 +79,9 @@
+ #     f(y::T, x::S) where {S,T} = f(x, y)
+ macro commutative(myexpr)
+     @assert Base.is_function_def(myexpr) # Make sure it is a function definition
+-    y = copy(myexpr.args[1].args[2:end])
++    y = copy(myexpr.args[0].args[1:end])
+     reverse!(y)
+-    reversed_call = Expr(:(=), Expr(:call,myexpr.args[1].args[1],y...), myexpr.args[1])
++    reversed_call = Expr(:(=), Expr(:call,myexpr.args[0].args[0],y...), myexpr.args[0])
+     esc(Expr(:block, myexpr, reversed_call))
+ end
+ 
+--- a/test/special.jl
++++ b/test/special.jl
+@@ -840,4 +840,17 @@
+     @test ST == diagm(-1=>fill(2, length(ev)), 0=>fill(2, length(dv)), 1=>fill(2, length(ev)))
+ end
+ 
++
++# Reversed methods must preserve the signature/body distinction and argument values.
++LinearAlgebra.@commutative function _joolia_commutative_long(a::Int, b::Float64)
++    (a, b)
++end
++LinearAlgebra.@commutative _joolia_commutative_short(a::Int, b::Float64) = (a, b)
++@testset "zero-origin commutative macro arguments" begin
++    @test _joolia_commutative_long(2, 3.0) == (2, 3.0)
++    @test _joolia_commutative_long(3.0, 2) == (2, 3.0)
++    @test _joolia_commutative_short(4, 5.0) == (4, 5.0)
++    @test _joolia_commutative_short(5.0, 4) == (4, 5.0)
++end
++
+ end # module TestSpecial

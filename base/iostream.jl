@@ -509,15 +509,15 @@ function copyuntil(out::IOBuffer, s::IOStream, delim::UInt8; keep::Bool=false, c
     while true
         d = out.data
         len = length(d)
-        ptr = (out.append ? out.size+1 : out.ptr)
+        ptr = (out.append ? out.size : out.ptr)
         GC.@preserve d @_lock_ios s n=
             Int(ccall(:jl_readuntil_buf, Csize_t, (Ptr{Cvoid}, UInt8, Ptr{UInt8}, Csize_t),
-                s.ios, delim, pointer(d, ptr), (len - ptr + 1) % Csize_t))
+                s.ios, delim, pointer(d, ptr), (len - ptr) % Csize_t))
         iszero(n) && break
         ptr += n
         found = (d[ptr - 1] == delim)
         found && !keep && (ptr -= 1)
-        out.size = max(out.size, ptr - 1)
+        out.size = max(out.size, ptr)
         out.append || (out.ptr = ptr)
         found && break
         (eof(s) || len == out.maxsize) && break
@@ -551,7 +551,7 @@ function readbytes_all!(s::IOStream, b::MutableDenseArrayType{UInt8}, nb::Intege
                 end
             end
             thisr = Int(ccall(:ios_readall, Csize_t, (Ptr{Cvoid}, Ptr{Cvoid}, Csize_t),
-                            s.ios, pointer(b, nr+1), min(lb-nr, nb-nr)))
+                            s.ios, pointer(b, nr), min(lb-nr, nb-nr)))
             nr += thisr
             (nr == nb || thisr == 0 || _eof_nolock(s)) && break
         end

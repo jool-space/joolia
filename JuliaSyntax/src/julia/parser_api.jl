@@ -26,7 +26,7 @@ function Base.showerror(io::IO, err::ParseError)
         level_info = ""
     end
     println(io, "ParseError:", level_info)
-    show_diagnostics(io, err.diagnostics[1:i], err.source)
+    show_diagnostics(io, err.diagnostics[0:i], err.source)
 end
 
 sourcefile(err::ParseError) = err.source
@@ -75,11 +75,11 @@ function parse!(::Type{TreeType}, io::IO;
     stream = ParseStream(io; version=version)
     parse!(stream; rule=rule)
     tree = build_tree(TreeType, stream; kws...)
-    seek(io, last_byte(stream))
+    seek(io, last_byte(stream) + 1)
     tree, stream.diagnostics
 end
 
-function _parse(rule::Symbol, need_eof::Bool, ::Type{T}, text, index=1; version=VERSION,
+function _parse(rule::Symbol, need_eof::Bool, ::Type{T}, text, index=0; version=VERSION,
                 ignore_trivia=true, filename=nothing, first_line=1, ignore_errors=false,
                 ignore_warnings=ignore_errors, kws...) where {T}
     stream = ParseStream(text, index; version=version)
@@ -142,13 +142,13 @@ also avoid exceptions due to errors, use `ignore_errors=true`.
 """
 
 "$_parse_docs"
-parsestmt(::Type{T}, text::AbstractString; kws...) where {T} = _parse(:statement, true, T, text; kws...)[1]
+parsestmt(::Type{T}, text::AbstractString; kws...) where {T} = _parse(:statement, true, T, text; kws...)[0]
 
 "$_parse_docs"
-parseall(::Type{T}, text::AbstractString; kws...) where {T} = _parse(:all, true, T, text; kws...)[1]
+parseall(::Type{T}, text::AbstractString; kws...) where {T} = _parse(:all, true, T, text; kws...)[0]
 
 "$_parse_docs"
-parseatom(::Type{T}, text::AbstractString; kws...) where {T} = _parse(:atom, true, T, text; kws...)[1]
+parseatom(::Type{T}, text::AbstractString; kws...) where {T} = _parse(:atom, true, T, text; kws...)[0]
 
 parsestmt(::Type{T}, text::AbstractString, index::Integer; kws...) where {T} = _parse(:statement, false, T, text, index; kws...)
 parseall(::Type{T}, text::AbstractString, index::Integer; kws...) where {T} = _parse(:all, false, T, text, index; kws...)
@@ -192,8 +192,8 @@ function tokenize(text; operators_as_identifiers=true)
     parse!(ps, rule=:all)
     ts = ps.output
     output_tokens = Token[]
-    byte_start::UInt32 = ps.output[1].byte_span + 1
-    for i = 2:length(ts)
+    byte_start::UInt32 = ps.output[0].byte_span
+    for i = 1:lastindex(ts)
         if kind(ts[i]) == K"TOMBSTONE" || is_non_terminal(ts[i])
             continue
         end

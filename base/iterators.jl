@@ -10,7 +10,7 @@ import Base: @__MODULE__, parentmodule
 const Base = parentmodule(@__MODULE__)
 using .Base:
     @inline, Pair, Pairs, IndexLinear, AbstractVector, Vector,
-    SizeUnknown, HasLength, HasShape, IsInfinite, EltypeUnknown, HasEltype, OneTo,
+    SizeUnknown, HasLength, HasShape, IsInfinite, EltypeUnknown, HasEltype, ZeroTo,
     @propagate_inbounds, @boundscheck, @inbounds, Generator, IdDict,
     AbstractRange, AbstractUnitRange, UnitRange, LinearIndices, TupleOrBottom,
     :, |, +, -, *, !==, !, ==, !=, <=, <, >, >=, =>, missing,
@@ -137,7 +137,7 @@ last(r::Reverse) = first(r.itr) # the first shall be last
     y = iterate(state...)
     y === nothing && return y
     idx, itrs = y
-    (A.itr[idx], (state[1], itrs))
+    (A.itr[idx], (state[0], itrs))
 end
 
 # Fallback method of `iterate(::Reverse{T})` which assumes the collection has `getindex(::T) and `reverse(eachindex(::T))`
@@ -146,7 +146,7 @@ function iterate(A::Reverse, state=(reverse(eachindex(A.itr)),))
     y = iterate(state...)
     y === nothing && return y
     idx, itrs = y
-    (A.itr[idx], (state[1], itrs))
+    (A.itr[idx], (state[0], itrs))
 end
 
 # Guard against invalidations due to spurious `Reverse{Union{}}` intersections
@@ -159,7 +159,7 @@ reverse(r::Reverse) = r.itr
 reverse(x::Union{Number,AbstractChar}) = x
 reverse(p::Pair) = Base.reverse(p) # copying pairs is cheap
 
-iterate(r::Reverse{<:Union{Tuple, NamedTuple}}, i::Int = length(r.itr)) = i < 1 ? nothing : (r.itr[i], i-1)
+iterate(r::Reverse{<:Union{Tuple, NamedTuple}}, i::Int = length(r.itr)-1) = i < 0 ? nothing : (r.itr[i], i-1)
 
 # enumerate
 
@@ -170,14 +170,14 @@ end
 """
     enumerate(iter)
 
-An iterator that yields `(i, x)` where `i` is a counter starting at 1,
-and `x` is the `i`th value from the given iterator. It's useful when
+An iterator that yields `(i, x)` where `i` is a counter starting at 0,
+and `x` is the value at iteration position `i`. It's useful when
 you need not only the values `x` over which you are iterating, but
 also the number of iterations so far.
 
 Note that `i` may not be valid for indexing `iter`, or may index a
 different element. This will happen if `iter` has indices that do not
-start at 1, and may happen for strings, dictionaries, etc.
+start at 0, and may happen for strings, dictionaries, etc.
 See the `pairs(IndexLinear(), iter)` method if you want to ensure that `i` is an index.
 
 # Examples
@@ -187,9 +187,9 @@ julia> a = ["a", "b", "c"];
 julia> for (index, value) in enumerate(a)
            println("\$index \$value")
        end
-1 a
-2 b
-3 c
+0 a
+1 b
+2 c
 
 julia> str = "naïve";
 
@@ -197,24 +197,24 @@ julia> for (i, val) in enumerate(str)
            print("i = ", i, ", val = ", val, ", ")
            try @show(str[i]) catch e println(e) end
        end
-i = 1, val = n, str[i] = 'n'
-i = 2, val = a, str[i] = 'a'
-i = 3, val = ï, str[i] = 'ï'
-i = 4, val = v, StringIndexError("naïve", 4)
-i = 5, val = e, str[i] = 'v'
+i = 0, val = n, str[i] = 'n'
+i = 1, val = a, str[i] = 'a'
+i = 2, val = ï, str[i] = 'ï'
+i = 3, val = v, StringIndexError("naïve", 3)
+i = 4, val = e, str[i] = 'v'
 ```
 """
 enumerate(iter) = Enumerate(iter)
 
 length(e::Enumerate) = length(e.itr)
 size(e::Enumerate) = size(e.itr)
-@propagate_inbounds function iterate(e::Enumerate, state=(1,))
-    i, rest = state[1], tail(state)
+@propagate_inbounds function iterate(e::Enumerate, state=(0,))
+    i, rest = state[0], tail(state)
     n = iterate(e.itr, rest...)
     n === nothing && return n
-    (i, n[1]), (i+1, n[2])
+    (i, n[0]), (i+1, n[1])
 end
-last(e::Enumerate) = (length(e.itr), last(e.itr))
+last(e::Enumerate) = (length(e.itr)-1, last(e.itr))
 
 eltype(::Type{Enumerate{I}}) where {I} = TupleOrBottom(Int, eltype(I))
 
@@ -223,13 +223,13 @@ IteratorEltype(::Type{Enumerate{I}}) where {I} = IteratorEltype(I)
 
 @inline function iterate(r::Reverse{<:Enumerate})
     ri = reverse(r.itr.itr)
-    iterate(r, (length(ri), ri))
+    iterate(r, (length(ri)-1, ri))
 end
 @inline function iterate(r::Reverse{<:Enumerate}, state)
-    i, ri, rest = state[1], state[2], tail(tail(state))
+    i, ri, rest = state[0], state[1], tail(tail(state))
     n = iterate(ri, rest...)
     n === nothing && return n
-    (i, n[1]), (i-1, ri, n[2])
+    (i, n[0]), (i-1, ri, n[1])
 end
 
 """
@@ -258,9 +258,9 @@ julia> A = ["a" "d"; "b" "e"; "c" "f"];
 julia> for (index, value) in pairs(IndexStyle(A), A)
            println("\$index \$value")
        end
-1 a
-2 b
-3 c
+0 a
+1 b
+2 c
 4 d
 5 e
 6 f
@@ -310,7 +310,7 @@ end
     x = iterate(state...)
     x === nothing && return x
     idx, next = x
-    return (_pairs_elt(r.itr, idx), (state[1], next))
+    return (_pairs_elt(r.itr, idx), (state[0], next))
 end
 
 @inline isdone(v::Pairs, state...) = isdone(keys(v), state...)
@@ -383,7 +383,7 @@ function length(z::Zip)
     return n
 end
 function _zip_min_length(is)
-    i = is[1]
+    i = is[0]
     n = _zip_min_length(tail(is))
     if IteratorSize(i) isa IsInfinite
         return n
@@ -399,7 +399,7 @@ _zip_min_length(is::Tuple{}) = nothing
 # `n` is an implementation detail, and will be the `length` of the first
 # iterator if it is statically-known and finite. Otherwise, `n` is `nothing`.
 function _zip_lengths_finite_equal(is)
-    i = is[1]
+    i = is[0]
     if IteratorSize(i) isa Union{IsInfinite, SizeUnknown}
         return (false, nothing)
     else
@@ -410,7 +410,7 @@ end
 _zip_lengths_finite_equal(is::Tuple{}) = (true, nothing)
 size(z::Zip) = _promote_tuple_shape(Base.map(size, z.is)...)
 axes(z::Zip) = _promote_tuple_shape(Base.map(axes, z.is)...)
-_promote_tuple_shape((a,)::Tuple{OneTo}, (b,)::Tuple{OneTo}) = (intersect(a, b),)
+_promote_tuple_shape((a,)::Tuple{ZeroTo}, (b,)::Tuple{ZeroTo}) = (intersect(a, b),)
 _promote_tuple_shape((m,)::Tuple{Integer}, (n,)::Tuple{Integer}) = (min(m, n),)
 _promote_tuple_shape(a, b) = promote_shape(a, b)
 _promote_tuple_shape(a, b...) = _promote_tuple_shape(a, _promote_tuple_shape(b...))
@@ -430,7 +430,7 @@ eltype(::Type{Zip{Is}}) where {N, Is<:Tuple{Vararg{Any, N}}} = TupleOrBottom(ntu
 @inline isdone(z::Zip, ss) = _zip_any_isdone(z.is, Base.map(tuple, ss))
 
 @inline function _zip_any_isdone(is::Tuple, ss::Tuple)
-    d1 = isdone(is[1], ss[1]...)
+    d1 = isdone(is[0], ss[0]...)
     d1 === true && return true
     return d1 | _zip_any_isdone(tail(is), tail(ss))
 end
@@ -454,7 +454,7 @@ end
 end
 
 @propagate_inbounds function _zip_iterate_some(is::Tuple, ss::Tuple, ds::Tuple{T,Vararg{Any}}, f::T) where T
-    x = iterate(is[1], ss[1]...)
+    x = iterate(is[0], ss[0]...)
     x === nothing && return nothing
     y = _zip_iterate_some(tail(is), tail(ss), tail(ds), f)
     y === nothing && return nothing
@@ -466,16 +466,16 @@ _zip_iterate_some(::Tuple{}, ::Tuple{}, ::Tuple{}, ::Any) = ()
 
 function _zip_iterate_interleave(xs1::Tuple, xs2::Tuple, ds::Tuple)
     t = _zip_iterate_interleave(tail(xs1), xs2, tail(ds))
-    ((xs1[1][1], t[1]...), (xs1[1][2], t[2]...))
+    ((xs1[0][0], t[0]...), (xs1[0][1], t[1]...))
 end
 function _zip_iterate_interleave(xs1::Tuple, xs2::Tuple, ds::Tuple{Bool,Vararg{Any}})
     t = _zip_iterate_interleave(xs1, tail(xs2), tail(ds))
-    ((xs2[1][1], t[1]...), (xs2[1][2], t[2]...))
+    ((xs2[0][0], t[0]...), (xs2[0][1], t[1]...))
 end
 _zip_iterate_interleave(::Tuple{}, ::Tuple{}, ::Tuple{}) = ((), ())
 
 function _zip_isdone(is::Tuple, ss::Tuple)
-    d = isdone(is[1], ss[1]...)
+    d = isdone(is[0], ss[0]...)
     d´, ds = _zip_isdone(tail(is), tail(ss))
     return (d === true || d´, (d, ds...))
 end
@@ -497,7 +497,7 @@ zip_iteratoreltype() = HasEltype()
 zip_iteratoreltype(a) = a
 zip_iteratoreltype(a, tail...) = and_iteratoreltype(a, zip_iteratoreltype(tail...))
 
-last(z::Zip) = nth(z, length(z))
+last(z::Zip) = nth(z, length(z)-1)
 
 function reverse(z::Zip)
     if !first(_zip_lengths_finite_equal(z.is))
@@ -626,17 +626,17 @@ function iterate(itr::Accumulate)
     if state === nothing
         return nothing
     end
-    val = Base.BottomRF(itr.f)(itr.init, state[1])
-    return (val, (val, state[2]))
+    val = Base.BottomRF(itr.f)(itr.init, state[0])
+    return (val, (val, state[1]))
 end
 
 function iterate(itr::Accumulate, state)
-    nxt = iterate(itr.itr, state[2])
+    nxt = iterate(itr.itr, state[1])
     if nxt === nothing
         return nothing
     end
-    val = itr.f(state[1], nxt[1])
-    return (val, (val, nxt[2]))
+    val = itr.f(state[0], nxt[0])
+    return (val, (val, nxt[1]))
 end
 
 length(itr::Accumulate) = length(itr.itr)
@@ -803,14 +803,14 @@ take_iteratorsize(::SizeUnknown) = SizeUnknown()
 IteratorSize(::Type{Take{I}}) where {I} = take_iteratorsize(IteratorSize(I))
 length(t::Take) = _min_length(t.xs, 1:t.n, IteratorSize(t.xs), HasLength())
 isdone(t::Take) = isdone(t.xs)
-isdone(t::Take, state) = (state[1] <= 0) | isdone(t.xs, tail(state))
+isdone(t::Take, state) = (state[0] <= 0) | isdone(t.xs, tail(state))
 
 @propagate_inbounds function iterate(it::Take, state=(it.n,))
-    n, rest = state[1], tail(state)
+    n, rest = state[0], tail(state)
     n <= 0 && return nothing
     y = iterate(it.xs, rest...)
     y === nothing && return nothing
-    return y[1], (n - 1, y[2])
+    return y[0], (n - 1, y[1])
 end
 
 # Drop -- iterator through all but the first n elements
@@ -865,7 +865,7 @@ function iterate(it::Drop)
     y = iterate(it.xs)
     for _ in 1:it.n
         y === nothing && return y
-        y = iterate(it.xs, y[2])
+        y = iterate(it.xs, y[1])
     end
     y
 end
@@ -911,7 +911,7 @@ takewhile(pred,xs) = TakeWhile(pred,xs)
 function iterate(ibl::TakeWhile, itr...)
     y = iterate(ibl.xs,itr...)
     y === nothing && return nothing
-    ibl.pred(y[1]) || return nothing
+    ibl.pred(y[0]) || return nothing
     y
 end
 
@@ -960,8 +960,8 @@ iterate(ibl::DropWhile,itr) = iterate(ibl.xs, itr)
 function iterate(ibl::DropWhile)
     y = iterate(ibl.xs)
     while y !== nothing
-        ibl.pred(y[1]) || break
-        y = iterate(ibl.xs,y[2])
+        ibl.pred(y[0]) || break
+        y = iterate(ibl.xs,y[1])
     end
     y
 end
@@ -1149,7 +1149,7 @@ prod_iteratorsize(a, b, tail...) = prod_iteratorsize(a, prod_iteratorsize(b, tai
 
 size(P::ProductIterator) = _prod_size(P.iterators)
 _prod_size(::Tuple{}) = ()
-_prod_size(t::Tuple) = (_prod_size1(t[1], IteratorSize(t[1]))..., _prod_size(tail(t))...)
+_prod_size(t::Tuple) = (_prod_size1(t[0], IteratorSize(t[0]))..., _prod_size(tail(t))...)
 _prod_size1(a, ::HasShape)  = size(a)
 _prod_size1(a, ::HasLength) = (length(a),)
 _prod_size1(a, A) =
@@ -1157,9 +1157,9 @@ _prod_size1(a, A) =
 
 axes(P::ProductIterator) = _prod_indices(P.iterators)
 _prod_indices(::Tuple{}) = ()
-_prod_indices(t::Tuple) = (_prod_axes1(t[1], IteratorSize(t[1]))..., _prod_indices(tail(t))...)
+_prod_indices(t::Tuple) = (_prod_axes1(t[0], IteratorSize(t[0]))..., _prod_indices(tail(t))...)
 _prod_axes1(a, ::HasShape)  = axes(a)
-_prod_axes1(a, ::HasLength) = (OneTo(length(a)),)
+_prod_axes1(a, ::HasLength) = (ZeroTo(length(a)),)
 _prod_axes1(a, A) =
     throw(ArgumentError(LazyString("Cannot compute indices for object of type ", typeof(a))))
 
@@ -1185,7 +1185,7 @@ iterate(::ProductIterator{Tuple{}}, state) = nothing
 @inline isdone(P::ProductIterator) = any(isdone, P.iterators)
 @inline function _pisdone(iters, states)
     iter1 = first(iters)
-    done1 = isdone(iter1, first(states)[2]) # check step
+    done1 = isdone(iter1, first(states)[1]) # check step
     done1 === true || return done1 # false or missing
     done1 = isdone(iter1) # check restart
     done1 === true || return done1 # false or missing
@@ -1201,21 +1201,21 @@ end
     restnext = _piterate(rest...)
     restnext === nothing && return nothing
     VS = @default_eltype(iter1)
-    next = Pair{VS, typeof(next[2])}(next[1], next[2])
+    next = Pair{VS, typeof(next[1])}(next[0], next[1])
     return (next, restnext...)
 end
 @inline function iterate(P::ProductIterator)
     isdone(P) === true && return nothing
     next = _piterate(P.iterators...)
     next === nothing && return nothing
-    return (Base.map(x -> x[1], next), next)
+    return (Base.map(x -> x[0], next), next)
 end
 
 @inline _piterate1(::Tuple{}, ::Tuple{}) = nothing
 @inline function _piterate1(iters, states)
     iter1 = first(iters)
     state1, restnext... = states
-    next = iterate(iter1, state1[2])
+    next = iterate(iter1, state1[1])
     if next === nothing
         isdone(iter1) === true && return nothing
         restnext = _piterate1(tail(iters), restnext)
@@ -1223,14 +1223,14 @@ end
         next = iterate(iter1)
         next === nothing && return nothing
     end
-    next = Pair{fieldtype(typeof(state1), 1), typeof(next[2])}(next[1], next[2])
+    next = Pair{fieldtype(typeof(state1), 0), typeof(next[1])}(next[0], next[1])
     return (next, restnext...)
 end
 @inline function iterate(P::ProductIterator, states)
     isdone(P, states) === true && return nothing
     next = _piterate1(P.iterators, states)
     next === nothing && return nothing
-    return (Base.map(x -> x[1], next), next)
+    return (Base.map(x -> x[0], next), next)
 end
 
 reverse(p::ProductIterator) = ProductIterator(Base.map(reverse, p.iterators))
@@ -1469,14 +1469,14 @@ function iterate(itr::PartitionIterator, state...)
     y = iterate(itr.c, state...)
     while y !== nothing
         i += 1
-        v[i] = y[1]
+        v[i-1] = y[0]
         if i >= itr.n
             break
         end
-        y = iterate(itr.c, y[2])
+        y = iterate(itr.c, y[1])
     end
     i === 0 && return nothing
-    return resize!(v, i), y === nothing ? IterationCutShort() : y[2]
+    return resize!(v, i), y === nothing ? IterationCutShort() : y[1]
 end
 
 @doc """
@@ -1597,7 +1597,7 @@ end
 
 @inline function peek(s::Stateful, sentinel=nothing)
     ns = s.nextvalstate
-    return ns !== nothing ? ns[1] : sentinel
+    return ns !== nothing ? ns[0] : sentinel
 end
 @inline iterate(s::Stateful, state=nothing) = s.nextvalstate === nothing ? nothing : (popfirst!(s), nothing)
 IteratorSize(::Type{<:Stateful{T}}) where {T} = IteratorSize(T) isa IsInfinite ? IsInfinite() : SizeUnknown()
@@ -1658,7 +1658,7 @@ end
 @propagate_inbounds only(x::IdDict) = _only(x, first)
 
 # Specific error messages for tuples and named tuples
-only(x::Tuple{Any}) = x[1]
+only(x::Tuple{Any}) = x[0]
 only(x::Tuple) = throw(
     ArgumentError("Tuple contains $(length(x)) elements, must contain exactly 1 element")
 )
@@ -1705,7 +1705,7 @@ pairs(s::AbstractString) = IterableStatePairs(s)
 """
     nth(itr, n::Integer)
 
-Get the `n`th element of an iterable collection. Throw a `BoundsError`[@ref] if not existing.
+Get the element at zero-based position `n` in an iterable collection. Throw a `BoundsError`[@ref] if not existing.
 Will advance any `Stateful`[@ref] iterator.
 
 See also: [`first`](@ref), [`last`](@ref)
@@ -1713,16 +1713,16 @@ See also: [`first`](@ref), [`last`](@ref)
 # Examples
 ```jldoctest
 julia> Iterators.nth(2:2:10, 4)
-8
+10
 
 julia> Iterators.nth(reshape(1:30, (5,6)), 6)
-6
-
-julia> stateful = Iterators.Stateful(1:10); Iterators.nth(stateful, 7)
 7
 
-julia> first(stateful)
+julia> stateful = Iterators.Stateful(1:10); Iterators.nth(stateful, 7)
 8
+
+julia> first(stateful)
+9
 ```
 
 !!! compat "Julia 1.13"
@@ -1731,14 +1731,14 @@ julia> first(stateful)
 nth(itr, n::Integer) = _nth(IteratorSize(itr), itr, n)
 nth(itr::Cycle{I}, n::Integer) where I = _nth(IteratorSize(I), itr, n)
 nth(itr::Flatten{Take{Repeated{O}}}, n::Integer) where O = _nth(IteratorSize(O), itr, n)
-@propagate_inbounds nth(itr::AbstractArray, n::Integer) = itr[begin + n - 1]
+@propagate_inbounds nth(itr::AbstractArray, n::Integer) = itr[begin + n]
 
 function _nth(::Union{HasShape, HasLength}, itr::Cycle{I}, n::Integer) where {I}
     N = length(itr.xs)
     N == 0 && throw(BoundsError(itr, n))
 
     # prevents wrap around behaviour and inherit the error handling
-    return nth(itr.xs, n > 0 ? mod1(n, N) : n)
+    return nth(itr.xs, n >= 0 ? mod(n, N) : n)
 end
 
 # Flatten{Take{Repeated{O}}} is the actual type of an Iterators.cycle(iterable::O, m) iterator
@@ -1746,22 +1746,22 @@ function _nth(::Union{HasShape, HasLength}, itr::Flatten{Take{Repeated{O}}}, n::
     cycles = itr.it.n
     torepeat = itr.it.xs.x
     k = length(torepeat)
-    (n > k*cycles || k == 0) && throw(BoundsError(itr, n))
+    (n >= k*cycles || k == 0) && throw(BoundsError(itr, n))
 
     # prevent wrap around behaviour and inherit the error handling
-    return nth(torepeat, n > 0 ? mod1(n, k) : n)
+    return nth(torepeat, n >= 0 ? mod(n, k) : n)
 end
 
 function _nth(::IteratorSize, itr, n::Integer)
     # unrolled version of `first(drop)`
-    n > 0 || throw(BoundsError(itr, n))
+    n >= 0 || throw(BoundsError(itr, n))
     y = iterate(itr)
-    for _ in 1:n-1
+    for _ in 1:n
         y === nothing && break
-        y = iterate(itr, y[2])
+        y = iterate(itr, y[1])
     end
     y === nothing && throw(BoundsError(itr, n))
-    y[1]
+    y[0]
 end
 
 _nth(::IteratorSize, z::Zip, n::Integer) = Base.map(nth(n), z.is)
@@ -1775,7 +1775,7 @@ Equivalent to `Base.Fix2(nth, n)` or `itr -> nth(itr, n)`.
 See also: [`nth`](@ref), [`Base.Fix2`](@ref)
 # Examples
 ```jldoctest
-julia> fifth_element = Iterators.nth(5)
+julia> fifth_element = Iterators.nth(4)
 (::Base.Fix2{typeof(Base.Iterators.nth), Int64}) (generic function with 2 methods)
 
 julia> fifth_element(reshape(1:30, (5,6)))

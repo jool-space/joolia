@@ -176,7 +176,7 @@ To index by capture group name, the entire match object should be indexed instea
 as shown in the examples.
 The location of the start of the match is stored in the `offset` field.
 The `offsets` field stores the locations of the start of each capture group,
-with 0 denoting a group that was not captured.
+with -1 denoting a group that was not captured.
 
 This type can be used as an iterator over the capture groups of the `Regex`,
 yielding the substrings captured in each group.
@@ -261,7 +261,7 @@ function keys(m::RegexMatch)
     idx_to_capture_name = PCRE.capture_names(m.regex.regex)
     return map(eachindex(m.captures)) do i
         # If the capture group is named, return its name, else return its index
-        get(idx_to_capture_name, i, i)
+        get(idx_to_capture_name, i + 1, i)
     end
 end
 
@@ -274,7 +274,7 @@ function show(io::IO, m::RegexMatch)
         for (i, capture_name) in enumerate(capture_keys)
             print(io, capture_name, "=")
             show(io, m.captures[i])
-            if i < length(m)
+            if i < length(m) - 1
                 print(io, ", ")
             end
         end
@@ -287,7 +287,7 @@ getindex(m::RegexMatch, idx::Integer) = m.captures[idx]
 function getindex(m::RegexMatch, name::Union{AbstractString,Symbol})
     idx = PCRE.substring_number_from_name(m.regex.regex, name)
     idx <= 0 && error("no capture group named $name found in regex")
-    m[idx]
+    m[idx - 1]
 end
 
 haskey(m::RegexMatch, idx::Integer) = idx in eachindex(m.captures)
@@ -380,7 +380,7 @@ end
 function chopprefix(s::AbstractString, prefix::Regex)
     m = match(prefix, s, firstindex(s), PCRE.ANCHORED)
     m === nothing && return SubString(s)
-    return SubString(s, ncodeunits(m.match) + 1)
+    return SubString(s, ncodeunits(m.match))
 end
 
 function chopsuffix(s::AbstractString, suffix::Regex)
@@ -431,34 +431,35 @@ function match(re::Regex, str::DenseUTF8String, idx::Integer,
                add_opts::UInt32=UInt32(0))
     compile(re)
     opts = re.match_options | add_opts
-    matched, data = PCRE.exec_r_data(re.regex, str, idx-1, opts)
+    matched, data = PCRE.exec_r_data(re.regex, str, idx, opts)
     if !matched
         PCRE.free_match_data(data)
         return nothing
     end
     n = div(PCRE.ovec_length(data), 2) - 1
     p = PCRE.ovec_ptr(data)
-    mat = SubString(str, unsafe_load(p, 1)+1, prevind(str, unsafe_load(p, 2)+1))
+    mat = SubString(str, unsafe_load(p, 0), prevind(str, unsafe_load(p, 1)))
     T = if str isa SubString
         typeof(str)
     else
         SubString{typeof(str)}
     end
-    cap = Union{Nothing,T}[unsafe_load(p,2i+1) == PCRE.UNSET ? nothing :
-                                        SubString(str, unsafe_load(p,2i+1)+1,
-                                                  prevind(str, unsafe_load(p,2i+2)+1)) for i=1:n]
-    off = Int[ unsafe_load(p,2i+1) == PCRE.UNSET ? 0 : unsafe_load(p,2i+1)+1 for i=1:n ]
-    result = RegexMatch(mat, cap, unsafe_load(p,1)+1, off, re)
+    # PCRE group IDs start at one; group zero describes the complete match.
+    cap = Union{Nothing,T}[unsafe_load(p,2i) == PCRE.UNSET ? nothing :
+                                        SubString(str, unsafe_load(p,2i),
+                                                  prevind(str, unsafe_load(p,2i+1))) for i=1:n]
+    off = Int[ unsafe_load(p,2i) == PCRE.UNSET ? -1 : unsafe_load(p,2i) for i=1:n ]
+    result = RegexMatch(mat, cap, unsafe_load(p,0), off, re)
     PCRE.free_match_data(data)
     return result
 end
 
 function _annotatedmatch(m::RegexMatch{S}, str::AnnotatedString{S}) where {S<:AbstractString}
     RegexMatch{AnnotatedString{S}}(
-        (@inbounds raw_substring(str, m.match.offset + 1, m.match.ncodeunits)),
+        (@inbounds raw_substring(str, m.match.offset, m.match.ncodeunits)),
         Union{Nothing,SubString{AnnotatedString{S}}}[
             if !isnothing(cap)
-                (@inbounds raw_substring(str, cap.offset + 1, cap.ncodeunits))
+                (@inbounds raw_substring(str, cap.offset, cap.ncodeunits))
             end for cap in m.captures],
         m.offset, m.offsets, m.regex)
 end
@@ -489,21 +490,21 @@ end
 # TODO: return only start index and update deprecation
 # duck-type str so that external UTF-8 string packages like StringViews can hook in
 function _findnext_re(re::Regex, str, idx::Integer, match_data::Ptr{Cvoid})
-    if idx > nextind(str,lastindex(str))
+    if !(0 <= idx <= ncodeunits(str))
         throw(BoundsError())
     end
     opts = re.match_options
     compile(re)
     alloc = match_data == C_NULL
     if alloc
-        matched, data = PCRE.exec_r_data(re.regex, str, idx-1, opts)
+        matched, data = PCRE.exec_r_data(re.regex, str, idx, opts)
     else
-        matched = PCRE.exec(re.regex, str, idx-1, opts, match_data)
+        matched = PCRE.exec(re.regex, str, idx, opts, match_data)
         data = match_data
     end
     if matched
         p = PCRE.ovec_ptr(data)
-        ans = (Int(unsafe_load(p,1))+1):prevind(str,Int(unsafe_load(p,2))+1)
+        ans = Int(unsafe_load(p,0)):prevind(str,Int(unsafe_load(p,1)))
     else
         ans = nothing
     end
@@ -659,7 +660,7 @@ function _write_capture(io::IO, group::Int, str, r, re::RegexAndMatchData)
     PCRE.substring_copy_bynumber(re.match_data, group,
         pointer(io.data, io.ptr), len+1)
     io.ptr += len
-    io.size = max(io.size, io.ptr - 1)
+    io.size = max(io.size, io.ptr)
     return len
 end
 function _write_capture(io::IO, group::Int, str, r, re)
@@ -746,14 +747,14 @@ compile(itr::RegexMatchIterator) = (compile(itr.regex); itr)
 eltype(::Type{<:RegexMatchIterator}) = RegexMatch
 IteratorSize(::Type{<:RegexMatchIterator}) = SizeUnknown()
 
-function iterate(itr::RegexMatchIterator, (offset,prevempty)=(1,false))
+function iterate(itr::RegexMatchIterator, (offset,prevempty)=(0,false))
     opts_nonempty = UInt32(PCRE.ANCHORED | PCRE.NOTEMPTY_ATSTART)
     while true
         mat = match(itr.regex, itr.string, offset,
                     prevempty ? opts_nonempty : UInt32(0))
 
         if mat === nothing
-            if prevempty && offset <= sizeof(itr.string)
+            if prevempty && offset < sizeof(itr.string)
                 offset = nextind(itr.string, offset)
                 prevempty = false
                 continue

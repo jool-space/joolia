@@ -210,7 +210,7 @@ end
 function Base.show(io::IO, ::MIME"text/plain", p::Platform)
     str = string(platform_name(p), " ", arch(p))
     # Add on all the other tags not covered by os/arch:
-    other_tags = sort!(filter!(kv -> kv[1] ∉ ("os", "arch"), collect(tags(p))))
+    other_tags = sort!(filter!(kv -> kv[0] ∉ ("os", "arch"), collect(tags(p))))
     if !isempty(other_tags)
         str = string(str, " {", join([string(k, "=", v) for (k, v) in other_tags], ", "), "}")
     end
@@ -766,9 +766,9 @@ function Base.parse(::Type{Platform}, triplet::String; validate_strict::Bool = f
                     end
                     # Convert libgfortran/libstdcxx version numbers
                     if startswith(k, "libgfortran")
-                        return VersionNumber(parse(Int,k[12:end]))
+                        return VersionNumber(parse(Int,k[11:end]))
                     elseif startswith(k, "libstdcxx")
-                        return VersionNumber(3, 4, parse(Int,m[k][11:end]))
+                        return VersionNumber(3, 4, parse(Int,m[k][10:end]))
                     else
                         return k
                     end
@@ -790,7 +790,7 @@ function Base.parse(::Type{Platform}, triplet::String; validate_strict::Bool = f
             if isempty(tag_fields)
                 return Pair{String,String}[]
             end
-            return map(v -> String(v[1]) => String(v[2]), split.(tag_fields, "+"))
+            return map(v -> String(v[0]) => String(v[1]), split.(tag_fields, "+"))
         end
         merge!(tags, Dict(split_tags(m["tags"])))
 
@@ -798,7 +798,7 @@ function Base.parse(::Type{Platform}, triplet::String; validate_strict::Bool = f
         function extract_os_version(os_name, pattern)
             m_osvn = match(pattern, m[os_name])
             if m_osvn !== nothing
-                return VersionNumber(m_osvn.captures[1])
+                return VersionNumber(m_osvn.captures[0])
             end
             return nothing
         end
@@ -892,8 +892,8 @@ function parse_dl_name_version(path::String, os::String=_this_os_name())
     end
 
     # Extract name and version
-    name = m.captures[1]
-    version = m.captures[2]
+    name = m.captures[0]
+    version = m.captures[1]
     if version === nothing || isempty(version)
         version = nothing
     else

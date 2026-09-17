@@ -546,7 +546,7 @@ end
         a = DateTime(2021,1,1):t(1):DateTime(2021,2,1)
         d = diff(a)
         @test d == diff(collect(a))
-        @test eltype(d) === typeof(a[1] - a[2])
+        @test eltype(d) === typeof(a[0] - a[1])
     end
 end
 

@@ -1122,3 +1122,18 @@ end
 end
 
 @test_throws FieldError BigFloat(1).notfield = 1
+
+
+@testset "zero-origin BigFloatData limbs" begin
+    d = Memory{Base.MPFR.Limb}(undef, Base.MPFR.offset_p_limbs + 3)
+    fd = Base.MPFR.BigFloatData(d)
+    @test length(fd) == 3
+    fd[0] = Base.MPFR.Limb(11)
+    fd[2] = Base.MPFR.Limb(29)
+    @test fd[0] == 11
+    @test fd[2] == 29
+    @test_throws BoundsError fd[3]
+    src = Base.MPFR.Limb[31, 37, 41]
+    copyto!(fd, src)
+    @test [fd[i] for i in 0:2] == src
+end

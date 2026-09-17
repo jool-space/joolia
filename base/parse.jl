@@ -49,7 +49,8 @@ function parse(::Type{T}, c::AbstractChar; base::Integer = 10) where T<:Integer
 end
 
 function parseint_iterate(s::AbstractString, startpos::Int, endpos::Int)
-    (0 < startpos <= endpos) || (return Char(0), 0, 0)
+    # -1 is the missing-position sentinel; zero is a valid character position.
+    (0 <= startpos <= endpos) || (return Char(0), -1, -1)
     j = startpos
     c, startpos = iterate(s,startpos)::Tuple{Char, Int}
     c, startpos, j
@@ -61,7 +62,7 @@ function parseint_preamble(signed::Bool, base::Int, s::AbstractString, startpos:
     while isspace(c)
         c, i, j = parseint_iterate(s,i,endpos)
     end
-    (j == 0) && (return 0, 0, 0)
+    (j == -1) && (return 0, 0, -1)
 
     sgn = 1
     if signed
@@ -74,7 +75,7 @@ function parseint_preamble(signed::Bool, base::Int, s::AbstractString, startpos:
     while isspace(c)
         c, i, j = parseint_iterate(s,i,endpos)
     end
-    (j == 0) && (return 0, 0, 0)
+    (j == -1) && (return 0, 0, -1)
 
     if base == 0
         if c == '0' && i <= endpos
@@ -112,7 +113,7 @@ end
 
 function tryparse_internal(::Type{T}, s::AbstractString, startpos::Int, endpos::Int, base_::Integer, raise::Bool) where T<:Integer
     sgn, base, i = parseint_preamble(T<:Signed, Int(base_), s, startpos, endpos)
-    if sgn == 0 && base == 0 && i == 0
+    if sgn == 0 && base == 0 && i == -1
         raise && throw(ArgumentError("input string is empty or only contains whitespace"))
         return nothing
     end
@@ -120,12 +121,12 @@ function tryparse_internal(::Type{T}, s::AbstractString, startpos::Int, endpos::
         raise && throw(ArgumentError(LazyString("invalid base: base must be 2 ≤ base ≤ 62, got ", base)))
         return nothing
     end
-    if i == 0
+    if i == -1
         raise && throw(ArgumentError("premature end of integer: $(repr(SubString(s,startpos,endpos)))"))
         return nothing
     end
     c, i = parseint_iterate(s,i,endpos)
-    if i == 0
+    if i == -1
         raise && throw(ArgumentError("premature end of integer: $(repr(SubString(s,startpos,endpos)))"))
         return nothing
     end
@@ -190,7 +191,7 @@ function tryparse_internal(::Type{Bool}, sbuff::AbstractString,
         return nothing
     end
 
-    if isnumeric(sbuff[1])
+    if isnumeric(sbuff[firstindex(sbuff)])
         intres = tryparse_internal(UInt8, sbuff, startpos, endpos, base, false)
         (intres == 1) && return true
         (intres == 0) && return false
@@ -210,7 +211,7 @@ function tryparse_internal(::Type{Bool}, sbuff::AbstractString,
 
     len = endpos - startpos + 1
     if sbuff isa Union{String, SubString{String}}
-        p = pointer(sbuff) + startpos - 1
+        p = pointer(sbuff) + startpos
         truestr = "true"
         falsestr = "false"
         GC.@preserve sbuff truestr falsestr begin
@@ -267,7 +268,7 @@ function tryparse(::Type{Float64}, s::DenseUTF8String)
 end
 function tryparse_internal(::Type{Float64}, s::DenseUTF8String, startpos::Int, endpos::Int)
     hasvalue, val = ccall(:jl_try_substrtod, Tuple{Bool, Float64},
-                          (Ptr{UInt8},Csize_t,Csize_t), s, startpos-1, endpos-startpos+1)
+                          (Ptr{UInt8},Csize_t,Csize_t), s, startpos, endpos-startpos+1)
     hasvalue ? val : nothing
 end
 function tryparse(::Type{Float32}, s::DenseUTF8String)
@@ -277,7 +278,7 @@ function tryparse(::Type{Float32}, s::DenseUTF8String)
 end
 function tryparse_internal(::Type{Float32}, s::DenseUTF8String, startpos::Int, endpos::Int)
     hasvalue, val = ccall(:jl_try_substrtof, Tuple{Bool, Float32},
-                          (Ptr{UInt8},Csize_t,Csize_t), s, startpos-1, endpos-startpos+1)
+                          (Ptr{UInt8},Csize_t,Csize_t), s, startpos, endpos-startpos+1)
     hasvalue ? val : nothing
 end
 
@@ -300,25 +301,25 @@ function tryparse_internal(::Type{Complex{T}}, s::DenseUTF8String, i::Int, e::In
     end
 
     # find index of ± separating real/imaginary parts (if any)
-    i₊ = something(findnext(in(('+','-')), s, i), 0)
+    i₊ = something(findnext(in(('+','-')), s, i), -1)
     if i₊ == i # leading ± sign
-        i₊ = something(findnext(in(('+','-')), s, i₊+1), 0)
+        i₊ = something(findnext(in(('+','-')), s, i₊+1), -1)
     end
-    if i₊ != 0 && s[prevind(s, i₊)] in ('e','E') # exponent sign
-        i₊ = something(findnext(in(('+','-')), s, i₊+1), 0)
+    if i₊ != -1 && s[prevind(s, i₊)] in ('e','E') # exponent sign
+        i₊ = something(findnext(in(('+','-')), s, i₊+1), -1)
     end
 
     # find trailing im/i/j
-    iᵢ = something(findprev(in(('m','i','j')), s, e), 0)
-    if iᵢ > 0 && s[iᵢ] == 'm' # im
+    iᵢ = something(findprev(in(('m','i','j')), s, e), -1)
+    if iᵢ >= 0 && s[iᵢ] == 'm' # im
         iᵢ = prevind(s, iᵢ)
-        if s[iᵢ] != 'i'
+        if iᵢ < i || s[iᵢ] != 'i'
             raise && throw(ArgumentError("expected trailing \"im\", found only \"m\""))
             return nothing
         end
     end
 
-    if i₊ == 0 # purely real or imaginary value
+    if i₊ == -1 # purely real or imaginary value
         if iᵢ > i && !(iᵢ == i+1 && s[i] in ('+','-')) # purely imaginary (not "±inf")
             x = tryparse_internal(T, s, i, prevind(s, iᵢ), raise)
             x === nothing && return nothing

@@ -1,3 +1,111 @@
+# Exercise zero-origin Dict and Set storage before inference activation and Test loading.
+if Core.Intrinsics.not_int(Core.isdefined(Base, :end_base_include))
+    Core.eval(Base, :(begin
+        include("reflection.jl")
+        include("refpointer.jl")
+        include("flfrontend.jl")
+        Core._setparser!(fl_parse)
+        Core._setlowerer!(fl_lower)
+        include("meta.jl")
+        using .Meta
+        include("multimedia.jl")
+        using .Multimedia
+        include("char.jl")
+        include("strings/basic.jl")
+        include("strings/string.jl")
+        include("strings/substring.jl")
+        include("strings/cstring.jl")
+        include("cartesian.jl")
+        using .Cartesian
+        include("hashing.jl")
+        include("subarray.jl")
+        include("views.jl")
+        include("strings/stringview.jl")
+        include("strings/search.jl")
+        include("some.jl")
+        include("div.jl")
+        include("simdloop.jl")
+        using .SimdLoop
+        include("floatfuncs.jl")
+        include("multinverses.jl")
+        using .MultiplicativeInverses
+        include("abstractarraymath.jl")
+        include("arraymath.jl")
+        include("reduce.jl")
+        include("reshapedarray.jl")
+        include("reinterpretarray.jl")
+        include("dict.jl")
+        include("set.jl")
+    end))
+    Core.eval(Core.Main, :(module JooliaDictFoundationTests
+        const checks = Base.RefValue(0)
+        function check(ok::Bool, label::String)
+            ok || throw(ErrorException(label))
+            checks[] += 1
+        end
+        struct CollisionKey
+            value::Int
+        end
+        Base.hash(::CollisionKey, h::UInt) = h ⊻ Base.HASH_SEED
+        Base.isequal(a::CollisionKey, b::CollisionKey) = a.value == b.value
+        Base.:(==)(a::CollisionKey, b::CollisionKey) = a.value == b.value
+        function run()
+            d = Dict{UInt8,Int}()
+            check(isempty(d) && d.idxfloor == 0, "empty Dict")
+            for i = 0:255
+                d[UInt8(i)] = i
+            end
+            check(length(d) == 256 && d[0x00] == 0 && d[0xff] == 255, "UInt8 boundary keys")
+            check(length(collect(d)) == 256, "Dict iteration")
+            d[0x00] = 999
+            check(d[0x00] == 999 && length(d) == 256, "Dict update of zero key")
+            check(pop!(d, 0x00) == 999 && !haskey(d, 0x00), "Dict pop of zero key")
+            delete!(d, 0x01)
+            check(!haskey(d, 0x01) && length(d) == 254, "Dict delete")
+            empty!(d)
+            check(isempty(d) && isempty(collect(d)), "Dict empty")
+            c = Dict{CollisionKey,Int}()
+            for i = 0:31
+                c[CollisionKey(i)] = i
+            end
+            check(length(c) == 32 && all(c[CollisionKey(i)] == i for i = 0:31), "Dict collisions")
+            check(Base.ht_keyindex(c, CollisionKey(0)) == 0, "Dict physical slot zero")
+            c[CollisionKey(0)] = 100
+            check(pop!(c, CollisionKey(0)) == 100, "Dict update and pop physical slot zero")
+            c[CollisionKey(0)] = 0
+            check(Base.ht_keyindex(c, CollisionKey(0)) == 0 && length(c) == 32,
+                  "Dict reuses zero tombstone")
+            for i = 0:2:30
+                delete!(c, CollisionKey(i))
+            end
+            check(length(c) == 16 && all(!haskey(c, CollisionKey(i)) for i = 0:2:30), "Dict collision tombstones")
+            for i = 0:2:30
+                c[CollisionKey(i)] = i
+            end
+            check(length(c) == 32 && all(c[CollisionKey(i)] == i for i = 0:31), "Dict tombstone reinsertion")
+            empty!(c)
+            c[CollisionKey(0)] = 7
+            check(c[CollisionKey(0)] == 7 && length(c) == 1 && Base.ht_keyindex(c, CollisionKey(0)) == 0,
+                  "Dict reuse after empty")
+            values = Set{UInt8}()
+            for i = 0:255
+                push!(values, UInt8(i))
+            end
+            check(length(values) == 256 && all(UInt8(i) in values for i = 0:255), "Set UInt8 keys")
+            delete!(values, 0x00)
+            check(!(0x00 in values) && pop!(values, 0xff) == 0xff && length(values) == 254,
+                  "Set deletion and pop")
+            empty!(values)
+            push!(values, 0x00)
+            check(length(values) == 1 && first(values) == 0x00 && pop!(values) == 0x00 && isempty(values),
+                  "Set iteration and reuse")
+            Core.println("joolia Dict foundation checks passed: ", checks[])
+        end
+        run()
+    end))
+    ccall(:jl_exit, Core.Cvoid, (Core.Int32,), Core.Int32(0))
+end
+
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
 using Random

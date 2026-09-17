@@ -26,16 +26,16 @@ macro static(ex)
         @label loop
         hd = ex.head
         if hd ∈ (:if, :elseif, :&&, :||)
-            cond = Core.eval(__module__, ex.args[1])::Bool
+            cond = Core.eval(__module__, ex.args[0])::Bool
             if xor(cond, hd === :||)
-                return esc(ex.args[2])
+                return esc(ex.args[1])
             elseif length(ex.args) == 3
-                br = ex.args[3]
+                br = ex.args[2]
                 if br isa Expr && br.head === :elseif
                     ex = br
                     @goto loop
                 else
-                    return esc(ex.args[3])
+                    return esc(ex.args[2])
                 end
             elseif hd ∈ (:if, :elseif)
                 return nothing

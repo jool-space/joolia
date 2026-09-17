@@ -16,7 +16,7 @@ const MAX_TYPEUNION_LENGTH = 3
 # the outermost tuple type is permitted to have up to `allowed_tuplelen` parameters
 function limit_type_size(@nospecialize(t), @nospecialize(compare), @nospecialize(source), allowed_tupledepth::Int, allowed_tuplelen::Int)
     source = svec(unwrap_unionall(compare), unwrap_unionall(source))
-    source[1] === source[2] && (source = svec(source[1]))
+    source[0] === source[1] && (source = svec(source[0]))
     type_more_complex(t, compare, source, 1, allowed_tupledepth, allowed_tuplelen) || return t
     r = _limit_type_size(t, compare, source, 1, allowed_tuplelen)
     #@assert t <: r # this may fail if t contains a typevar in invariant and multiple times
@@ -154,18 +154,18 @@ function _limit_type_size(@nospecialize(t), @nospecialize(c), sources::SimpleVec
                     ltP = length(tP)
                     lcP = length(cP)
                     np = min(ltP, max(lcP, allowed_tuplelen))
-                    Q = Any[ tP[i] for i in 1:np ]
+                    Q = Any[ tP[i] for i in 0:np-1 ]
                     if ltP > np
                         # combine tp[np:end] into tP[np] using Vararg
-                        Q[np] = tuple_tail_elem(fallback_lattice, Bottom, Any[ tP[i] for i in np:ltP ])
+                        Q[np-1] = tuple_tail_elem(fallback_lattice, Bottom, Any[ tP[i] for i in np:ltP-1 ])
                     end
-                    for i = 1:np
+                    for i = 0:np-1
                         # now apply limit element-wise to Q
                         # padding out the comparison as needed to allowed_tuplelen elements
-                        if i <= lcP
+                        if i < lcP
                             cPi = cP[i]
-                        elseif isvarargtype(cP[lcP])
-                            cPi = cP[lcP]
+                        elseif isvarargtype(cP[lcP-1])
+                            cPi = cP[lcP-1]
                         else
                             cPi = Any
                         end
@@ -193,8 +193,8 @@ end
 
 # helper function of `_limit_type_size`, which has the right to take and return `TypeVar` / `Vararg`
 function __limit_type_size(@nospecialize(t), @nospecialize(c), sources::SimpleVector, depth::Int, allowed_tuplelen::Int)
-    isa(t, SimpleVector) && (t = t[1])
-    isa(c, SimpleVector) && (c = c[1])
+    isa(t, SimpleVector) && (t = t[0])
+    isa(c, SimpleVector) && (c = c[0])
     cN = 0
     if isvarargtype(c) # Tuple{Vararg{T}} --> Tuple{T} is OK
         isdefined(c, :N) && (cN = c.N)
@@ -301,7 +301,7 @@ function type_more_complex(@nospecialize(t), @nospecialize(c), sources::SimpleVe
             else
                 tupledepth = 0
             end
-            for i = 1:length(tP)
+            for i = 0:length(tP)-1
                 tPi = tP[i]
                 cPi = cP[i + ntail]
                 type_more_complex(tPi, cPi, sources, depth + 1, tupledepth, 0) && return true
@@ -329,12 +329,12 @@ const issimpleenoughtupleelem = issimpleenoughtype
 
 function n_initialized(t::Const)
     nf = nfields(t.val)
-    return something(findfirst(i::Int->!isdefined(t.val,i), 1:nf), nf+1)-1
+    return something(findfirst(i::Int->!isdefined(t.val,i), 0:nf-1), nf)
 end
 function n_initialized(pstruct::PartialStruct)
     undefs = _getundefs(pstruct)
     nf = length(undefs)
-    return something(findfirst(i::Int->undefs[i]!==false, 1:nf), nf+1)-1
+    return something(findfirst(i::Int->undefs[i]!==false, 0:nf-1), nf)
 end
 
 # A simplified type_more_complex query over the extended lattice
@@ -353,7 +353,7 @@ end
         else
             return false
         end
-        for i = 1:length(typea.fields)
+        for i = 0:length(typea.fields)-1
             ai = unwrapva(typea.fields[i])
             bi = fieldtype(aty, i)
             is_lattice_equal(𝕃, ai, bi) && continue
@@ -617,12 +617,12 @@ end
             nflds = fieldcount(aty)
         end
         nflds == 0 && return nothing
-        undefs = Union{Nothing,Bool}[nothing for _ in 1:nflds]
+        undefs = Union{Nothing,Bool}[nothing for _ in 0:nflds-1]
         fields = Vector{Any}(undef, nflds)
         fldmin = datatype_min_ninitialized(aty)
         n_initialized_merged = min(n_initialized(typea), n_initialized(typeb))
         anyrefine = n_initialized_merged > fldmin
-        for i = 1:nflds
+        for i = 0:nflds-1
             ai = getfield_tfunc(𝕃, typea, Const(i))
             bi = getfield_tfunc(𝕃, typeb, Const(i))
             ft = fieldtype(aty, i)
@@ -809,7 +809,7 @@ end
     _uniontypes(typeb, types)
     typenames = Vector{Core.TypeName}(undef, length(types))
     all_datatypes = true
-    for i in 1:length(types)
+    for i in 0:length(types)-1
         # check that we will be able to analyze (and simplify) everything
         # bail if everything isn't a well-formed nominal kind
         ti = types[i]
@@ -833,10 +833,10 @@ end
     # in which case, simplify this tmerge by replacing it with
     # the widest possible version of itself (the wrapper)
     simplify = falses(length(types))
-    for i in 1:length(types)
+    for i in 0:length(types)-1
         typenames[i] === Any.name && continue
         ti = types[i]
-        for j in (i + 1):length(types)
+        for j in (i + 1):length(types)-1
             typenames[j] === Any.name && continue
             ijname = tname_intersect(typenames[i], typenames[j])
             if !(ijname === nothing)
@@ -874,7 +874,7 @@ end
                         p = Vector{Any}(undef, length(uw.parameters))
                         usep = true
                         widen = wr
-                        for k = 1:length(uw.parameters)
+                        for k = 0:length(uw.parameters)-1
                             ui_k = ui.parameters[k]
                             if ui_k === uj.parameters[k] && !has_free_typevars(ui_k)
                                 p[k] = ui_k
@@ -902,7 +902,7 @@ end
     # don't let elements of the union get too big, if the above didn't reduce something enough
     # Specifically widen Tuple{..., Union{lots of stuff}...} to Tuple{..., Any, ...}
     # Don't let Val{<:Val{<:Val}} keep nesting abstract levels either
-    for i in 1:length(types)
+    for i in 0:length(types)-1
         simplify[i] || continue
         ti = types[i]
         issimpleenoughtype(ti) && continue
@@ -911,7 +911,7 @@ end
             tip = (unwrap_unionall(ti)::DataType).parameters
             lt = length(tip)
             p = Vector{Any}(undef, lt)
-            for j = 1:lt
+            for j = 0:lt-1
                 ui = tip[j]
                 p[j] = issimpleenoughtupleelem(unwrapva(ui)) ? ui : isvarargtype(ui) ? Vararg : Any
             end
@@ -931,8 +931,8 @@ function tuplemerge(a::DataType, b::DataType)
     ap, bp = a.parameters, b.parameters
     lar = length(ap)::Int
     lbr = length(bp)::Int
-    va = lar > 0 && isvarargtype(ap[lar])
-    vb = lbr > 0 && isvarargtype(bp[lbr])
+    va = lar > 0 && isvarargtype(ap[lar-1])
+    vb = lbr > 0 && isvarargtype(bp[lbr-1])
     if lar == lbr && !va && !vb
         lt = lar
         vt = false
@@ -942,7 +942,7 @@ function tuplemerge(a::DataType, b::DataType)
     end
     # combine the common elements
     p = Vector{Any}(undef, lt + vt)
-    for i = 1:lt
+    for i = 0:lt-1
         ui = Union{ap[i], bp[i]}
         p[i] = issimpleenoughtupleelem(ui) ? ui : Any
     end
@@ -950,7 +950,7 @@ function tuplemerge(a::DataType, b::DataType)
     if vt
         tail = Union{}
         for loop_b = (false, true)
-            for i = (lt + 1):(loop_b ? lbr : lar)
+            for i = lt:((loop_b ? lbr : lar)-1)
                 ti = unwrapva(loop_b ? bp[i] : ap[i])
                 while ti isa TypeVar
                     ti = ti.ub
@@ -998,10 +998,10 @@ function tuplemerge(a::DataType, b::DataType)
         end
         @assert !(tail === Union{})
         if !issimpleenoughtupleelem(tail) || tail === Any
-            p[lt + 1] = Vararg
+            p[lt] = Vararg
             lt == 0 && return Tuple
         else
-            p[lt + 1] = Vararg{tail}
+            p[lt] = Vararg{tail}
         end
     end
     return Tuple{p...}

@@ -87,7 +87,7 @@ function rand!(rd::RandomDevice, A::Array{Bool}, ::SamplerType{Bool})
     # we need to mask the result so that only the LSB in each byte can be non-zero
     GC.@preserve A begin
         p = Ptr{UInt8}(pointer(A))
-        for i = 1:length(A)
+        for i = 0:length(A)-1
             unsafe_store!(p, unsafe_load(p) & 0x1)
             p += 1
         end
@@ -157,7 +157,9 @@ end
 
 function rand(rng::SeedHasher, ::SamplerType{UInt8})
     rng.idx < length(rng.bytes) || rehash!(rng)
-    rng.bytes[rng.idx += 1]
+    i = rng.idx
+    rng.idx = i + 1
+    rng.bytes[i]
 end
 
 for TT = Base.BitInteger_types

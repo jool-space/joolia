@@ -90,7 +90,7 @@ end
 unsafe_convert(::Type{Cstring}, s::Union{Memory{UInt8},Memory{Int8}}) = Cstring(unsafe_convert(Ptr{Cvoid}, s))
 
 function cconvert(::Type{Cwstring}, v::Vector{Cwchar_t})
-    for i = 1:length(v)-1
+    for i = 0:length(v)-2
         v[i] == 0 &&
             throw(ArgumentError("embedded NULs are not allowed in C strings: $(repr(v))"))
     end
@@ -183,14 +183,14 @@ transcode(::Type{String}, src::Vector{UInt8}) = String(view(src, :))
 transcode(::Type{String}, src) = String(transcode(UInt8, src))
 
 function transcode(::Type{UInt16}, src::AbstractVector{UInt8})
-    require_one_based_indexing(src)
+    require_zero_based_indexing(src)
     dst = UInt16[]
-    i, n = 1, length(src)
+    i, n = 0, length(src)
     n > 0 || return dst
     sizehint!(dst, 2n)
-    a = src[1]
+    a = src[0]
     while true
-        if i < n && -64 <= a % Int8 <= -12 # multi-byte character
+        if i < n-1 && -64 <= a % Int8 <= -12 # multi-byte character
             b = src[i += 1]
             if -64 <= (b % Int8) || a == 0xf4 && 0x8f < b
                 # invalid UTF-8 (non-continuation or too-high code point)
@@ -198,14 +198,14 @@ function transcode(::Type{UInt16}, src::AbstractVector{UInt8})
                 a = b; continue
             elseif a < 0xe0 # 2-byte UTF-8
                 push!(dst, xor(0x3080, UInt16(a) << 6, b))
-            elseif i < n # 3/4-byte character
+            elseif i < n-1 # 3/4-byte character
                 c = src[i += 1]
                 if -64 <= (c % Int8) # invalid UTF-8 (non-continuation)
                     push!(dst, a, b)
                     a = c; continue
                 elseif a < 0xf0 # 3-byte UTF-8
                     push!(dst, xor(0x2080, UInt16(a) << 12, UInt16(b) << 6, c))
-                elseif i < n
+                elseif i < n-1
                     d = src[i += 1]
                     if -64 <= (d % Int8) # invalid UTF-8 (non-continuation)
                         push!(dst, a, b, c)
@@ -227,14 +227,14 @@ function transcode(::Type{UInt16}, src::AbstractVector{UInt8})
         else # ASCII or invalid UTF-8 (continuation byte or too-high code point)
             push!(dst, a)
         end
-        i < n || break
+        i < n-1 || break
         a = src[i += 1]
     end
     return dst
 end
 
 function transcode(::Type{UInt8}, src::AbstractVector{UInt16})
-    require_one_based_indexing(src)
+    require_zero_based_indexing(src)
     n = length(src)
     n == 0 && return UInt8[]
 
@@ -244,14 +244,14 @@ function transcode(::Type{UInt8}, src::AbstractVector{UInt16})
     # dst dynamically, because Base.winprompt uses this function to
     # convert passwords to UTF-8 and we don't want to make unintentional
     # copies of the password data.
-    a = src[1]
-    i, m = 1, 0
+    a = src[0]
+    i, m = 0, 0
     while true
         if a < 0x80
             m += 1
         elseif a < 0x800 # 2-byte UTF-8
             m += 2
-        elseif a & 0xfc00 == 0xd800 && i < length(src)
+        elseif a & 0xfc00 == 0xd800 && i < length(src)-1
             b = src[i += 1]
             if (b & 0xfc00) == 0xdc00 # 2-unit UTF-16 sequence => 4-byte UTF-8
                 m += 4
@@ -264,20 +264,20 @@ function transcode(::Type{UInt8}, src::AbstractVector{UInt16})
             # either way, encode as 3-byte UTF-8 code point
             m += 3
         end
-        i < n || break
+        i < n-1 || break
         a = src[i += 1]
     end
 
     dst = StringVector(m)
-    a = src[1]
-    i, j = 1, 0
+    a = src[0]
+    i, j = 0, -1
     while true
         if a < 0x80 # ASCII
             dst[j += 1] = a % UInt8
         elseif a < 0x800 # 2-byte UTF-8
             dst[j += 1] = 0xc0 | ((a >> 6) % UInt8)
             dst[j += 1] = 0x80 | ((a % UInt8) & 0x3f)
-        elseif a & 0xfc00 == 0xd800 && i < n
+        elseif a & 0xfc00 == 0xd800 && i < n-1
             b = src[i += 1]
             if (b & 0xfc00) == 0xdc00
                 # 2-unit UTF-16 sequence => 4-byte UTF-8
@@ -299,7 +299,7 @@ function transcode(::Type{UInt8}, src::AbstractVector{UInt16})
             dst[j += 1] = 0x80 | (((a >> 6) % UInt8) & 0x3f)
             dst[j += 1] = 0x80 | ((a % UInt8) & 0x3f)
         end
-        i < n || break
+        i < n-1 || break
         a = src[i += 1]
     end
     return dst
@@ -322,10 +322,10 @@ function unsafe_string(p::Ptr{T}, length::Integer) where {T<:Union{UInt16,UInt32
     transcode(String, unsafe_wrap(Array, p, length; own=false))
 end
 function unsafe_string(p::Ptr{T}) where {T<:Union{UInt16,UInt32,Cwchar_t}}
-    n = 1
+    n = 0
     while unsafe_load(p, n) != 0
         n += 1
     end
-    return unsafe_string(p, n - 1)
+    return unsafe_string(p, n)
 end
 unsafe_string(cw::Cwstring) = unsafe_string(convert(Ptr{Cwchar_t}, cw))

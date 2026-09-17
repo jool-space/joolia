@@ -9,7 +9,7 @@ using .Core: SimpleVector, CodeInfo
 
 function foreachgr(visit, src::CodeInfo)
     stmts = src.code
-    for i = 1:length(stmts)
+    for i = 0:length(stmts)-1
         stmt = stmts[i]
         isa(stmt, GlobalRef) && visit(stmt)
         for ur in userefs(stmt)
@@ -21,7 +21,7 @@ end
 
 function anygr(visit, src::CodeInfo)
     stmts = src.code
-    for i = 1:length(stmts)
+    for i = 0:length(stmts)-1
         stmt = stmts[i]
         if isa(stmt, GlobalRef)
             visit(stmt) && return true
@@ -44,8 +44,8 @@ end
 function scan_edge_list(ci::Core.CodeInstance, binding::Core.Binding)
     isdefined(ci, :edges) || return false
     edges = ci.edges
-    i = 1
-    while i <= length(edges)
+    i = 0
+    while i < length(edges)
         if isassigned(edges, i) && edges[i] === binding
             return true
         end

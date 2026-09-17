@@ -143,13 +143,13 @@ function DFS!(D::DFSTree, blocks::Vector{BasicBlock}, is_post_dominator::Bool)
             # Going up the DFS tree, so all we need to do is record the
             # postorder number, then move on
             if current_node_bb != -1
-                D.to_post[current_node_bb] = post_num
-                D.from_post[post_num] = current_node_bb
+                D.to_post[current_node_bb-1] = post_num
+                D.from_post[post_num-1] = current_node_bb
             end
             post_num += 1
             pop!(to_visit)
 
-        elseif current_node_bb != -1 && D.to_pre[current_node_bb] != 0
+        elseif current_node_bb != -1 && D.to_pre[current_node_bb-1] != 0
             # Node has already been visited, move on
             pop!(to_visit)
             continue
@@ -158,19 +158,19 @@ function DFS!(D::DFSTree, blocks::Vector{BasicBlock}, is_post_dominator::Bool)
 
             # Record preorder number
             if current_node_bb != -1
-                D.to_pre[current_node_bb] = pre_num
-                D.from_pre[pre_num] = current_node_bb
-                D.to_parent_pre[pre_num] = parent_pre
+                D.to_pre[current_node_bb-1] = pre_num
+                D.from_pre[pre_num-1] = current_node_bb
+                D.to_parent_pre[pre_num-1] = parent_pre
             end
 
             # Record that children (will) have been pushed
             to_visit[end] = (current_node_bb, parent_pre, true)
 
             if is_post_dominator && current_node_bb == -1
-                edges = Int[bb for bb in 1:length(blocks) if isempty(blocks[bb].succs)]
+                edges = Int[bb for bb in 1:length(blocks) if isempty(blocks[bb-1].succs)]
             else
-                edges = is_post_dominator ? blocks[current_node_bb].preds :
-                                            blocks[current_node_bb].succs
+                edges = is_post_dominator ? blocks[current_node_bb-1].preds :
+                                            blocks[current_node_bb-1].succs
             end
 
             # Push children to the stack
@@ -289,23 +289,25 @@ function compute_domtree_nodes!(domtree::GenericDomTree{IsPostDom};
     new_len = length(domtree.idoms_bb)
     old_len = length(nodes)
     for i in 1:min(old_len, new_len)
-        children = nodes[i].children
+        children = nodes[i-1].children
         empty!(children)
-        nodes[i] = DomTreeNode(1, children)
+        nodes[i-1] = DomTreeNode(1, children)
     end
     resize!(nodes, new_len)
     for i in (old_len+1):new_len
-        nodes[i] = DomTreeNode()
+        nodes[i-1] = DomTreeNode()
     end
-    for (idx, idom) in Iterators.enumerate(domtree.idoms_bb)
+    for (idx0, idom) in Iterators.enumerate(domtree.idoms_bb)
+        idx = idx0 + 1
         ((!IsPostDom && idx == 1) || idom == 0) && continue
-        push!(nodes[idom].children, idx)
+        push!(nodes[idom-1].children, idx)
     end
     # n.b. now issorted(domtree.nodes[*].children) since idx is sorted above
     # Recursively set level
     worklist = cache.worklist
     if IsPostDom
-        for (node, idom) in enumerate(domtree.idoms_bb)
+        for (node0, idom) in enumerate(domtree.idoms_bb)
+            node = node0 + 1
             idom == 0 || continue
             update_level!(domtree.nodes, node, 1, worklist)
         end
@@ -321,17 +323,17 @@ function update_level!(nodes::Vector{DomTreeNode}, node::BBNumber, level::Int,
     push!(worklist, (node, level))
     while !isempty(worklist)
         (node, level) = pop!(worklist)
-        nodes[node] = DomTreeNode(level, nodes[node].children)
-        foreach(nodes[node].children) do child
+        nodes[node-1] = DomTreeNode(level, nodes[node-1].children)
+        foreach(nodes[node-1].children) do child
             push!(worklist, (child, level+1))
         end
     end
 end
 
 dom_edges(domtree::DomTree, blocks::Vector{BasicBlock}, idx::BBNumber) =
-    blocks[idx].preds
+    blocks[idx-1].preds
 dom_edges(domtree::PostDomTree, blocks::Vector{BasicBlock}, idx::BBNumber) =
-    blocks[idx].succs
+    blocks[idx-1].succs
 
 """
 The main Semi-NCA algorithm. Matches Figure 2.8 in [LG05]. Note that the
@@ -354,7 +356,7 @@ function SNCA!(domtree::GenericDomTree{IsPostDom}, blocks::Vector{BasicBlock}, m
     resize!(state, n_nodes)
     for w in 1:max_pre
         # Only reset semidominators for nodes we want to recompute
-        state[w] = SNCAData(typemax(PreNumber), w)
+        state[w-1] = SNCAData(typemax(PreNumber), w)
     end
 
     # If we are only recomputing some of the semidominators, the remaining
@@ -371,8 +373,8 @@ function SNCA!(domtree::GenericDomTree{IsPostDom}, blocks::Vector{BasicBlock}, m
     # situation where all semidominators were recomputed, then path compression
     # will produce the correct label.
     for w in max_pre+1:n_nodes
-        semi = state[w].semi
-        state[w] = SNCAData(semi, semi)
+        semi = state[w-1].semi
+        state[w-1] = SNCAData(semi, semi)
     end
 
     # Calculate semidominators, but only for blocks with preorder number up to
@@ -381,14 +383,14 @@ function SNCA!(domtree::GenericDomTree{IsPostDom}, blocks::Vector{BasicBlock}, m
     copy!(ancestors, D.to_parent_pre)
     relevant_blocks = IsPostDom ? (1:max_pre) : (2:max_pre)
     for w::PreNumber in reverse(relevant_blocks)
-        semi_w = ancestors[w]
+        semi_w = ancestors[w-1]
         last_linked = PreNumber(w + 1)
-        for v ∈ dom_edges(domtree, blocks, D.from_pre[w])
+        for v ∈ dom_edges(domtree, blocks, D.from_pre[w-1])
             # For the purpose of the domtree, ignore virtual predecessors into
             # catch blocks.
             v == 0 && continue
 
-            v_pre = D.to_pre[v]
+            v_pre = D.to_pre[v-1]
 
             # Ignore unreachable predecessors
             v_pre == 0 && continue
@@ -411,9 +413,9 @@ function SNCA!(domtree::GenericDomTree{IsPostDom}, blocks::Vector{BasicBlock}, m
 
             # The (preorder number of the) semidominator of a block is the
             # minimum over the labels of its predecessors
-            semi_w = min(semi_w, state[v_pre].label)
+            semi_w = min(semi_w, state[v_pre-1].label)
         end
-        state[w] = SNCAData(semi_w, semi_w)
+        state[w-1] = SNCAData(semi_w, semi_w)
     end
 
     # Compute immediate dominators, which for a node must be the nearest common
@@ -422,22 +424,22 @@ function SNCA!(domtree::GenericDomTree{IsPostDom}, blocks::Vector{BasicBlock}, m
     idoms_pre = cache.idoms_pre
     copy!(idoms_pre, D.to_parent_pre)
     for v in (IsPostDom ? (1:n_nodes) : (2:n_nodes))
-        idom = idoms_pre[v]
-        vsemi = state[v].semi
+        idom = idoms_pre[v-1]
+        vsemi = state[v-1].semi
         while idom > vsemi
-            idom = idoms_pre[idom]
+            idom = idoms_pre[idom-1]
         end
-        idoms_pre[v] = idom
+        idoms_pre[v-1] = idom
     end
 
     # Express idoms in BB indexing
     resize!(domtree.idoms_bb, n_blocks)
     for i::BBNumber in 1:n_blocks
-        if (!IsPostDom && i == 1) || D.to_pre[i] == 0
-            domtree.idoms_bb[i] = 0
+        if (!IsPostDom && i == 1) || D.to_pre[i-1] == 0
+            domtree.idoms_bb[i-1] = 0
         else
-            ip = idoms_pre[D.to_pre[i]]
-            domtree.idoms_bb[i] = ip == 0 ? 0 : D.from_pre[ip]
+            ip = idoms_pre[D.to_pre[i-1]-1]
+            domtree.idoms_bb[i-1] = ip == 0 ? 0 : D.from_pre[ip-1]
         end
     end
 end
@@ -449,14 +451,14 @@ an ancestor has been processed rather than storing `0` in the ancestor array.
 """
 function snca_compress!(state::Vector{SNCAData}, ancestors::Vector{PreNumber},
                         v::PreNumber, last_linked::PreNumber)
-    u = ancestors[v]
+    u = ancestors[v-1]
     @assert u < v
     if u >= last_linked
         snca_compress!(state, ancestors, u, last_linked)
-        if state[u].label < state[v].label
-            state[v] = SNCAData(state[v].semi, state[u].label)
+        if state[u-1].label < state[v-1].label
+            state[v-1] = SNCAData(state[v-1].semi, state[u-1].label)
         end
-        ancestors[v] = ancestors[u]
+        ancestors[v-1] = ancestors[u-1]
     end
     nothing
 end
@@ -466,21 +468,21 @@ function snca_compress_worklist!(
         v::PreNumber, last_linked::PreNumber,
         worklist::Vector{Tuple{PreNumber, PreNumber}})
     # TODO: There is a smarter way to do this
-    u = ancestors[v]
+    u = ancestors[v-1]
     @assert u < v
     empty!(worklist)
     push!(worklist, (u, v))
     while !isempty(worklist)
         u, v = last(worklist)
         if u >= last_linked
-            if ancestors[u] >= last_linked
-                push!(worklist, (ancestors[u], u))
+            if ancestors[u-1] >= last_linked
+                push!(worklist, (ancestors[u-1], u))
                 continue
             end
-            if state[u].label < state[v].label
-                state[v] = SNCAData(state[v].semi, state[u].label)
+            if state[u-1].label < state[v-1].label
+                state[v-1] = SNCAData(state[v-1].semi, state[u-1].label)
             end
-            ancestors[v] = ancestors[u]
+            ancestors[v-1] = ancestors[u-1]
         end
         pop!(worklist)
     end
@@ -496,10 +498,10 @@ function domtree_insert_edge!(domtree::DomTree, blocks::Vector{BasicBlock},
 
     # Implements Section 3.1 of [GI16]
     dt        = domtree.dfs_tree
-    from_pre  = dt.to_pre[from]
-    to_pre    = dt.to_pre[to]
-    from_post = dt.to_post[from]
-    to_post   = dt.to_post[to]
+    from_pre  = dt.to_pre[from-1]
+    to_pre    = dt.to_pre[to-1]
+    from_post = dt.to_post[from-1]
+    to_post   = dt.to_post[to-1]
     if to_pre == 0 || (from_pre < to_pre && from_post < to_post)
         # The DFS tree is invalidated by the edge insertion, so run from
         # scratch
@@ -532,7 +534,7 @@ function domtree_delete_edge!(domtree::DomTree, blocks::Vector{BasicBlock},
         # the block can pass through the `to` block (the preorder number of
         # `to` would be lower than those of these blocks, and `to` is not their
         # parent in the DFS tree).
-        to_pre = domtree.dfs_tree.to_pre[to]
+        to_pre = domtree.dfs_tree.to_pre[to-1]
         update_domtree!(blocks, domtree, false, to_pre; cache)
     end
     # Otherwise, dominator tree is not affected
@@ -542,9 +544,9 @@ end
 
 "Check if x is the parent of y in the given DFS tree."
 function is_parent(dfs_tree::DFSTree, x::BBNumber, y::BBNumber)
-    x_pre = dfs_tree.to_pre[x]
-    y_pre = dfs_tree.to_pre[y]
-    return x_pre == dfs_tree.to_parent_pre[y_pre]
+    x_pre = dfs_tree.to_pre[x-1]
+    y_pre = dfs_tree.to_pre[y-1]
+    return x_pre == dfs_tree.to_parent_pre[y_pre-1]
 end
 
 """
@@ -552,10 +554,10 @@ Check if x is on some semidominator path from the semidominator of y to y,
 assuming there is an edge from x to y.
 """
 function on_semidominator_path(domtree::DomTree, x::BBNumber, y::BBNumber)
-    x_pre = domtree.dfs_tree.to_pre[x]
-    y_pre = domtree.dfs_tree.to_pre[y]
+    x_pre = domtree.dfs_tree.to_pre[x-1]
+    y_pre = domtree.dfs_tree.to_pre[y-1]
 
-    semi_y = domtree.snca_state[y_pre].semi
+    semi_y = domtree.snca_state[y_pre-1].semi
     current_block = x_pre
 
     # Follow the semidominators of `x` up the DFS tree to see if we ever reach
@@ -567,7 +569,7 @@ function on_semidominator_path(domtree::DomTree, x::BBNumber, y::BBNumber)
         if semi_y == current_block
             return true
         end
-        current_block = domtree.snca_state[current_block].semi
+        current_block = domtree.snca_state[current_block-1].semi
     end
     return false
 end
@@ -585,14 +587,15 @@ function rename_nodes!(domtree::DomTree, rename_bb::Vector{BBNumber})
     # Rename `idoms_bb` and `nodes`
     old_idoms_bb = copy(domtree.idoms_bb)
     old_nodes = copy(domtree.nodes)
-    for (old_bb, new_bb) in enumerate(rename_bb)
+    for (old_bb0, new_bb) in enumerate(rename_bb)
+        old_bb = old_bb0 + 1
         if new_bb != -1
-            domtree.idoms_bb[new_bb] = (new_bb == 1) ?
-                0 : rename_bb[old_idoms_bb[old_bb]]
-            domtree.nodes[new_bb] = old_nodes[old_bb]
-            map!(i -> rename_bb[i],
-                 domtree.nodes[new_bb].children,
-                 domtree.nodes[new_bb].children)
+            domtree.idoms_bb[new_bb-1] = (new_bb == 1) ?
+                0 : rename_bb[old_idoms_bb[old_bb-1]-1]
+            domtree.nodes[new_bb-1] = old_nodes[old_bb-1]
+            map!(i -> rename_bb[i-1],
+                 domtree.nodes[new_bb-1].children,
+                 domtree.nodes[new_bb-1].children)
         end
     end
 
@@ -615,12 +618,13 @@ function rename_nodes!(D::DFSTree, rename_bb::Vector{BBNumber})
     old_to_post = copy(D.to_post)
     old_from_post = copy(D.from_post)
     max_new_bb = 0
-    for (old_bb, new_bb) in enumerate(rename_bb)
+    for (old_bb0, new_bb) in enumerate(rename_bb)
+        old_bb = old_bb0 + 1
         if new_bb != -1
-            D.to_pre[new_bb] = old_to_pre[old_bb]
-            D.from_pre[old_to_pre[old_bb]] = new_bb
-            D.to_post[new_bb] = old_to_post[old_bb]
-            D.from_post[old_to_post[old_bb]] = new_bb
+            D.to_pre[new_bb-1] = old_to_pre[old_bb-1]
+            D.from_pre[old_to_pre[old_bb-1]-1] = new_bb
+            D.to_post[new_bb-1] = old_to_post[old_bb-1]
+            D.from_post[old_to_post[old_bb-1]-1] = new_bb
 
             # Keep track of highest BB number to resize arrays with
             if new_bb > max_new_bb
@@ -658,16 +662,16 @@ postdominates(domtree::PostDomTree, bb1::BBNumber, bb2::BBNumber) =
 
 function _dominates(domtree::GenericDomTree, bb1::BBNumber, bb2::BBNumber)
     bb1 == bb2 && return true
-    target_level = domtree.nodes[bb1].level
-    source_level = domtree.nodes[bb2].level
+    target_level = domtree.nodes[bb1-1].level
+    source_level = domtree.nodes[bb2-1].level
     source_level < target_level && return false
     for _ in (source_level - 1):-1:target_level
-        bb2 = domtree.idoms_bb[bb2]
+        bb2 = domtree.idoms_bb[bb2-1]
     end
     return bb1 == bb2
 end
 
-bb_unreachable(domtree::DomTree, bb::BBNumber) = bb != 1 && domtree.dfs_tree.to_pre[bb] == 0
+bb_unreachable(domtree::DomTree, bb::BBNumber) = bb != 1 && domtree.dfs_tree.to_pre[bb-1] == 0
 
 "Iterable data structure that walks through all dominated blocks"
 struct DominatedBlocks
@@ -685,7 +689,7 @@ end
 function iterate(doms::DominatedBlocks, state::Nothing=nothing)
     isempty(doms.worklist) && return nothing
     bb = pop!(doms.worklist)
-    for dominated in doms.domtree.nodes[bb].children
+    for dominated in doms.domtree.nodes[bb-1].children
         push!(doms.worklist, dominated)
     end
     return (bb, nothing)
@@ -699,20 +703,20 @@ Compute the nearest common (post-)dominator of `a` and `b`.
 function nearest_common_dominator(domtree::GenericDomTree, a::BBNumber, b::BBNumber)
     a == 0 && return a
     b == 0 && return b
-    alevel = domtree.nodes[a].level
-    blevel = domtree.nodes[b].level
+    alevel = domtree.nodes[a-1].level
+    blevel = domtree.nodes[b-1].level
     # W.l.g. assume blevel <= alevel
     if alevel < blevel
         a, b = b, a
         alevel, blevel = blevel, alevel
     end
     while alevel > blevel
-        a = domtree.idoms_bb[a]
+        a = domtree.idoms_bb[a-1]
         alevel -= 1
     end
     while a != b && a != 0
-        a = domtree.idoms_bb[a]
-        b = domtree.idoms_bb[b]
+        a = domtree.idoms_bb[a-1]
+        b = domtree.idoms_bb[b-1]
     end
     @assert a == b
     return a
@@ -723,45 +727,45 @@ function naive_idoms(blocks::Vector{BasicBlock}, is_post_dominator::Bool=false)
     # The extra +1 helps us detect unreachable blocks below
     dom_all = BitSet(1:nblocks+1)
     dominators = is_post_dominator ?
-        BitSet[isempty(blocks[n].succs) ? BitSet(n) : copy(dom_all) for n = 1:nblocks] :
+        BitSet[isempty(blocks[n-1].succs) ? BitSet(n) : copy(dom_all) for n = 1:nblocks] :
         BitSet[n == 1 ? BitSet(1) : copy(dom_all) for n = 1:nblocks]
     changed = true
     relevant_blocks = (is_post_dominator ? (1:nblocks) : (2:nblocks))
     while changed
         changed = false
         for n in relevant_blocks
-            edges = is_post_dominator ? blocks[n].succs : blocks[n].preds
+            edges = is_post_dominator ? blocks[n-1].succs : blocks[n-1].preds
             if isempty(edges)
                 continue
             end
             firstp, rest = Iterators.peel(Iterators.filter(p->p != 0, edges))::NTuple{2,Any}
-            new_doms = copy(dominators[firstp])
+            new_doms = copy(dominators[firstp-1])
             for p in rest
-                intersect!(new_doms, dominators[p])
+                intersect!(new_doms, dominators[p-1])
             end
             push!(new_doms, n)
-            changed = changed || (new_doms != dominators[n])
-            dominators[n] = new_doms
+            changed = changed || (new_doms != dominators[n-1])
+            dominators[n-1] = new_doms
         end
     end
     # Compute idoms
     idoms = fill(0, nblocks)
     for i in relevant_blocks
-        if dominators[i] == dom_all
-            idoms[i] = 0
+        if dominators[i-1] == dom_all
+            idoms[i-1] = 0
             continue
         end
-        doms = collect(dominators[i])
+        doms = collect(dominators[i-1])
         for dom in doms
             i == dom && continue
             hasany = false
             for p in doms
-                if p !== i && p !== dom && dom in dominators[p]
+                if p !== i && p !== dom && dom in dominators[p-1]
                     hasany = true; break
                 end
             end
             hasany && continue
-            idoms[i] = dom
+            idoms[i-1] = dom
         end
     end
     idoms

@@ -1,0 +1,92 @@
+--- a/src/verify_host.jl
++++ b/src/verify_host.jl
+@@ -71,9 +71,9 @@
+ 
+ function url_host(url::AbstractString)
+     m = match(r"^(?:[a-z]+)://(?:[^@/]+@)?([-\w\.]+)"ai, url)
+-    m !== nothing && return m.captures[1]
++    m !== nothing && return m.captures[0]
+     m = match(r"^(?:[-\w\.]+@)?([-\w\.]+)(?:$|:)"a, url)
+-    m !== nothing && return m.captures[1]
++    m !== nothing && return m.captures[0]
+     return nothing # couldn't parse
+ end
+ 
+@@ -121,7 +121,7 @@
+     for parts in patterns
+         re = ""
+         for (i, part) in enumerate(parts)
+-            re *= if i < length(parts)
++            re *= if i < lastindex(parts)
+                 part == "*"  ? "[-\\w]+\\." :
+                 part == "**" ? "(?:[-\\w]+\\.)*" : "$part\\."
+             else
+--- a/src/ssh_options.jl
++++ b/src/ssh_options.jl
+@@ -138,7 +138,7 @@
+     for file in files
+         ispath(file) && return file
+     end
+-    return !isempty(files) ? files[1] :
++    return !isempty(files) ? files[0] :
+         isfile("/dev/null") ? "/dev/null" : tempname()
+ end
+ 
+--- a/test/runtests.jl
++++ b/test/runtests.jl
+@@ -23,8 +23,8 @@
+             @test ca_roots() == value
+             @test ca_roots_path() == value
+             ENV[var] = ""
+-            @test ca_roots() == unset[1]
+-            @test ca_roots_path() == unset[2]
++            @test ca_roots() == unset[0]
++            @test ca_roots_path() == unset[1]
+             clear_env()
+         end
+         # set multiple CA_ROOT_VARS with increasing precedence
+@@ -35,8 +35,8 @@
+         ENV["JULIA_SSL_CA_ROOTS_PATH"] = "1"
+         @test ca_roots() == ca_roots_path() == "1"
+         ENV["JULIA_SSL_CA_ROOTS_PATH"] = ""
+-        @test ca_roots() == unset[1]
+-        @test ca_roots_path() == unset[2]
++        @test ca_roots() == unset[0]
++        @test ca_roots_path() == unset[1]
+         clear_env()
+     end
+ end
+@@ -137,15 +137,15 @@
+         paths = [tempname() for _ = 1:3]
+         ENV["SSH_KNOWN_HOSTS_FILES"] = join(paths, path_sep)
+         @test ssh_known_hosts_files() == paths
+-        @test ssh_known_hosts_file() == paths[1]
+-        touch(paths[3])
+-        @test ssh_known_hosts_files() == paths
+-        @test ssh_known_hosts_file() == paths[3]
++        @test ssh_known_hosts_file() == paths[0]
+         touch(paths[2])
+         @test ssh_known_hosts_files() == paths
+         @test ssh_known_hosts_file() == paths[2]
++        touch(paths[1])
++        @test ssh_known_hosts_files() == paths
++        @test ssh_known_hosts_file() == paths[1]
++        rm(paths[1])
+         rm(paths[2])
+-        rm(paths[3])
+         # prepend path
+         path = tempname()
+         ENV["SSH_KNOWN_HOSTS_FILES"] = path * path_sep
+@@ -320,3 +320,12 @@
+ end
+ 
+ reset_env()
++
++
++@testset "zero-origin host parsing" begin
++    @test NetworkOptions.url_host("file:///tmp/data") == "file"
++    @test NetworkOptions.url_host("https://example.com/path") == "example.com"
++    @test NetworkOptions.url_host("user@example.com:/path") == "example.com"
++    @test occursin(NetworkOptions.host_pattern_regex("*.example.com"), "api.example.com")
++    @test !occursin(NetworkOptions.host_pattern_regex("*.example.com"), "example.com")
++end

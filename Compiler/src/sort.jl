@@ -78,18 +78,18 @@ function sort!(v::Vector; by::Function=identity, (<)::Function=<)
     if length(v) > 200 # Heap sort prevents quadratic runtime
         o = ord(<, by, true)
         heapify!(v, o)
-        for i in lastindex(v):-1:2
+        for i in lastindex(v):-1:1
             y = v[i]
-            v[i] = v[1]
-            percolate_down!(v, 1, y, o, i-1)
+            v[i] = v[0]
+            percolate_down!(v, 0, y, o, i)
         end
         return v
     end
 
-    @inbounds for i in 2:length(v) # Insertion sort
+    @inbounds for i in 1:lastindex(v) # Insertion sort
         x = v[i]
         y = by(x)
-        while i > 1 && y < by(v[i-1])
+        while i > 0 && y < by(v[i-1])
             v[i] = v[i-1]
             i -= 1
         end

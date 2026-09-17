@@ -2226,3 +2226,23 @@ end
 end
 
 @test Base.infer_return_type(stat, (String,)) == Base.Filesystem.StatStruct
+
+# Filename byte positions and DiskStat property enumeration start at zero.
+@testset "zero-origin filesystem positions" begin
+    alphabet = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for n in (0, 1, 2, 10, 63, 64, 65)
+        slug = Base.Filesystem._rand_filename(n)
+        @test ncodeunits(slug) == n
+        @test all(c -> c in alphabet, codeunits(slug))
+    end
+    mktempdir() do parent
+        path = tempname(parent; cleanup=false, suffix=".jool")
+        @test dirname(path) == parent
+        @test startswith(basename(path), "jl_") && endswith(path, ".jool")
+        @test !ispath(path)
+    end
+    props = propertynames(Base.Filesystem.DiskStat(ntuple(_ -> UInt64(0), 7)..., ntuple(_ -> UInt64(0), 4)))
+    @test first(props) === :ftype
+    @test :ffree in props && !(:fspare in props)
+    @test props[end-2:end] === (:available, :total, :used)
+end

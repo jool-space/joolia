@@ -905,11 +905,11 @@ function _sockname(sock, self=true)
     end
 
     if rfamily[] == 2 # AF_INET
-        addrv4 = raddress[1:4]
-        naddr = ntoh(unsafe_load(Ptr{Cuint}(pointer(addrv4)), 1))
+        addrv4 = raddress[0:3]
+        naddr = ntoh(unsafe_load(Ptr{Cuint}(pointer(addrv4)), 0))
         addr = IPv4(naddr)
     elseif rfamily[] == af_inet6
-        naddr = ntoh(unsafe_load(Ptr{UInt128}(pointer(raddress)), 1))
+        naddr = ntoh(unsafe_load(Ptr{UInt128}(pointer(raddress)), 0))
         addr = IPv6(naddr)
     else
         error(string("unsupported address family: ", rfamily[]))

@@ -54,7 +54,7 @@ macro cfunction(f, rt, at)
     at.head = :call
     pushfirst!(at.args, GlobalRef(Core, :svec))
     if isa(f, Expr) && f.head === :$
-        fptr = f.args[1]
+        fptr = f.args[0]
         typ = CFunction
     else
         fptr = QuoteNode(f)
@@ -200,18 +200,18 @@ end
 
 function expand_ccallable(name, rt, def)
     if isa(def,Expr) && (def.head === :(=) || def.head === :function)
-        sig = def.args[1]
+        sig = def.args[0]
         if sig.head === :(::)
             if rt === nothing
-                rt = sig.args[2]
+                rt = sig.args[1]
             end
-            sig = sig.args[1]
+            sig = sig.args[0]
         end
         if rt === nothing
             error("@ccallable requires a return type")
         end
         if sig.head === :call
-            f = sig.args[1]
+            f = sig.args[0]
             if isa(f,Expr) && f.head === :(::)
                 f = f.args[end]
             else
@@ -223,7 +223,7 @@ function expand_ccallable(name, rt, def)
                     else
                         :Any
                     end
-                end for i in 2:length(sig.args)]
+                end for i in 1:(length(sig.args)-1)]
             return quote
                 @__doc__ $(esc(def))
                 _ccallable($name, $(esc(rt)), $(Expr(:curly, :Tuple, esc(f), map!(esc, at, at)...)))
@@ -273,11 +273,11 @@ function ccall_macro_parse(exprs)
         expr = exprs
     else
         # leading `name = value` options, then the call expression
-        i = 1
-        while i < length(exprs) && isexpr(exprs[i], :(=))
+        i = 0
+        while i < length(exprs)-1 && isexpr(exprs[i], :(=))
             opt = exprs[i]::Expr
-            name = opt.args[1]
-            value = opt.args[2]
+            name = opt.args[0]
+            value = opt.args[1]
             if name === :gc_safe
                 if value === true
                     gc_safe = true
@@ -290,13 +290,13 @@ function ccall_macro_parse(exprs)
                 if !(isexpr(value, :tuple) && length(value.args) == 2)
                     throw(ArgumentError("cancel_handler must be a `(handler, state)` tuple"))
                 end
-                cancel = (value.args[1], value.args[2])
+                cancel = (value.args[0], value.args[1])
             else
                 throw(ArgumentError("@ccall options are `gc_safe = <bool>` and `cancel_handler = (handler, state)`"))
             end
             i += 1
         end
-        if i != length(exprs)
+        if i != length(exprs)-1
             throw(ArgumentError("@ccall needs a function signature with a return type"))
         end
         expr = exprs[i]
@@ -306,19 +306,19 @@ function ccall_macro_parse(exprs)
     if !isexpr(expr, :(::))
         throw(ArgumentError("@ccall needs a function signature with a return type"))
     end
-    rettype = expr.args[2]
+    rettype = expr.args[1]
 
-    call = expr.args[1]
+    call = expr.args[0]
     if !isexpr(call, :call)
         throw(ArgumentError("@ccall has to take a function call"))
     end
 
     # get the function symbols
-    func = let f = call.args[1]
+    func = let f = call.args[0]
         if isexpr(f, :.)
-            Expr(:tuple, f.args[2], f.args[1])
+            Expr(:tuple, f.args[1], f.args[0])
         elseif isexpr(f, :$)
-            func = f.args[1]
+            func = f.args[0]
             if isa(func, String) || (isa(func, QuoteNode) && !isa(func.value, Ptr)) || isa(func, Tuple) || isexpr(func, :tuple)
                 throw(ArgumentError("interpolated value should be a variable or expression, not a literal name or tuple"))
             end
@@ -332,11 +332,11 @@ function ccall_macro_parse(exprs)
 
     # detect varargs
     varargs = nothing
-    argstart = 2
+    argstart = 1
     callargs = call.args
-    if length(callargs) >= 2 && isexpr(callargs[2], :parameters)
-        argstart = 3
-        varargs = callargs[2].args
+    if length(callargs) >= 2 && isexpr(callargs[1], :parameters)
+        argstart = 2
+        varargs = callargs[1].args
     end
 
     # collect args and types
@@ -347,11 +347,11 @@ function ccall_macro_parse(exprs)
         if !isexpr(arg, :(::))
             throw(ArgumentError("args in @ccall need type annotations. '$arg' doesn't have one."))
         end
-        push!(args, arg.args[1])
-        push!(types, arg.args[2])
+        push!(args, arg.args[0])
+        push!(types, arg.args[1])
     end
 
-    for i in argstart:length(callargs)
+    for i in argstart:(length(callargs)-1)
         pusharg!(callargs[i])
     end
     # add any varargs if necessary

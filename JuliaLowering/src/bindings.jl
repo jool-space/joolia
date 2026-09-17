@@ -110,7 +110,7 @@ end
 
 function get_binding(bindings::Bindings, x)::BindingInfo
     id = x isa SyntaxTree ? syntax_id(x) : x
-    bindings.info[id]
+    bindings.info[id - 1]
 end
 
 function get_binding(ctx::AbstractLoweringContext, x)::BindingInfo

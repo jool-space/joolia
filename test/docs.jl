@@ -477,11 +477,11 @@ function f end, function f! end, @enum E a b c
 
 end
 
-let d_1 = @doc(DocRefTests.f).meta[:results][1],
-    d_2 = @doc(DocRefTests.f!).meta[:results][1],
-    d_3 = @doc(DocRefTests.g).meta[:results][1],
-    d_4 = @doc(DocRefTests.g!).meta[:results][1],
-    d_5 = @doc(DocRefTests.E).meta[:results][1]
+let d_1 = @doc(DocRefTests.f).meta[:results][0],
+    d_2 = @doc(DocRefTests.f!).meta[:results][0],
+    d_3 = @doc(DocRefTests.g).meta[:results][0],
+    d_4 = @doc(DocRefTests.g!).meta[:results][0],
+    d_5 = @doc(DocRefTests.E).meta[:results][0]
     @test d_1 === d_2 === d_3 === d_4 === d_5
 end
 
@@ -638,7 +638,7 @@ let __source__ = LineNumberNode(0),
         ]
         result = Docs.docm(__source__, __module__, "...", each)
         @test Meta.isexpr(result, :call)
-        @test result.args[1] === error
+        @test result.args[0] === error
     end
 end
 
@@ -737,7 +737,7 @@ read(x) = x
 end
 
 let md = Base.Docs.meta(I11798)[@var(I11798.read)],
-    d1 = md.docs[md.order[1]],
+    d1 = md.docs[md.order[0]],
     d2 = doc"read"
     @test docstrings_equal(d1,d2)
 end
@@ -752,7 +752,7 @@ Base.collect(::Type{EmptyType{T}}) where {T} = "borked"
 end
 
 let fd = meta(I12515)[@var(Base.collect)]
-    @test fd.order[1] == (Union{Tuple{Type{I12515.EmptyType{T}}}, Tuple{T}} where T)
+    @test fd.order[0] == (Union{Tuple{Type{I12515.EmptyType{T}}}, Tuple{T}} where T)
 end
 
 # PR #12593
@@ -1228,22 +1228,22 @@ end
 
 let m = @doc(DocsTest).meta
     @test length(m[:results]) == 1
-    @test m[:results][1] === Docs.meta(DocsTest)[@var(DocsTest)].docs[Union{}]
+    @test m[:results][0] === Docs.meta(DocsTest)[@var(DocsTest)].docs[Union{}]
     @test m[:binding] == @var(DocsTest)
     @test m[:typesig] === Union{}
 end
 
 let m = @doc(DocsTest.f).meta
     @test length(m[:results]) == 2
-    @test m[:results][1] === Docs.meta(DocsTest)[@var(DocsTest.f)].docs[Tuple{Any}]
-    @test m[:results][2] === Docs.meta(DocsTest)[@var(DocsTest.f)].docs[Tuple{Any, Any}]
+    @test m[:results][0] === Docs.meta(DocsTest)[@var(DocsTest.f)].docs[Tuple{Any}]
+    @test m[:results][1] === Docs.meta(DocsTest)[@var(DocsTest.f)].docs[Tuple{Any, Any}]
     @test m[:binding] == @var(DocsTest.f)
     @test m[:typesig] === Union{}
 end
 
 let m = @doc(DocsTest.f(x)).meta
     @test length(m[:results]) == 1
-    @test m[:results][1] === Docs.meta(DocsTest)[@var(DocsTest.f)].docs[Tuple{Any}]
+    @test m[:results][0] === Docs.meta(DocsTest)[@var(DocsTest.f)].docs[Tuple{Any}]
     @test m[:binding] == @var(DocsTest.f)
     @test m[:typesig] == Tuple{Any}
 end
@@ -1354,11 +1354,11 @@ dynamic_test.x = "test 2"
 # For testing purposes, strip off the `trimdocs(expr)` wrapper
 function striptrimdocs(expr)
     if Meta.isexpr(expr, :call)
-        fex = expr.args[1]
-        if Meta.isexpr(fex, :.) && fex.args[1] === :REPL
-            fmex = fex.args[2]
+        fex = expr.args[0]
+        if Meta.isexpr(fex, :.) && fex.args[0] === :REPL
+            fmex = fex.args[1]
             if isa(fmex, QuoteNode) && fmex.value === :trimdocs
-                expr = expr.args[2]
+                expr = expr.args[1]
             end
         end
     end
@@ -1367,31 +1367,31 @@ end
 
 let dt1 = striptrimdocs(_repl(:(dynamic_test(1.0))))
     @test dt1 isa Expr
-    @test dt1.args[1] isa Expr
-    @test dt1.args[1].head === :call
-    @test dt1.args[1].args[1] === Base.Docs.doc
-    @test dt1.args[1].args[3] == :(Union{Tuple{typeof(1.0)}})
+    @test dt1.args[0] isa Expr
+    @test dt1.args[0].head === :call
+    @test dt1.args[0].args[0] === Base.Docs.doc
+    @test dt1.args[0].args[2] == :(Union{Tuple{typeof(1.0)}})
 end
 let dt2 = striptrimdocs(_repl(:(dynamic_test(::String))))
     @test dt2 isa Expr
-    @test dt2.args[1] isa Expr
-    @test dt2.args[1].head === :call
-    @test dt2.args[1].args[1] === Base.Docs.doc
-    @test dt2.args[1].args[3] == :(Union{Tuple{String}})
+    @test dt2.args[0] isa Expr
+    @test dt2.args[0].head === :call
+    @test dt2.args[0].args[0] === Base.Docs.doc
+    @test dt2.args[0].args[2] == :(Union{Tuple{String}})
 end
 let dt3 = striptrimdocs(_repl(:(dynamic_test(a))))
     @test dt3 isa Expr
-    @test dt3.args[1] isa Expr
-    @test dt3.args[1].head === :call
-    @test dt3.args[1].args[1] === Base.Docs.doc
-    @test dt3.args[1].args[3].args[2].head === :curly # can't test equality due to line numbers
+    @test dt3.args[0] isa Expr
+    @test dt3.args[0].head === :call
+    @test dt3.args[0].args[0] === Base.Docs.doc
+    @test dt3.args[0].args[2].args[1].head === :curly # can't test equality due to line numbers
 end
 let dt4 = striptrimdocs(_repl(:(dynamic_test(1.0,u=2.0))))
     @test dt4 isa Expr
-    @test dt4.args[1] isa Expr
-    @test dt4.args[1].head === :call
-    @test dt4.args[1].args[1] === Base.Docs.doc
-    @test dt4.args[1].args[3] == :(Union{Tuple{typeof(1.0)}})
+    @test dt4.args[0] isa Expr
+    @test dt4.args[0].head === :call
+    @test dt4.args[0].args[0] === Base.Docs.doc
+    @test dt4.args[0].args[2] == :(Union{Tuple{typeof(1.0)}})
 end
 
 # Equality testing

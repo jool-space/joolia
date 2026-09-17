@@ -738,7 +738,7 @@ JL_DLLEXPORT jl_value_t *jl_fl_parse(const char *text, size_t text_len,
     if (offset > text_len) {
         jl_value_t *textstr = jl_pchar_to_string(text, text_len);
         JL_GC_PUSH1(&textstr);
-        jl_bounds_error(textstr, jl_box_long(offset+1));
+        jl_bounds_error(textstr, jl_box_long(offset));
     }
     jl_sym_t *rule = (jl_sym_t*)options;
     if (rule != jl_atom_sym && rule != jl_statement_sym && rule != jl_all_sym) {

@@ -125,7 +125,7 @@ and this is still used in optimizing the callers of `f` and `g`.
 macro nospecialize(vars...)
     if nfields(vars) === 1
         # in argument position, need to fix `@nospecialize x=v` to `@nospecialize (kw x v)`
-        var = getfield(vars, 1)
+        var = getfield(vars, 0)
         if isa(var, Expr) && var.head === :(=)
             var.head = :kw
         end
@@ -142,7 +142,7 @@ For details, see [`@nospecialize`](@ref).
 macro specialize(vars...)
     if nfields(vars) === 1
         # in argument position, need to fix `@specialize x=v` to `@specialize (kw x v)`
-        var = getfield(vars, 1)
+        var = getfield(vars, 0)
         if isa(var, Expr) && var.head === :(=)
             var.head = :kw
         end
@@ -384,7 +384,7 @@ end
 # These checkbounds methods are defined early for bootstrapping
 function checkbounds(::Type{Bool}, A::Union{Array, Memory}, i::Int)
     @inline
-    ult_int(bitcast(UInt, sub_int(i, 1)), bitcast(UInt, length(A)))
+    ult_int(bitcast(UInt, i), bitcast(UInt, length(A)))
 end
 function checkbounds(A::AbstractArray, I...)
     @inline
@@ -595,7 +595,7 @@ function isvatuple(@nospecialize(t))
     t = unwrap_unionall(t)
     if isa(t, DataType)
         n = length(t.parameters)
-        return n > 0 && isvarargtype(t.parameters[n])
+        return n > 0 && isvarargtype(t.parameters[n-1])
     end
     return false
 end
@@ -619,7 +619,7 @@ function datatype_min_ninitialized(@nospecialize t0)
     t isa DataType || return 0
     isabstracttype(t) && return 0
     if t.name === _NAMEDTUPLE_NAME
-        names, types = t.parameters[1], t.parameters[2]
+        names, types = t.parameters[0], t.parameters[1]
         if names isa Tuple
             return length(names)
         end
@@ -630,7 +630,7 @@ function datatype_min_ninitialized(@nospecialize t0)
     if t.name === Tuple.name
         n = length(t.parameters)
         n == 0 && return 0
-        va = t.parameters[n]
+        va = t.parameters[n-1]
         if isvarargtype(va)
             n -= 1
             if isdefined(va, :N)
@@ -1022,13 +1022,13 @@ macro label(name::Symbol, body)
     if body isa Expr && (body.head === :for || body.head === :while)
         cont_name = Symbol(string(name, "#cont"))
         if body.head === :for
-            loop_body = body.args[2]
+            loop_body = body.args[1]
             wrapped_body = Expr(:symbolicblock, cont_name, loop_body)
-            body = Expr(:for, body.args[1], wrapped_body)
+            body = Expr(:for, body.args[0], wrapped_body)
         else  # while
-            loop_body = body.args[2]
+            loop_body = body.args[1]
             wrapped_body = Expr(:symbolicblock, cont_name, loop_body)
-            body = Expr(:while, body.args[1], wrapped_body)
+            body = Expr(:while, body.args[0], wrapped_body)
         end
     end
     return esc(Expr(:symbolicblock, name, body))
@@ -1087,24 +1087,24 @@ getindex(v::SimpleVector, i::Int) = (@_foldable_meta; Core._svec_ref(v, i))
 function length(v::SimpleVector)
     Core._svec_len(v)
 end
-firstindex(::SimpleVector) = 1
-lastindex(v::SimpleVector) = length(v)
-iterate(v::SimpleVector, i=1) = (length(v) < i ? nothing : (v[i], i + 1))
+firstindex(::SimpleVector) = 0
+lastindex(v::SimpleVector) = length(v) - 1
+iterate(v::SimpleVector, i::Int=0) = (ult_int(i, length(v)) ? (v[i], i + 1) : nothing)
 eltype(::Type{SimpleVector}) = Any
-keys(v::SimpleVector) = OneTo(length(v))
+keys(v::SimpleVector) = ZeroTo(length(v))
 isempty(v::SimpleVector) = (length(v) == 0)
-axes(v::SimpleVector) = (OneTo(length(v)),)
-axes(v::SimpleVector, d::Integer) = d <= 1 ? axes(v)[d] : OneTo(1)
+axes(v::SimpleVector) = (ZeroTo(length(v)),)
+axes(v::SimpleVector, d::Integer) = d < 0 ? throw(BoundsError(v, d)) : d == 0 ? ZeroTo(length(v)) : ZeroTo(1)
 
 function ==(v1::SimpleVector, v2::SimpleVector)
     length(v1)==length(v2) || return false
-    for i = 1:length(v1)
+    for i = 0:(length(v1)-1)
         v1[i] == v2[i] || return false
     end
     return true
 end
 
-map(f, v::SimpleVector) = Any[ f(v[i]) for i = 1:length(v) ]
+map(f, v::SimpleVector) = Any[ f(v[i]) for i = 0:(length(v)-1) ]
 
 getindex(v::SimpleVector, I::AbstractArray) = Core.svec(Any[ v[i] for i in I ]...)
 
@@ -1139,7 +1139,7 @@ false
 function isassigned end
 
 function isassigned(v::SimpleVector, i::Int)
-    @boundscheck 1 <= i <= length(v) || return false
+    @boundscheck 0 <= i < length(v) || return false
     return true
 end
 
@@ -1283,7 +1283,7 @@ julia> .![true false true]
 """
 !(x::Bool) = not_int(x)
 
-length(a::Array{T,1}) where {T} = getfield(getfield(a, :size), 1)
+length(a::Array{T,1}) where {T} = getfield(getfield(a, :size), 0)
 const C_NULL = bitcast(Ptr{Cvoid}, 0)
 has_typevar(@nospecialize(t), v::TypeVar) = ccall(:jl_has_typevar, Int32, (Any, Any), t, v) !== Int32(0)
 
@@ -1292,12 +1292,12 @@ has_typevar(@nospecialize(t), v::TypeVar) = ccall(:jl_has_typevar, Int32, (Any, 
 function _fieldtypes_constrain_typevars(tvars::Array{Any,1}, fts::Core.SimpleVector)
     nparams = length(tvars)
     n = length(fts)
-    i = nparams
-    while i !== 0
+    i = nparams - 1
+    while i !== -1
         @inbounds tv = tvars[i]::TypeVar
         constrained = false
-        j = 1
-        while j !== n + 1
+        j = 0
+        while j !== n
             ft = fts[j]
             if has_typevar(ft, tv)
                 constrained = true
@@ -1307,7 +1307,7 @@ function _fieldtypes_constrain_typevars(tvars::Array{Any,1}, fts::Core.SimpleVec
         end
         if !constrained
             j = i + 1
-            remaining = nparams - i
+            remaining = nparams - i - 1
             while remaining !== 0
                 @inbounds tv2 = tvars[j]::TypeVar
                 if has_typevar(tv2.ub, tv)
@@ -1339,8 +1339,8 @@ function _defaultctor_typeinfo(@nospecialize(ty::Type))
     dt = ua::DataType
     tvars = Array{Any,1}(Core.undef, nparams)
     ua = ty
-    i = 1
-    while i !== nparams + 1
+    i = 0
+    while i !== nparams
         @inbounds tvars[i] = (ua::UnionAll).var
         ua = (ua::UnionAll).body
         i = i + 1
@@ -1354,9 +1354,9 @@ end
 # Uses jl_method_def directly with type objects, avoiding type-to-expression conversion.
 function _defaultctors(@nospecialize(ty), functionloc)
     typeinfo = _defaultctor_typeinfo(ty)
-    dt = getfield(typeinfo, 1)
-    tvars = getfield(typeinfo, 2)
-    fts = getfield(typeinfo, 3)
+    dt = getfield(typeinfo, 0)
+    tvars = getfield(typeinfo, 1)
+    fts = getfield(typeinfo, 2)
     nparams = length(tvars)
 
     mod = dt.name.module
@@ -1372,10 +1372,10 @@ function _defaultctors(@nospecialize(ty), functionloc)
     # all-underscore field names being write-only in lowering.
     self = Symbol("#ctor-self#")
     argnames = Array{Any,1}(Core.undef, n + 1)
-    @inbounds argnames[1] = self
-    i = 1
+    @inbounds argnames[0] = self
+    i = 0
     nany = 0
-    while i !== n + 1
+    while i !== n
         @inbounds argnames[i + 1] = names[i]::Symbol
         if fts[i] === Any
             nany = nany + 1
@@ -1389,10 +1389,10 @@ function _defaultctors(@nospecialize(ty), functionloc)
         if is_parametric
             # new(apply_type(ty, static_parameter(1), ...), args...)
             curly_args = Array{Any,1}(Core.undef, nparams + 1)
-            @inbounds curly_args[1] = ty
-            i = 1
-            while i !== nparams + 1
-                @inbounds curly_args[i + 1] = Expr(:static_parameter, i)
+            @inbounds curly_args[0] = ty
+            i = 0
+            while i !== nparams
+                @inbounds curly_args[i + 1] = Expr(:static_parameter, i + 1)
                 i = i + 1
             end
             new_target = Expr(:curly, curly_args...)
@@ -1400,23 +1400,23 @@ function _defaultctors(@nospecialize(ty), functionloc)
             new_target = Core.Argument(1)
         end
         new_args = Array{Any,1}(Core.undef, n + 1)
-        @inbounds new_args[1] = new_target
-        i = 1
-        while i !== n + 1
-            @inbounds new_args[i + 1] = Core.Argument(i + 1)
+        @inbounds new_args[0] = new_target
+        i = 0
+        while i !== n
+            @inbounds new_args[i + 1] = Core.Argument(i + 2)
             i = i + 1
         end
         new_expr = Expr(:new, new_args...)
         lambda = Expr(:lambda, argnames,
             Expr(:block, functionloc, Expr(:return, new_expr)))
         ci = ccall(:jl_lower, Any, (Any, Any, Ptr{UInt8}, UInt, UInt, Int32),
-                   lambda, mod, src_file, src_line, sub_int(UInt(0), UInt(1)), Int32(0))[1]
+                   lambda, mod, src_file, src_line, sub_int(UInt(0), UInt(1)), Int32(0))[0]
 
         # Build argdata: svec(svec(Type{ty}, ft1, ft2, ...), svec(tvars...), functionloc)
         atypes_arr = Array{Any,1}(Core.undef, n + 1)
-        @inbounds atypes_arr[1] = Core.apply_type(Type, ty)
-        i = 1
-        while i !== n + 1
+        @inbounds atypes_arr[0] = Core.apply_type(Type, ty)
+        i = 0
+        while i !== n
             @inbounds atypes_arr[i + 1] = fts[i]
             i = i + 1
         end
@@ -1429,8 +1429,8 @@ function _defaultctors(@nospecialize(ty), functionloc)
         # For non-parametric types where all fields are Any, outer constructor suffices
         if nparams === 0
             all_any = true
-            i = 1
-            while i !== n + 1
+            i = 0
+            while i !== n
                 if fts[i] !== Any
                     all_any = false
                     break
@@ -1448,12 +1448,12 @@ function _defaultctors(@nospecialize(ty), functionloc)
     nstmts = ((n - nany) + (n - nany)) + 1
     body_args = Array{Any,1}(Core.undef, nstmts)
     new_args = Array{Any,1}(Core.undef, n)
-    i = 1
+    i = 0
     bidx = 1
-    while i !== n + 1
+    while i !== n
         ft = fts[i]
         if ft === Any
-            @inbounds new_args[i] = Core.Argument(i + 1)
+            @inbounds new_args[i] = Core.Argument(i + 2)
         else
             # Use an isa check to avoid depending on convert inlining.
             # This matches the old convert-for-type-decl pattern:
@@ -1465,33 +1465,33 @@ function _defaultctors(@nospecialize(ty), functionloc)
             ft_expr = Expr(:call, GlobalRef(Core, :fieldtype), Core.Argument(1), i)
             ft_ssa = Expr(:ssavalue, bidx)
             cnvt_ssa = Expr(:ssavalue, bidx + 1)
-            isa_check = Expr(:call, GlobalRef(Core, :isa), Core.Argument(i + 1), ft_ssa)
-            convert_expr = Expr(:call, GlobalRef(Base, :convert), ft_ssa, Core.Argument(i + 1))
-            @inbounds body_args[bidx] = Expr(:(=), ft_ssa, ft_expr)
-            @inbounds body_args[bidx + 1] = Expr(:(=), cnvt_ssa, Expr(:if, isa_check,
-                                               Core.Argument(i + 1), convert_expr))
+            isa_check = Expr(:call, GlobalRef(Core, :isa), Core.Argument(i + 2), ft_ssa)
+            convert_expr = Expr(:call, GlobalRef(Base, :convert), ft_ssa, Core.Argument(i + 2))
+            @inbounds body_args[bidx - 1] = Expr(:(=), ft_ssa, ft_expr)
+            @inbounds body_args[bidx] = Expr(:(=), cnvt_ssa, Expr(:if, isa_check,
+                                               Core.Argument(i + 2), convert_expr))
             @inbounds new_args[i] = cnvt_ssa
             bidx = bidx + 2
         end
         i = i + 1
     end
-    body_args[nstmts] = Expr(:return, Expr(:new, Core.Argument(1), new_args...))
+    body_args[nstmts - 1] = Expr(:return, Expr(:new, Core.Argument(1), new_args...))
     lambda = Expr(:lambda, argnames,
         Expr(:block, functionloc, body_args...))
     ci = ccall(:jl_lower, Any, (Any, Any, Ptr{UInt8}, UInt, UInt, Int32),
-               lambda, mod, src_file, src_line, sub_int(UInt(0), UInt(1)), Int32(0))[1]
+               lambda, mod, src_file, src_line, sub_int(UInt(0), UInt(1)), Int32(0))[0]
 
     # Build argdata: svec(svec(UnionAll...Type{dt}..., Any, Any, ...), svec(), functionloc)
     inner_atypes_arr = Array{Any,1}(Core.undef, n + 1)
     typedt = Core.apply_type(Type, dt)
-    i = nparams
-    while i !== 0
+    i = nparams - 1
+    while i !== -1
         @inbounds typedt = UnionAll(tvars[i], typedt)
         i = i - 1
     end
-    @inbounds inner_atypes_arr[1] = typedt
-    i = 1
-    while i !== n + 1
+    @inbounds inner_atypes_arr[0] = typedt
+    i = 0
+    while i !== n
         @inbounds inner_atypes_arr[i + 1] = Any
         i = i + 1
     end
@@ -1652,8 +1652,8 @@ macro world(sym, world)
     elseif isa(sym, GlobalRef)
         return :($(_resolve_in_world)($(esc(world)), $(QuoteNode(sym))))
     elseif isa(sym, Expr) && sym.head === :(.) &&
-            length(sym.args) == 2 && isa(sym.args[2], QuoteNode) && isa(sym.args[2].value, Symbol)
-        return :($(_resolve_in_world)($(esc(world)), $(GlobalRef)($(esc(sym.args[1])), $(sym.args[2]))))
+            length(sym.args) == 2 && isa(sym.args[1], QuoteNode) && isa(sym.args[1].value, Symbol)
+        return :($(_resolve_in_world)($(esc(world)), $(GlobalRef)($(esc(sym.args[0])), $(sym.args[1]))))
     else
         error("`@world` requires a symbol or GlobalRef")
     end

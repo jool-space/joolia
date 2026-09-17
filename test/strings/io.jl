@@ -1,3 +1,16 @@
+@testset "zero-origin string IO positions" begin
+    @test sprint(print, "left", 17, ":", :right) == "left17:right"
+    @test string("left", 17, ":", :right) == "left17:right"
+    @test string() == ""
+    parent = "aα😀z"
+    @test takestring!(IOBuffer(SubString(parent, 1, 6))) == "α😀"
+    @test takestring!(IOBuffer(SubString(parent, 0, 0))) == "a"
+    @test String(Char[Char(0x3b1), Char(0x1f600), Char(0x7a)]) == "α😀z"
+    @test String(Char[]) == ""
+    @test escape_string("abc") == "abc"
+    @test unescape_string("abc") == "abc"
+end
+
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
 @testset "string escaping & unescaping" begin

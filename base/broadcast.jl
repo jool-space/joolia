@@ -8,7 +8,7 @@ Module containing the broadcasting implementation.
 module Broadcast
 
 using .Base.Cartesian
-using .Base: OneTo, tail, isoperator, promote_typejoin, promote_typejoin_union, unalias, negate
+using .Base: OneTo, ZeroTo, tail, isoperator, promote_typejoin, promote_typejoin_union, unalias, negate
 import .Base: copy, copyto!, axes
 export broadcast, broadcast!, BroadcastStyle, broadcast_axes, broadcastable, dotview, @__dot__, BroadcastFunction
 
@@ -242,7 +242,7 @@ _axes(::Broadcasted, axes::Tuple) = axes
 _axes(bc::Broadcasted{<:AbstractArrayStyle{0}}, ::Nothing) = ()
 
 @inline Base.axes(bc::Broadcasted{<:Any, <:NTuple{N}}, d::Integer) where N =
-    d <= N ? axes(bc)[d] : OneTo(1)
+    d < N ? axes(bc)[d] : ZeroTo(1)
 
 BroadcastStyle(::Type{<:Broadcasted{Style}}) where {Style} = Style()
 BroadcastStyle(::Type{<:Broadcasted{S}}) where {S<:Union{Nothing,Unknown}} =
@@ -255,7 +255,7 @@ argtype(bc::Broadcasted) = argtype(typeof(bc))
 @inline Base.eachindex(s::IndexStyle, bc::Broadcasted) = _eachindex(s, axes(bc))
 _eachindex(::IndexCartesian, t::Tuple) = CartesianIndices(t)
 _eachindex(s::IndexLinear, t::Tuple) = eachindex(s, LinearIndices(t))
-_eachindex(::IndexLinear, t::Tuple{Any}) = t[1]
+_eachindex(::IndexLinear, t::Tuple{Any}) = t[0]
 
 Base.IndexStyle(bc::Broadcasted) = IndexStyle(typeof(bc))
 Base.IndexStyle(::Type{<:Broadcasted{<:Any,<:Tuple{Any}}}) = IndexLinear()
@@ -288,7 +288,7 @@ Base.@propagate_inbounds function Base.iterate(bc::Broadcasted, s)
     y = iterate(s...)
     y === nothing && return nothing
     i, newstate = y
-    return (bc[i], (s[1], newstate))
+    return (bc[i], (s[0], newstate))
 end
 
 Base.IteratorSize(::Type{T}) where {T<:Broadcasted} = Base.HasShape{ndims(T)}()
@@ -349,9 +349,9 @@ function flatten(bc::Broadcasted)
     # build a tuple of functions `makeargs`. Its elements take
     # the whole "flat" argument list and generate the appropriate
     # input arguments for the broadcasted function `f`, e.g.,
-    #          makeargs[1] = ((w, x, y, z)) -> w
-    #          makeargs[2] = ((w, x, y, z)) -> g(x, y)
-    #          makeargs[3] = ((w, x, y, z)) -> z
+    #          makeargs[0] = ((w, x, y, z)) -> w
+    #          makeargs[1] = ((w, x, y, z)) -> g(x, y)
+    #          makeargs[2] = ((w, x, y, z)) -> z
     makeargs = make_makeargs(bc.args)
     f = Base.maybeconstructor(bc.f)
     # TODO: consider specializing on args... if performance problems emerge:
@@ -367,8 +367,8 @@ _isflat(args::Tuple{}) = true
 
 cat_nested(bc::Broadcasted) = cat_nested_args(bc.args)
 cat_nested_args(::Tuple{}) = ()
-cat_nested_args(t::Tuple{Any}) = cat_nested(t[1])
-cat_nested_args(t::Tuple) = (cat_nested(t[1])..., cat_nested_args(tail(t))...)
+cat_nested_args(t::Tuple{Any}) = cat_nested(t[0])
+cat_nested_args(t::Tuple) = (cat_nested(t[0])..., cat_nested_args(tail(t))...)
 cat_nested(a) = (a,)
 
 """
@@ -378,12 +378,12 @@ Each element of `t` is one (consecutive) node in a broadcast tree.
 The returned `Tuple` are functions which take in the (whole) flattened
 list and generate the inputs for the corresponding broadcasted function.
 """
-make_makeargs(args::Tuple) = _make_makeargs(args, 1)[1]
+make_makeargs(args::Tuple) = _make_makeargs(args, 0)[0]
 
 # We build `makeargs` by traversing the broadcast nodes recursively.
 # note: `n` indicates the flattened index of the next unused argument.
 @inline function _make_makeargs(args::Tuple, n::Int)
-    head, n = _make_makeargs1(args[1], n)
+    head, n = _make_makeargs1(args[0], n)
     rest, n = _make_makeargs(tail(args), n)
     (head, rest...), n
 end
@@ -403,8 +403,8 @@ struct Pick{N} <: Function end
     makeargs1, n
 end
 
-@inline prepare_args(makeargs::Tuple, @nospecialize(x::Tuple)) = (makeargs[1](x), prepare_args(tail(makeargs), x)...)
-@inline prepare_args(makeargs::Tuple{Any}, @nospecialize(x::Tuple)) = (makeargs[1](x),)
+@inline prepare_args(makeargs::Tuple, @nospecialize(x::Tuple)) = (makeargs[0](x), prepare_args(tail(makeargs), x)...)
+@inline prepare_args(makeargs::Tuple{Any}, @nospecialize(x::Tuple)) = (makeargs[0](x),)
 prepare_args(::Tuple{}, ::Tuple) = ()
 
 ## Broadcasting utilities ##
@@ -521,10 +521,10 @@ broadcast_shape(shape::Tuple) = shape
 broadcast_shape(shape::Tuple, shape1::Tuple, shapes::Tuple...) = broadcast_shape(_bcs(shape, shape1), shapes...)
 # _bcs consolidates two shapes into a single output shape
 _bcs(::Tuple{}, ::Tuple{}) = ()
-_bcs(::Tuple{}, newshape::Tuple) = (newshape[1], _bcs((), tail(newshape))...)
-_bcs(shape::Tuple, ::Tuple{}) = (shape[1], _bcs(tail(shape), ())...)
+_bcs(::Tuple{}, newshape::Tuple) = (newshape[0], _bcs((), tail(newshape))...)
+_bcs(shape::Tuple, ::Tuple{}) = (shape[0], _bcs(tail(shape), ())...)
 function _bcs(shape::Tuple, newshape::Tuple)
-    return (_bcs1(shape[1], newshape[1]), _bcs(tail(shape), tail(newshape))...)
+    return (_bcs1(shape[0], newshape[0]), _bcs(tail(shape), tail(newshape))...)
 end
 # _bcs1 handles the logic for a single dimension
 _bcs1(a::Integer, b::Integer) = a == 1 ? b : (b == 1 ? a : (a == b ? a : throw(DimensionMismatch(LazyString("arrays could not be broadcast to a common size; got a dimension with lengths ", a, " and ", b)))))
@@ -554,7 +554,7 @@ function check_broadcast_shape(::Tuple{}, Ashp::Tuple)
     nothing
 end
 function check_broadcast_shape(shp, Ashp::Tuple)
-    _bcsm(shp[1], Ashp[1]) || throw(DimensionMismatch("array could not be broadcast to match destination"))
+    _bcsm(shp[0], Ashp[0]) || throw(DimensionMismatch("array could not be broadcast to match destination"))
     check_broadcast_shape(tail(shp), tail(Ashp))
 end
 @inline check_broadcast_axes(shp, A) = check_broadcast_shape(shp, axes(A))
@@ -583,19 +583,19 @@ an `Int`.
 """
 Base.@propagate_inbounds newindex(arg, I::CartesianIndex) = to_index(_newindex(axes(arg), I.I))
 Base.@propagate_inbounds newindex(arg, I::Integer) = to_index(_newindex(axes(arg), (I,)))
-Base.@propagate_inbounds _newindex(ax::Tuple, I::Tuple) = (ifelse(length(ax[1]) == 1, ax[1][begin], I[1]), _newindex(tail(ax), tail(I))...)
+Base.@propagate_inbounds _newindex(ax::Tuple, I::Tuple) = (ifelse(length(ax[0]) == 1, ax[0][begin], I[0]), _newindex(tail(ax), tail(I))...)
 Base.@propagate_inbounds _newindex(ax::Tuple{}, I::Tuple) = ()
-Base.@propagate_inbounds _newindex(ax::Tuple, I::Tuple{}) = (ax[1][begin], _newindex(tail(ax), ())...)
+Base.@propagate_inbounds _newindex(ax::Tuple, I::Tuple{}) = (ax[0][begin], _newindex(tail(ax), ())...)
 Base.@propagate_inbounds _newindex(ax::Tuple{}, I::Tuple{}) = ()
 
 # If dot-broadcasting were already defined, this would be `ifelse.(keep, I, Idefault)`.
 @inline newindex(I::CartesianIndex, keep, Idefault) = to_index(_newindex(I.I, keep, Idefault))
-@inline newindex(I::CartesianIndex{1}, keep, Idefault) = newindex(I.I[1], keep, Idefault)
-@inline newindex(i::Integer, keep::Tuple, idefault) = CartesianIndex(ifelse(keep[1], Int(i), Int(idefault[1])), idefault[2])
-@inline newindex(i::Integer, keep::Tuple{Bool}, idefault) = ifelse(keep[1], i, idefault[1])
+@inline newindex(I::CartesianIndex{1}, keep, Idefault) = newindex(I.I[0], keep, Idefault)
+@inline newindex(i::Integer, keep::Tuple, idefault) = CartesianIndex(ifelse(keep[0], Int(i), Int(idefault[0])), idefault[1])
+@inline newindex(i::Integer, keep::Tuple{Bool}, idefault) = ifelse(keep[0], i, idefault[0])
 @inline newindex(i::Integer, keep::Tuple{}, idefault) = CartesianIndex()
 @inline _newindex(I, keep, Idefault) =
-    (ifelse(keep[1], I[1], Idefault[1]), _newindex(tail(I), tail(keep), tail(Idefault))...)
+    (ifelse(keep[0], I[0], Idefault[0]), _newindex(tail(I), tail(keep), tail(Idefault))...)
 @inline _newindex(I, keep::Tuple{}, Idefault) = ()  # truncate if keep is shorter than I
 @inline _newindex(I::Tuple{}, keep, Idefault) = ()  # or I is shorter
 @inline _newindex(I::Tuple{}, keep::Tuple{}, Idefault) = () # or both
@@ -606,7 +606,7 @@ Base.@propagate_inbounds _newindex(ax::Tuple{}, I::Tuple{}) = ()
 @inline shapeindexer(ax) = _newindexer(ax)
 @inline _newindexer(indsA::Tuple{}) = (), ()
 @inline function _newindexer(indsA::Tuple)
-    ind1 = indsA[1]
+    ind1 = indsA[0]
     keep, Idefault = _newindexer(tail(indsA))
     (Base.length(ind1)::Integer != 1, keep...), (first(ind1), Idefault...)
 end
@@ -628,7 +628,7 @@ Base.@propagate_inbounds function _getindex(s::IndexLinear, bc, I::CartesianInde
     _getindex(s, bc, L[I])
 end
 to_index(::Tuple{}) = CartesianIndex()
-to_index(Is::Tuple{Any}) = Is[1]
+to_index(Is::Tuple{Any}) = Is[0]
 to_index(Is::Tuple) = CartesianIndex(Is)
 
 @inline function Base.checkbounds(bc::Broadcasted, I::CartesianIndex)
@@ -650,8 +650,8 @@ Index into `A` with `I`, collapsing broadcasted indices to their singleton indic
 Base.@propagate_inbounds _broadcast_getindex(A::Union{Ref,AbstractArray{<:Any,0},Number}, I) = A[] # Scalar-likes can just ignore all indices
 Base.@propagate_inbounds _broadcast_getindex(::Ref{Type{T}}, I) where {T} = T
 # Tuples are statically known to be singleton or vector-like
-Base.@propagate_inbounds _broadcast_getindex(A::Tuple{Any}, I) = A[1]
-Base.@propagate_inbounds _broadcast_getindex(A::Tuple, I) = A[I[1]]
+Base.@propagate_inbounds _broadcast_getindex(A::Tuple{Any}, I) = A[0]
+Base.@propagate_inbounds _broadcast_getindex(A::Tuple, I) = A[I[0]]
 # Everything else falls back to dynamically dropping broadcasted indices based upon its axes
 Base.@propagate_inbounds _broadcast_getindex(A, I) = A[newindex(A, I)]
 
@@ -686,7 +686,7 @@ Base.@propagate_inbounds function _broadcast_getindex(bc::Broadcasted{<:Any,<:An
     return _broadcast_getindex_evalf(bc.f, T, args...)
 end
 Base.@propagate_inbounds function _broadcast_getindex(bc::Broadcasted{<:Any,<:Any,<:Any,<:Tuple{Any,Ref{Type{T}},Vararg{Any}}}, I) where {T}
-    arg1 = _broadcast_getindex(bc.args[1], I)
+    arg1 = _broadcast_getindex(bc.args[0], I)
     args = _getindex(tail(tail(bc.args)), I)
     return _broadcast_getindex_evalf(bc.f, arg1, T, args...)
 end
@@ -696,8 +696,8 @@ Base.@propagate_inbounds function _broadcast_getindex(bc::Broadcasted{<:Any,<:An
 end
 
 # Utilities for _broadcast_getindex
-Base.@propagate_inbounds _getindex(args::Tuple, I) = (_broadcast_getindex(args[1], I), _getindex(tail(args), I)...)
-Base.@propagate_inbounds _getindex(args::Tuple{Any}, I) = (_broadcast_getindex(args[1], I),)
+Base.@propagate_inbounds _getindex(args::Tuple, I) = (_broadcast_getindex(args[0], I), _getindex(tail(args), I)...)
+Base.@propagate_inbounds _getindex(args::Tuple{Any}, I) = (_broadcast_getindex(args[0], I),)
 Base.@propagate_inbounds _getindex(args::Tuple{}, I) = ()
 
 @inline _broadcast_getindex_evalf(f::Tf, args::Vararg{Any,N}) where {Tf,N} = f(args...)  # not propagate_inbounds
@@ -749,7 +749,7 @@ _bc_eltype(x::Tuple, i) = _broadcast_getindex(x, i)
 # inference barrier prevents recursion limiting, and ::eltype gives the desired result
 _bc_eltype(x, i) = _broadcast_getindex(Base.inferencebarrier(x), i)::eltype(x)
 
-_bc_eltypes(args::Tuple, i) = (_bc_eltype(args[1], i), _bc_eltypes(tail(args), i)...)
+_bc_eltypes(args::Tuple, i) = (_bc_eltype(args[0], i), _bc_eltypes(tail(args), i)...)
 _bc_eltypes(::Tuple{}, i) = ()
 
 function result_eltype(bc::Broadcasted)
@@ -765,9 +765,9 @@ _broadcast_getindex_eltype(bc::Broadcasted) = combine_eltypes(bc.f, bc.args)
 _broadcast_getindex_eltype(A) = eltype(A)  # Tuple, Array, etc.
 
 eltypes(::Tuple{}) = Tuple{}
-eltypes(t::Tuple{Any}) = Iterators.TupleOrBottom(_broadcast_getindex_eltype(t[1]))
-eltypes(t::Tuple{Any,Any}) = Iterators.TupleOrBottom(_broadcast_getindex_eltype(t[1]), _broadcast_getindex_eltype(t[2]))
-eltypes(t::Tuple) = (TT = eltypes(tail(t)); TT === Union{} ? Union{} : Iterators.TupleOrBottom(_broadcast_getindex_eltype(t[1]), TT.parameters...))
+eltypes(t::Tuple{Any}) = Iterators.TupleOrBottom(_broadcast_getindex_eltype(t[0]))
+eltypes(t::Tuple{Any,Any}) = Iterators.TupleOrBottom(_broadcast_getindex_eltype(t[0]), _broadcast_getindex_eltype(t[1]))
+eltypes(t::Tuple) = (TT = eltypes(tail(t)); TT === Union{} ? Union{} : Iterators.TupleOrBottom(_broadcast_getindex_eltype(t[0]), TT.parameters...))
 
 # Inferred eltype of result of broadcast(f, args...)
 function combine_eltypes(f, args::Tuple)
@@ -984,7 +984,7 @@ end
     # IF we're in the common no-op identity case with no nested args (like `dest .= val`),
     if bc.f === identity && bc.args isa Tuple{Any} && isflat(bc)
         # THEN we can just extract the argument and `fill!` the destination with it
-        return fill!(dest, bc.args[1][])
+        return fill!(dest, bc.args[0][])
     else
         # Otherwise, fall back to the default implementation like above
         return copyto!(dest, convert(Broadcasted{Nothing}, bc))
@@ -1006,8 +1006,8 @@ broadcast_unalias(::Nothing, src) = src
 @inline preprocess(dest, bc::Broadcasted) = Broadcasted(bc.style, bc.f, preprocess_args(dest, bc.args), bc.axes)
 preprocess(dest, x) = extrude(broadcast_unalias(dest, x))
 
-@inline preprocess_args(dest, args::Tuple) = (preprocess(dest, args[1]), preprocess_args(dest, tail(args))...)
-@inline preprocess_args(dest, args::Tuple{Any}) = (preprocess(dest, args[1]),)
+@inline preprocess_args(dest, args::Tuple) = (preprocess(dest, args[0]), preprocess_args(dest, tail(args))...)
+@inline preprocess_args(dest, args::Tuple{Any}) = (preprocess(dest, args[0]),)
 @inline preprocess_args(dest, args::Tuple{}) = ()
 
 # Specialize this method if all you want to do is specialize on typeof(dest)
@@ -1015,7 +1015,7 @@ preprocess(dest, x) = extrude(broadcast_unalias(dest, x))
     axes(dest) == axes(bc) || throwdm(axes(dest), axes(bc))
     # Performance optimization: broadcast!(identity, dest, A) is equivalent to copyto!(dest, A) if indices match
     if bc.f === identity && bc.args isa Tuple{AbstractArray} # only a single input argument to broadcast!
-        A = bc.args[1]
+        A = bc.args[0]
         if axes(dest) == axes(A)
             return copyto!(dest, A)
         end
@@ -1037,7 +1037,7 @@ end
     ndims(dest) == 0 && (dest[] = bc[]; return dest)
     bc′ = preprocess(dest, bc)
     ax = axes(bc′)
-    ax1, out = ax[1], CartesianIndices(tail(ax))
+    ax1, out = ax[0], CartesianIndices(tail(ax))
     destc, indc = dest.chunks, 0
     bitst, remain = 0, UInt64(0)
     for I in out
@@ -1047,7 +1047,8 @@ end
                 @inbounds @simd for j = bitst:63
                     remain |= UInt64(convert(Bool, bc′[i+=1, I])) << (j & 63)
                 end
-                @inbounds destc[indc+=1] = remain
+                @inbounds destc[indc] = remain
+                indc += 1
                 bitst, remain = 0, UInt64(0)
             end
             while i <= last(ax1) - 64
@@ -1055,7 +1056,8 @@ end
                 @inbounds @simd for j = 0:63
                     z |= UInt64(convert(Bool, bc′[i+=1, I])) << (j & 63)
                 end
-                @inbounds destc[indc+=1] = z
+                @inbounds destc[indc] = z
+                indc += 1
             end
         end
         @inbounds @simd for j = i+1:last(ax1)
@@ -1064,7 +1066,7 @@ end
         end
     end
     @inbounds if bitst != 0
-        destc[indc+1] = remain
+        destc[indc] = remain
     end
     return dest
 end
@@ -1082,9 +1084,9 @@ const ChunkableOp = Union{typeof(&), typeof(|), typeof(xor), typeof(~), typeof(i
 const BroadcastedChunkableOp{Style<:Union{Nothing,BroadcastStyle}, Axes, F<:ChunkableOp, Args<:Tuple} = Broadcasted{Style,Axes,F,Args}
 ischunkedbroadcast(R, bc::BroadcastedChunkableOp) = ischunkedbroadcast(R, bc.args)
 ischunkedbroadcast(R, args) = false
-ischunkedbroadcast(R, args::Tuple{<:BitArray,Vararg{Any}}) = size(R) == size(args[1]) && ischunkedbroadcast(R, tail(args))
+ischunkedbroadcast(R, args::Tuple{<:BitArray,Vararg{Any}}) = size(R) == size(args[0]) && ischunkedbroadcast(R, tail(args))
 ischunkedbroadcast(R, args::Tuple{<:Bool,Vararg{Any}}) = ischunkedbroadcast(R, tail(args))
-ischunkedbroadcast(R, args::Tuple{<:BroadcastedChunkableOp,Vararg{Any}}) = ischunkedbroadcast(R, args[1]) && ischunkedbroadcast(R, tail(args))
+ischunkedbroadcast(R, args::Tuple{<:BroadcastedChunkableOp,Vararg{Any}}) = ischunkedbroadcast(R, args[0]) && ischunkedbroadcast(R, tail(args))
 ischunkedbroadcast(R, args::Tuple{}) = true
 
 # Convert compatible functions to chunkable ones. They must also be green-lighted as ChunkableOps
@@ -1096,9 +1098,9 @@ liftfuncs(bc::Broadcasted{<:Any,<:Any,typeof(==)}) = Broadcasted(bc.style, (~)�
 liftfuncs(x) = x
 
 liftchunks(::Tuple{}) = ()
-liftchunks(args::Tuple{<:BitArray,Vararg{Any}}) = (args[1].chunks, liftchunks(tail(args))...)
+liftchunks(args::Tuple{<:BitArray,Vararg{Any}}) = (args[0].chunks, liftchunks(tail(args))...)
 # Transform scalars to repeated scalars the size of a chunk
-liftchunks(args::Tuple{<:Bool,Vararg{Any}}) = (ifelse(args[1], typemax(UInt64), UInt64(0)), liftchunks(tail(args))...)
+liftchunks(args::Tuple{<:Bool,Vararg{Any}}) = (ifelse(args[0], typemax(UInt64), UInt64(0)), liftchunks(tail(args))...)
 ithchunk(i) = ()
 Base.@propagate_inbounds ithchunk(i, c::Vector{UInt64}, args...) = (c[i], ithchunk(i, args...)...)
 Base.@propagate_inbounds ithchunk(i, b::UInt64, args...) = (b, ithchunk(i, args...)...)
@@ -1152,7 +1154,7 @@ end
 @inline function copy(bc::Broadcasted{Style{Tuple}})
     dim = axes(bc)
     length(dim) == 1 || throw(DimensionMismatch("tuple only supports one dimension"))
-    N = length(dim[1])
+    N = length(dim[0])
     return ntuple(k -> @inbounds(_broadcast_getindex(bc, k)), Val(N))
 end
 
@@ -1252,17 +1254,17 @@ end
 Base.@propagate_inbounds dotview(B::BitArray, i::BitArray) = BitMaskedBitArray(B, i)
 Base.show(io::IO, B::BitMaskedBitArray) = foreach(arg->show(io, arg), (typeof(B), (B.parent, B.mask)))
 # Override materialize! to prevent the BitMaskedBitArray from escaping to an overridable method
-@inline materialize!(B::BitMaskedBitArray, bc::Broadcasted{<:Any,<:Any,typeof(identity),Tuple{Bool}}) = fill!(B, bc.args[1])
+@inline materialize!(B::BitMaskedBitArray, bc::Broadcasted{<:Any,<:Any,typeof(identity),Tuple{Bool}}) = fill!(B, bc.args[0])
 @inline materialize!(B::BitMaskedBitArray, bc::Broadcasted{<:Any}) = materialize!(@inbounds(view(B.parent, B.mask)), bc)
 function Base.fill!(B::BitMaskedBitArray, b::Bool)
     Bc = B.parent.chunks
     Ic = B.mask.chunks
     @inbounds if b
-        for i = 1:length(Bc)
+        for i in eachindex(Bc)
             Bc[i] |= Ic[i]
         end
     else
-        for i = 1:length(Bc)
+        for i in eachindex(Bc)
             Bc[i] &= ~Ic[i]
         end
     end
@@ -1303,22 +1305,22 @@ end
 __dot__(x) = x
 function __dot__(x::Expr)
     dotargs = Base.mapany(__dot__, x.args)
-    if x.head === :call && dottable(x.args[1])
-        Expr(:., dotargs[1], Expr(:tuple, dotargs[2:end]...))
+    if x.head === :call && dottable(x.args[0])
+        Expr(:., dotargs[0], Expr(:tuple, dotargs[1:end]...))
     elseif x.head === :comparison
-        Expr(:comparison, (iseven(i) && dottable(arg) && arg isa Symbol && isoperator(arg) ?
+        Expr(:comparison, (isodd(i) && dottable(arg) && arg isa Symbol && isoperator(arg) ?
                                Symbol('.', arg) : arg for (i, arg) in pairs(dotargs))...)
     elseif x.head === :$
-        x.args[1]
+        x.args[0]
     elseif x.head === :let # don't add dots to `let x=...` assignments
-        Expr(:let, undot(dotargs[1]), dotargs[2])
+        Expr(:let, undot(dotargs[0]), dotargs[1])
     elseif x.head === :for # don't add dots to for x=... assignments
-        Expr(:for, undot(dotargs[1]), dotargs[2])
+        Expr(:for, undot(dotargs[0]), dotargs[1])
     elseif x.head === :generator || x.head === :filter
-        Expr(x.head, dotargs[1], map(undot, dotargs[2:end])...)
+        Expr(x.head, dotargs[0], map(undot, dotargs[1:end])...)
     elseif (x.head === :(=) || x.head === :function || x.head === :macro) &&
-           Meta.isexpr(x.args[1], :call) # function or macro definition
-        Expr(x.head, x.args[1], dotargs[2])
+           Meta.isexpr(x.args[0], :call) # function or macro definition
+        Expr(x.head, x.args[0], dotargs[1])
     elseif x.head === :(<:) || x.head === :(>:)
         tmp = x.head === :(<:) ? :.<: : :.>:
         Expr(:call, tmp, dotargs...)
@@ -1331,6 +1333,7 @@ function __dot__(x::Expr)
         end
     end
 end
+
 """
     @. expr
 

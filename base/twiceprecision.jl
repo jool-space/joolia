@@ -3,7 +3,7 @@
 # Twice-precision arithmetic.
 
 # Necessary for creating nicely-behaved ranges like r = 0.1:0.1:0.3
-# that return r[3] == 0.3.  Otherwise, we have roundoff error due to
+# that return r[2] == 0.3.  Otherwise, we have roundoff error due to
 #     0.1 + 2*0.1 = 0.30000000000000004
 
 """
@@ -253,7 +253,7 @@ nbitslen(::Type{T}, len, offset) where {T<:IEEEFloat} =
     min(cld(precision(T), 2), nbitslen(len, offset))
 # The +1 here is for safety, because the precision of the significand
 # is 1 bit higher than the number that is explicitly stored.
-nbitslen(len, offset) = len < 2 ? 0 : top_set_bit(max(offset-1, len-offset) - 1) + 1
+nbitslen(len, offset) = len < 2 ? 0 : top_set_bit(max(offset, len-offset-1) - 1) + 1
 
 eltype(::Type{TwicePrecision{T}}) where {T} = T
 
@@ -349,13 +349,13 @@ end
 function steprangelen_hp(::Type{T}, ref::Tuple{Integer,Integer},
                          step::Tuple{Integer,Integer}, nb::Integer,
                          len::Integer, offset::Integer) where {T<:IEEEFloat}
-    StepRangeLen{T}(ref[1]/ref[2], step[1]/step[2], len, offset)
+    StepRangeLen{T}(ref[0]/ref[1], step[0]/step[1], len, offset)
 end
 
 # AbstractFloat constructors (can supply a single number or a 2-tuple
 const F_or_FF = Union{AbstractFloat, Tuple{AbstractFloat,AbstractFloat}}
 asF64(x::AbstractFloat) = Float64(x)
-asF64(x::Tuple{AbstractFloat,AbstractFloat}) = Float64(x[1]) + Float64(x[2])
+asF64(x::Tuple{AbstractFloat,AbstractFloat}) = Float64(x[0]) + Float64(x[1])
 
 function steprangelen_hp(::Type{Float64}, ref::F_or_FF,
                          step::F_or_FF, nb::Integer,
@@ -373,20 +373,20 @@ end
 
 
 StepRangeLen(ref::TwicePrecision{T}, step::TwicePrecision{T},
-             len::Integer, offset::Integer=1) where {T} =
+             len::Integer, offset::Integer=0) where {T} =
     StepRangeLen{T,TwicePrecision{T},TwicePrecision{T}}(ref, step, len, offset)
 
 # Construct range for rational start=start_n/den, step=step_n/den
 function floatrange(::Type{T}, start_n::Integer, step_n::Integer, len::Integer, den::Integer) where T
     len = len + 0 # promote with Int
     if len < 2 || step_n == 0
-        return steprangelen_hp(T, (start_n, den), (step_n, den), 0, len, oneunit(len))
+        return steprangelen_hp(T, (start_n, den), (step_n, den), 0, len, zero(len))
     end
     # index of smallest-magnitude value
     L = typeof(len)
-    imin = clamp(round(typeof(len), -start_n/step_n+1), oneunit(L), len)
+    imin = clamp(round(typeof(len), -start_n/step_n), zero(L), len-oneunit(L))
     # Compute smallest-magnitude element to 2x precision
-    ref_n = start_n+(imin-1)*step_n  # this shouldn't overflow, so don't check
+    ref_n = start_n+imin*step_n  # this shouldn't overflow, so don't check
     nb = nbitslen(T, len, imin)
     steprangelen_hp(T, (ref_n, den), (step_n, den), nb, len, imin)
 end
@@ -430,7 +430,7 @@ function (:)(start::T, step::T, stop::T) where T<:IEEEFloat
         # if we've overshot the end, subtract one:
         len -= (start < stop < stop′) + (start > stop > stop′)
     end
-    steprangelen_hp(T, start, step, 0, len, 1)
+    steprangelen_hp(T, start, step, 0, len, 0)
 end
 
 step(r::StepRangeLen{T,TwicePrecision{T},TwicePrecision{T}}) where {T<:AbstractFloat} = T(r.step)
@@ -460,7 +460,7 @@ function range_start_step_length(a::T, st::T, len::Integer) where T<:IEEEFloat
             return floatrange(T, start_n, step_n, len, den)
         end
     end
-    steprangelen_hp(T, a, st, 0, len, 1)
+    steprangelen_hp(T, a, st, 0, len, 0)
 end
 
 range_step_stop_length(step::Real, stop::IEEEFloat, len::Integer) =
@@ -501,27 +501,27 @@ function getindex(r::StepRangeLen{T,<:TwicePrecision,<:TwicePrecision}, s::Ordin
     if S === Bool
         #rstep *= one(sstep)
         if len == 0
-            return StepRangeLen{T}(first(r), rstep, zero(L), oneunit(L))
+            return StepRangeLen{T}(first(r), rstep, zero(L), zero(L))
         elseif len == 1
             if first(s)
-                return StepRangeLen{T}(first(r), rstep, oneunit(L), oneunit(L))
+                return StepRangeLen{T}(first(r), rstep, oneunit(L), zero(L))
             else
-                return StepRangeLen{T}(first(r), rstep, zero(L), oneunit(L))
+                return StepRangeLen{T}(first(r), rstep, zero(L), zero(L))
             end
         else # len == 2
-            return StepRangeLen{T}(last(r), step(r), oneunit(L), oneunit(L))
+            return StepRangeLen{T}(last(r), step(r), oneunit(L), zero(L))
         end
     else
-        soffset = round(L, (r.offset - first(s))/sstep + 1)
-        soffset = clamp(soffset, oneunit(L), len)
-        ioffset = L(first(s) + (soffset - oneunit(L)) * sstep)
+        soffset = round(L, (r.offset - first(s))/sstep)
+        soffset = clamp(soffset, zero(L), len-oneunit(L))
+        ioffset = L(first(s) + soffset * sstep)
         if sstep == 1 || len < 2
             newstep = rstep #* one(sstep)
         else
             newstep = rstep * sstep
             newstep = twiceprecision(newstep, nbitslen(T, len, soffset))
         end
-        soffset = max(oneunit(L), soffset)
+        soffset = max(zero(L), soffset)
         if ioffset == r.offset
             return StepRangeLen{T}(r.ref, newstep, len, soffset)
         else
@@ -588,14 +588,15 @@ end
 
 function sum(r::StepRangeLen)
     l = length(r)
+    l == 0 && return zero(first(r))
     # Compute the contribution of step over all indices.
     # Indexes on opposite side of r.offset contribute with opposite sign,
     #    r.step * (sum(1:np) - sum(1:nn))
-    np, nn = l - r.offset, r.offset - 1  # positive, negative
+    np, nn = l - r.offset - 1, r.offset  # positive, negative
     # To prevent overflow in sum(1:n), multiply its factors by the step
     sp, sn = sumpair(np), sumpair(nn)
     W = widen(typeof(l))
-    Δn = W(sp[1]) * W(sp[2]) - W(sn[1]) * W(sn[2])
+    Δn = W(sp[0]) * W(sp[1]) - W(sn[0]) * W(sn[1])
     s = r.step * Δn
     # Add in contributions of ref
     ref = r.ref * l
@@ -603,20 +604,21 @@ function sum(r::StepRangeLen)
 end
 function sum(r::StepRangeLen{<:Any,<:TwicePrecision,<:TwicePrecision})
     l = length(r)
+    l == 0 && return zero(first(r))
     # Compute the contribution of step over all indices.
     # Indexes on opposite side of r.offset contribute with opposite sign,
     #    r.step * (sum(1:np) - sum(1:nn))
-    np, nn = l - r.offset, r.offset - 1  # positive, negative
+    np, nn = l - r.offset - 1, r.offset  # positive, negative
     # To prevent overflow in sum(1:n), multiply its factors by the step
     sp, sn = sumpair(np), sumpair(nn)
-    tp = _tp_prod(r.step, sp[1], sp[2])
-    tn = _tp_prod(r.step, sn[1], sn[2])
+    tp = _tp_prod(r.step, sp[0], sp[1])
+    tn = _tp_prod(r.step, sn[0], sn[1])
     s_hi, s_lo = add12(tp.hi, -tn.hi)
     s_lo += tp.lo - tn.lo
     # Add in contributions of ref
     ref = r.ref * l
     sm_hi, sm_lo = add12(s_hi, ref.hi)
-    add12(sm_hi, sm_lo + s_lo + ref.lo)[1]
+    add12(sm_hi, sm_lo + s_lo + ref.lo)[0]
 end
 
 # sum(1:n) as a product of two integers
@@ -646,7 +648,7 @@ function range_start_stop_length(start::T, stop::T, len::Integer) where {T<:IEEE
     len = len + 0 # promote with Int
     len < 2 && return _linspace1(T, start, stop, len)
     if start == stop
-        return steprangelen_hp(T, start, zero(T), 0, len, 1)
+        return steprangelen_hp(T, start, zero(T), 0, len, 0)
     end
     # Attempt to find exact rational approximations
     _, start_d = rat(start)
@@ -676,37 +678,37 @@ function _linspace(start::T, stop::T, len::Integer) where {T<:IEEEFloat}
     tmin = -(start/Δ)/Δfac            # t such that (1-t)*start + t*stop == 0
     L = typeof(len)
     lenn1 = len - oneunit(L)
-    imin = round(L, tmin*lenn1 + 1) # index approximately corresponding to t
-    if 1 < imin < len
+    imin = round(L, tmin*lenn1) # index approximately corresponding to t
+    if 0 < imin < len-oneunit(L)
         # The smallest-magnitude element is in the interior
-        t = (imin - 1)/lenn1
+        t = imin/lenn1
         ref = T((1-t)*start + t*stop)
-        step = imin-1 < len-imin ? (ref-start)/(imin-1) : (stop-ref)/(len-imin)
-    elseif imin <= 1
-        imin = oneunit(L)
+        step = imin < len-oneunit(L)-imin ? (ref-start)/imin : (stop-ref)/(len-oneunit(L)-imin)
+    elseif imin <= 0
+        imin = zero(L)
         ref = start
         step = (Δ/(lenn1))*Δfac
     else
-        imin = len
+        imin = len-oneunit(L)
         ref = stop
         step = (Δ/(lenn1))*Δfac
     end
     if len == 2 && !isfinite(step)
         # For very large endpoints where step overflows, exploit the
         # split-representation to handle the overflow
-        return steprangelen_hp(T, start, (-start, stop), 0, len, oneunit(L))
+        return steprangelen_hp(T, start, (-start, stop), 0, len, zero(L))
     end
     # 2x calculations to get high precision endpoint matching while also
     # preventing overflow in ref_hi+(i-offset)*step_hi
-    m, k = prevfloat(floatmax(T)), max(imin-1, len-imin)
+    m, k = prevfloat(floatmax(T)), max(imin, len-oneunit(L)-imin)
     step_hi_pre = clamp(step, max(-(m+ref)/k, (-m+ref)/k), min((m-ref)/k, (m+ref)/k))
     nb = nbitslen(T, len, imin)
     step_hi = truncbits(step_hi_pre, nb)
-    x1_hi, x1_lo = add12((1-imin)*step_hi, ref)
-    x2_hi, x2_lo = add12((len-imin)*step_hi, ref)
+    x1_hi, x1_lo = add12(-imin*step_hi, ref)
+    x2_hi, x2_lo = add12((len-oneunit(L)-imin)*step_hi, ref)
     a, b = (start - x1_hi) - x1_lo, (stop - x2_hi) - x2_lo
     step_lo = (b - a)/(len - 1)
-    ref_lo = a - (1 - imin)*step_lo
+    ref_lo = a + imin*step_lo
     steprangelen_hp(T, (ref, ref_lo), (step_hi, step_lo), 0, len, imin)
 end
 
@@ -717,14 +719,14 @@ function _linspace(::Type{T}, start_n::Integer, stop_n::Integer, len::Integer, d
     len = len + 0 # promote with Int
     len < 2 && return _linspace1(T, start_n/den, stop_n/den, len)
     L = typeof(len)
-    start_n == stop_n && return steprangelen_hp(T, (start_n, den), (zero(start_n), den), 0, len, oneunit(L))
+    start_n == stop_n && return steprangelen_hp(T, (start_n, den), (zero(start_n), den), 0, len, zero(L))
     tmin = -start_n/(Float64(stop_n) - Float64(start_n))
-    imin = round(typeof(len), tmin*(len-1)+1)
-    imin = clamp(imin, oneunit(L), len)
+    imin = round(typeof(len), tmin*(len-1))
+    imin = clamp(imin, zero(L), len-oneunit(L))
     W = widen(L)
     start_n = W(start_n)
     stop_n = W(stop_n)
-    ref_num = W(len-imin) * start_n + W(imin-1) * stop_n
+    ref_num = W(len-oneunit(L)-imin) * start_n + W(imin) * stop_n
     ref_denom = W(len-1) * den
     ref = (ref_num, ref_denom)
     step_full = (stop_n - start_n, ref_denom)
@@ -739,9 +741,9 @@ function _linspace1(::Type{T}, start, stop, len::Integer) where T<:IEEEFloat
         # Ensure that first(r)==start and last(r)==stop even for len==0
         # The output type must be consistent with steprangelen_hp
         if T<:Union{Float32,Float16}
-            return StepRangeLen{T}(Float64(start), Float64(start) - Float64(stop), len, 1)
+            return StepRangeLen{T}(Float64(start), Float64(start) - Float64(stop), len, 0)
         else # T == Float64
-            return StepRangeLen(TwicePrecision(start, zero(T)), TwicePrecision(start, -stop), len, 1)
+            return StepRangeLen(TwicePrecision(start, zero(T)), TwicePrecision(start, -stop), len, 0)
         end
     end
     throw(ArgumentError("should only be called for len < 2, got $len"))

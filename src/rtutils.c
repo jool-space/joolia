@@ -454,7 +454,7 @@ JL_DLLEXPORT void jl_set_nth_field(jl_value_t *v, size_t idx0, jl_value_t *rhs)
     if (!st->name->mutabl)
         jl_errorf("setfield!: immutable struct of type %s cannot be changed", jl_symbol_name(st->name->name));
     if (idx0 >= jl_datatype_nfields(st))
-        jl_bounds_error_int(v, idx0 + 1);
+        jl_bounds_error_int(v, idx0);
     //jl_value_t *ft = jl_field_type(st, idx0);
     //if (!jl_isa(rhs, ft)) {
     //    jl_type_error("setfield!", ft, rhs);

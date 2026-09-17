@@ -5,7 +5,7 @@
 # imports
 import Base: length, eltype, union!, push!
 # usings
-using Base: OneTo, collect, zero, zeros, one, typemax
+using Base: zero, zeros, one, typemax
 
 # Disjoint-Set
 
@@ -39,8 +39,8 @@ mutable struct IntDisjointSet{T<:Integer}
     ngroups::T
 end
 
-IntDisjointSet(n::T) where {T<:Integer} = IntDisjointSet{T}(collect(OneTo(n)), zeros(T, n), n)
-IntDisjointSet{T}(n::Integer) where {T<:Integer} = IntDisjointSet{T}(collect(OneTo(T(n))), zeros(T, T(n)), T(n))
+IntDisjointSet(n::T) where {T<:Integer} = IntDisjointSet{T}(T[i for i in 1:n], zeros(T, n), n)
+IntDisjointSet{T}(n::Integer) where {T<:Integer} = IntDisjointSet{T}(T[i for i in 1:T(n)], zeros(T, T(n)), T(n))
 length(s::IntDisjointSet) = length(s.parents)
 
 """
@@ -54,18 +54,18 @@ eltype(::Type{IntDisjointSet{T}}) where {T<:Integer} = T
 # find the root element of the subset that contains x
 # path compression is implemented here
 function find_root_impl!(parents::Vector{T}, x::Integer) where {T<:Integer}
-    p = parents[x]
-    @inbounds if parents[p] ≠ p
-        parents[x] = p = _find_root_impl!(parents, p)
+    p = parents[x - 1]
+    @inbounds if parents[p - 1] ≠ p
+        parents[x - 1] = p = _find_root_impl!(parents, p)
     end
     return p
 end
 
 # unsafe version of the above
 function _find_root_impl!(parents::Vector{T}, x::Integer) where {T<:Integer}
-    @inbounds p = parents[x]
-    @inbounds if parents[p] ≠ p
-        parents[x] = p = _find_root_impl!(parents, p)
+    @inbounds p = parents[x - 1]
+    @inbounds if parents[p - 1] ≠ p
+        parents[x - 1] = p = _find_root_impl!(parents, p)
     end
     return p
 end
@@ -108,15 +108,15 @@ Assume `x ≠ y` (unsafe).
 function root_union!(s::IntDisjointSet{T}, x::T, y::T) where {T<:Integer}
     parents = s.parents
     rks = s.ranks
-    @inbounds xrank = rks[x]
-    @inbounds yrank = rks[y]
+    @inbounds xrank = rks[x - 1]
+    @inbounds yrank = rks[y - 1]
 
     if xrank < yrank
         x, y = y, x
     elseif xrank == yrank
-        rks[x] += one(T)
+        rks[x - 1] += one(T)
     end
-    @inbounds parents[y] = x
+    @inbounds parents[y - 1] = x
     s.ngroups -= one(T)
     return x
 end

@@ -17,7 +17,7 @@ end
 function parse_iteration_space(x)
     (isa(x, Expr) && (x.head === :(=) || x.head === :in)) || throw(SimdError("= or in expected"))
     length(x.args) == 2 || throw(SimdError("simd range syntax is wrong"))
-    isa(x.args[1], Symbol) || throw(SimdError("simd loop index must be a symbol"))
+    isa(x.args[0], Symbol) || throw(SimdError("simd loop index must be a symbol"))
     x.args # symbol, range
 end
 
@@ -25,7 +25,7 @@ end
 function check_body!(x::Expr)
     if x.head === :break || x.head === :continue
         throw(SimdError("$(x.head) is not allowed inside a @simd loop body"))
-    elseif x.head === :macrocall && x.args[1] === Symbol("@goto")
+    elseif x.head === :macrocall && x.args[0] === Symbol("@goto")
         throw(SimdError("@goto is not allowed inside a @simd loop body"))
     end
     for arg in x.args
@@ -59,7 +59,7 @@ function compile(x, ivdep)
     length(x.args) == 2 || throw(SimdError("1D for loop expected"))
     check_body!(x)
 
-    var,range = parse_iteration_space(x.args[1])
+    var,range = parse_iteration_space(x.args[0])
     # r: Range value
     # j: Iteration variable for outer loop
     # n: Trip count for inner loop
@@ -74,7 +74,7 @@ function compile(x, ivdep)
                         let i = zero(n)
                             while i < n
                                 local $(esc(var)) = Base.simd_index(r,j,i)
-                                $(esc(x.args[2]))        # Body of loop
+                                $(esc(x.args[1]))        # Body of loop
                                 i += 1
                                 $(Expr(:loopinfo, Symbol("julia.simdloop"), ivdep))  # Mark loop as SIMD loop
                             end

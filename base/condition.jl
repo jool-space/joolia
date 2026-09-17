@@ -235,15 +235,15 @@ function schedule_on_notify!(c::GenericCondition, waiter::Task, first::Bool=fals
         # delivery kills the waiter at start
     end
     # since this is similar to schedule, we should observe the sticky bit now
-    if waiter.sticky && Threads.threadid(waiter) == 0 && !GC.in_finalizer()
+    if waiter.sticky && Threads.threadid(waiter) == -1 && !GC.in_finalizer()
         # Issue #41324
-        # t.sticky && tid == 0 is a task that needs to be co-scheduled with
+        # t.sticky && tid == -1 is a task that needs to be co-scheduled with
         # the parent task. If the parent (current_task) is not sticky we must
         # set it to be sticky.
         # XXX: Ideally we would be able to unset this
         current_task().sticky = true
         tid = Threads.threadid()
-        ccall(:jl_set_task_tid, Cint, (Any, Cint), waiter, tid-1)
+        ccall(:jl_set_task_tid, Cint, (Any, Cint), waiter, tid)
     end
     return w
 end

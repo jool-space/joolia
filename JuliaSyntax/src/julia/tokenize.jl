@@ -80,10 +80,10 @@ readchar(io::IO) = eof(io) ? EOF_CHAR : read(io, Char)
 function _char_in_set_expr(varname, firstchars)
     codes = sort!(UInt32.(unique(firstchars)))
     terms = []
-    i = 1
-    while i <= length(codes)
+    i = 0
+    while i < length(codes)
         j = i
-        while j < length(codes) && codes[j+1] == codes[j]+1
+        while j + 1 < length(codes) && codes[j+1] == codes[j]+1
             j += 1
         end
         if i == j
@@ -194,7 +194,7 @@ endbyte(t::RawToken) = t.endbyte
 
 
 function untokenize(t::RawToken, str::String)
-    String(codeunits(str)[1 .+ (t.startbyte:t.endbyte)])
+    String(codeunits(str)[t.startbyte:t.endbyte])
 end
 
 function Base.show(io::IO, t::RawToken)
@@ -316,28 +316,28 @@ startpos!(l::Lexer, i::Integer) = l.token_startpos = i
 
 Returns the next character without changing the lexer's state.
 """
-peekchar(l::Lexer) = l.chars[2]
+peekchar(l::Lexer) = l.chars[1]
 
 """
 dpeekchar(l::Lexer)
 
 Returns the next two characters without changing the lexer's state.
 """
-dpeekchar(l::Lexer) = l.chars[2], l.chars[3]
+dpeekchar(l::Lexer) = l.chars[1], l.chars[2]
 
 """
 peekchar3(l::Lexer)
 
 Returns the next three characters without changing the lexer's state.
 """
-peekchar3(l::Lexer) = l.chars[2], l.chars[3], l.chars[4]
+peekchar3(l::Lexer) = l.chars[1], l.chars[2], l.chars[3]
 
 """
     position(l::Lexer)
 
 Returns the current position.
 """
-Base.position(l::Lexer) = l.charspos[1]
+Base.position(l::Lexer) = l.charspos[0]
 
 """
     eof(l::Lexer)
@@ -355,7 +355,7 @@ Updates the lexer's state such that the next `RawToken` will start at the curren
 position.
 """
 function start_token!(l::Lexer)
-    l.token_startpos = l.charspos[1]
+    l.token_startpos = l.charspos[0]
 end
 
 """
@@ -365,9 +365,9 @@ Returns the next character and increments the current position.
 """
 function readchar(l::Lexer)
     c = readchar(l.io)
-    l.chars = (l.chars[2], l.chars[3], l.chars[4], c)
-    l.charspos = (l.charspos[2], l.charspos[3], l.charspos[4], position(l.io))
-    return l.chars[1]
+    l.chars = (l.chars[1], l.chars[2], l.chars[3], c)
+    l.charspos = (l.charspos[1], l.charspos[2], l.charspos[3], position(l.io))
+    return l.chars[0]
 end
 
 """
@@ -657,7 +657,7 @@ function lex_string_chunk(l)
         # Start interpolation
         readchar(l)
         return emit(l, K"$")
-    elseif !state.raw && pc == '\\' && (pc2 = dpeekchar(l)[2];
+    elseif !state.raw && pc == '\\' && (pc2 = dpeekchar(l)[1];
                                         pc2 == '\r' || pc2 == '\n')
         # Process escaped newline as whitespace
         readchar(l)
@@ -670,7 +670,7 @@ function lex_string_chunk(l)
         end
         return emit(l, K"Whitespace")
     elseif pc == state.delim && string_terminates(l, state.delim, state.triplestr)
-        if state.delim == '\'' && l.last_token == K"'" && dpeekchar(l)[2] == '\''
+        if state.delim == '\'' && l.last_token == K"'" && dpeekchar(l)[1] == '\''
             # Handle '''
             readchar(l)
             return emit(l, K"Char")
@@ -1048,7 +1048,7 @@ function lex_digit(l::Lexer, kind)
         else
             return emit(l, K"ErrorInvalidNumericConstant") # `1e+`
         end
-    elseif position(l) - startpos(l) == 1 && l.chars[1] == '0'
+    elseif position(l) - startpos(l) == 1 && l.chars[0] == '0'
         kind == K"Integer"
         is_bin_oct_hex_int = false
         if pc == 'x'
@@ -1219,7 +1219,7 @@ function lex_identifier(l::Lexer, c)
         ascii = ascii && isascii(pc)
         if ascii # fast path
             pc_byte = pc % UInt8
-            @inbounds if (pc_byte == UInt8('!') && ppc == '=') || !ascii_is_identifier_char[pc_byte+1]
+            @inbounds if (pc_byte == UInt8('!') && ppc == '=') || !ascii_is_identifier_char[pc_byte]
                 break
             end
         elseif @callsite_inline Unicode.isgraphemebreak!(graphemestate, c, pc)
@@ -1257,9 +1257,9 @@ end
 end
 
 function simple_hash(str)
-    ind = 1
+    ind = firstindex(str)
     h = UInt64(0)
-    L = min(lastindex(str), MAX_KW_LENGTH)
+    L = min(lastindex(str), MAX_KW_LENGTH - 1)
     while ind <= L
         h = simple_hash(str[ind], h)
         ind = nextind(str, ind)

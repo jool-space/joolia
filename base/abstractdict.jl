@@ -65,7 +65,7 @@ eltype(::Type{ValueIterator{D}}) where {D} = _tt2(eltype(D))
 function iterate(v::Union{KeySet,ValueIterator}, state...)
     y = iterate(v.dict, state...)
     y === nothing && return nothing
-    return (y[1][isa(v, KeySet) ? 1 : 2], y[2])
+    return (y[0][isa(v, KeySet) ? 0 : 1], y[1])
 end
 
 copy(v::KeySet) = copymutable(v)

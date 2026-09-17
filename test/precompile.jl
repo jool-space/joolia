@@ -23,6 +23,29 @@ using .ConflictingBindings
     @test Base.object_build_id(Base) == Base.module_build_id(Base)
 end
 
+@testset "zero-origin precompilation positions" begin
+    payload = "include_ns=100000000 compilation_ns=20000000 deps_ns=30000000 methods=4"
+    timing = Base.Precompilation.format_verbose_timing(payload, 0.5, 0, UInt64(0), false)
+    @test occursin("0.10", timing)
+    @test occursin("0.03", timing)
+    @test occursin("0.02", timing)
+    @test occursin("4", timing)
+
+    stats = Base.Precompilation.process_stats(Int32(getpid()))
+    @test keys(stats) === (:cpu_ns, :rss_bytes)
+    @test stats.cpu_ns isa UInt64
+    @test stats.rss_bytes isa UInt64
+    if Sys.islinux()
+        @test stats.rss_bytes > 0
+    end
+
+    bar = Base.Precompilation.MiniProgressBar(; header="Precompiling packages ", max=1, current=1,
+                                                percentage=false, always_reprint=true)
+    io = IOBuffer()
+    Base.Precompilation.show_progress(io, bar; termwidth=80, carriagereturn=false)
+    @test occursin("Precompiling packages", String(take!(io)))
+end
+
 # method root provenance
 
 rootid(m::Module) = Base.module_build_id(Base.parentmodule(m)) % UInt64

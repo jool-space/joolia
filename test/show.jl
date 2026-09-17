@@ -3040,3 +3040,53 @@ end
         @test !contains(str, "\e[93m")
     end
 end
+
+# Array rendering uses zero-origin dimensions, slice labels, and display positions.
+@testset "zero-origin array display" begin
+    a = reshape(collect(1:6), 2, 3)
+    @test repr([1, 2, 3]) == "[1, 2, 3]"
+    @test repr(a) == "[1 3 5; 2 4 6]"
+    @test sprint(show, MIME("text/plain"), a) == "2×3 Matrix{Int64}:\n 1  3  5\n 2  4  6"
+    @test repr(Int[]) == "Int64[]"
+    @test repr(Array{Int}(undef, 0, 3)) == "Matrix{Int64}(undef, 0, 3)"
+    @test repr(fill(9)) == "fill(9)"
+    cube = reshape(collect(1:8), 2, 2, 2)
+    @test repr(cube) == "[1 3; 2 4;;; 5 7; 6 8]"
+    plaincube = sprint(show, MIME("text/plain"), cube)
+    @test occursin("[:, :, 0] =", plaincube) && occursin("[:, :, 1] =", plaincube)
+    @test repr(Vector{Any}(undef, 2)) == "Any[#undef, #undef]"
+    for n in (0, 1, 2, 3, 4, 5)
+        s = Base.replace_with_centered_mark("x"^n)
+        @test textwidth(s) == max(n, 1) && occursin('⋅', s)
+    end
+    wide = reshape(collect(0:99), 10, 10)
+    clipped = sprint(show, MIME("text/plain"), wide;
+        context=(:limit => true, :displaysize => (9, 30)))
+    @test occursin('⋮', clipped) && occursin('…', clipped) && occursin("99", clipped)
+    @test repr(reshape([7], 1, 1, 1, 1)) == "[7;;;;]"
+    hyper = reshape(collect(0:15), 2, 2, 2, 2)
+    hypertext = sprint(show, MIME("text/plain"), hyper)
+    @test occursin("[:, :, 0, 0] =", hypertext) && occursin("[:, :, 1, 1] =", hypertext)
+    longcube = reshape(collect(0:47), 2, 2, 12)
+    limitedcube = sprint(show, MIME("text/plain"), longcube;
+        context=(:limit => true, :displaysize => (24, 80)))
+    @test occursin("[:, :, 0] =", limitedcube) && occursin("[:, :, 11] =", limitedcube) && !occursin("[:, :, 5] =", limitedcube)
+    @test sprint(show, MIME("text/plain"), Array{Any}(undef, 1, 2)) == "1×2 Matrix{Any}:\n #undef  #undef"
+    @test sprint(show, MIME("text/plain"), fill(9)) == "0-dimensional Array{Int64, 0}:\n9"
+    short = sprint(show, MIME("text/plain"), a;
+        context=(:limit => true, :displaysize => (4, 30)))
+    @test startswith(short, "2×3 Matrix{Int64}: ")
+end
+
+# Default struct rendering separates fields without a trailing separator.
+struct JooliaShowOneField
+    value::Int
+end
+struct JooliaShowTwoFields
+    first::Int
+    second::String
+end
+@testset "zero-origin default struct separators" begin
+    @test endswith(sprint(show, JooliaShowOneField(7)), "JooliaShowOneField(7)")
+    @test endswith(sprint(show, JooliaShowTwoFields(7, "x")), "JooliaShowTwoFields(7, \"x\")")
+end

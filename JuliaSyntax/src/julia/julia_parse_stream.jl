@@ -164,8 +164,8 @@ function validate_tokens(stream::ParseStream)
     charbuf = IOBuffer()
 
     # Process terminal nodes in the output
-    fbyte = stream.output[1].byte_span+1  # Start after sentinel
-    for i = 2:length(stream.output)
+    fbyte = stream.output[0].byte_span  # Start after sentinel
+    for i = 1:lastindex(stream.output)
         node = stream.output[i]
         if !is_terminal(node) || kind(node) == K"TOMBSTONE"
             continue
@@ -227,7 +227,7 @@ function validate_tokens(stream::ParseStream)
             # Emit messages for non-generic token errors
             tokstr = String(txtbuf[tokrange])
             msg = if k in KSet"ErrorInvisibleChar ErrorUnknownCharacter ErrorIdentifierStart"
-                "$(_token_error_descriptions[k]) $(repr(tokstr[1]))"
+                "$(_token_error_descriptions[k]) $(repr(tokstr[0]))"
             elseif k in KSet"ErrorInvalidUTF8 ErrorBidiFormatting"
                 "$(_token_error_descriptions[k]) $(repr(tokstr))"
             else

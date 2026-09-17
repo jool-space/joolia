@@ -127,13 +127,13 @@ function extendedterminfo(data::IO, NumInt::Union{Type{Int16}, Type{Int32}})
     numbers = map(Int ∘ ltoh, reinterpret(NumInt, read(data, numbers_count * sizeof(NumInt))))
     table_indices = map(ltoh, reinterpret(Int16, read(data, table_count * sizeof(Int16))))
     table_data = read(data, table_bytes)
-    strings = _terminfo_read_strings(table_data, table_indices[1:string_count])
-    table_halfoffset = Int16(get(table_indices, string_count, 0) +
-        ncodeunits(something(get(strings, length(strings), ""), "")) + 1)
-    for index in string_count+1:lastindex(table_indices)
+    strings = _terminfo_read_strings(table_data, table_indices[0:string_count-1])
+    table_halfoffset = string_count == 0 ? Int16(0) : Int16(get(table_indices, string_count-1, 0) +
+        ncodeunits(something(get(strings, length(strings)-1, ""), "")) + 1)
+    for index in string_count:lastindex(table_indices)
         table_indices[index] += table_halfoffset
     end
-    labels = map(Symbol, _terminfo_read_strings(table_data, table_indices[string_count+1:end]))
+    labels = map(Symbol, _terminfo_read_strings(table_data, table_indices[string_count:end]))
     Dict{Symbol, Union{Bool, Int, String, Nothing}}(
         zip(labels, Iterators.flatten((flags, numbers, strings))))
 end
@@ -149,10 +149,10 @@ function _terminfo_read_strings(table::Vector{UInt8}, indices::Vector{Int16})
     strings = Vector{Union{Nothing, String}}(undef, length(indices))
     map!(strings, indices) do idx
         if idx >= 0
-            len = findfirst(==(0x00), view(table, 1+idx:length(table)))
+            len = findfirst(==(0x00), view(table, idx:lastindex(table)))
             !isnothing(len) ||
                 throw(ArgumentError("Terminfo table entry @$idx does not terminate with a null byte"))
-            String(table[1+idx:idx+len-1])
+            String(table[idx:idx+len-1])
         elseif idx ∈ (-1, -2)
         else
             throw(ArgumentError("Terminfo table index is invalid: -2 ≰ $idx"))

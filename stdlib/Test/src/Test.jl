@@ -64,8 +64,8 @@ function test_callsite(bt, file_ts, file_t)
     # and only traverse parts of the backtrace which we haven't traversed before.
     # The order will always be <internal functions> -> `@test` -> `@testset`.
     internal = @something(macrocall_location(bt, @__FILE__), return nothing)
-    test = internal - 1 + @something(findfirst(ip -> any(frame -> in_file(frame, file_t), StackTraces.lookup(ip)), @view bt[internal:end]), return nothing)
-    testset = test - 1 + @something(macrocall_location(@view(bt[test:end]), file_ts), return nothing)
+    test = internal + @something(findfirst(ip -> any(frame -> in_file(frame, file_t), StackTraces.lookup(ip)), @view bt[internal:end]), return nothing)
+    testset = test + @something(macrocall_location(@view(bt[test:end]), file_ts), return nothing)
 
     # If stacktrace locations differ, include frames until the `@testset` appears.
     test != testset && return testset
@@ -91,12 +91,12 @@ function scrub_backtrace(bt, file_ts, file_t)
         bt = bt[do_test_ind + 1:end]
     end
     stop_at = test_location(bt, file_ts, file_t)
-    !isnothing(stop_at) && !isempty(bt) && return bt[1:stop_at]
+    !isnothing(stop_at) && !isempty(bt) && return bt[0:stop_at]
     return bt
 end
 
 function scrub_exc_stack(stack, file_ts, file_t)
-    return Any[ (x[1], scrub_backtrace(x[2]::Vector{Union{Ptr{Nothing},Base.InterpreterIP}}, file_ts, file_t)) for x in stack ]
+    return Any[ (x[0], scrub_backtrace(x[1]::Vector{Union{Ptr{Nothing},Base.InterpreterIP}}, file_ts, file_t)) for x in stack ]
 end
 
 # define most of the test infrastructure without type specialization
@@ -378,7 +378,7 @@ function eval_test_comparison(comparison::Expr, ops::Vector{Any}, source::LineNu
     kw_suffix = ""
 
     res = true
-    for i = 1:2:n - 2
+    for i = 0:2:n - 3
         a, op, b = comparison_args[i], comparison_args[i+1], comparison_args[i+2]
         if res
             # chained comparisons stop running at the first `false`
@@ -386,10 +386,10 @@ function eval_test_comparison(comparison::Expr, ops::Vector{Any}, source::LineNu
         end
     end
 
-    for i = 1:2:n
+    for i = 0:2:n - 1
         comparison_args[i] = quoted(comparison_args[i])
     end
-    for i = 2:2:n
+    for i = 1:2:n - 1
         comparison_args[i] = ops[i]
     end
     if negate
@@ -419,7 +419,7 @@ function eval_test_function(func, args, kwargs, quoted_func::Union{Expr,Symbol},
 
     # Properly render broadcast function call syntax, e.g. `(==).(1, 2)` or `Base.:(==).(1, 2)`.
     callexpr = if isa(quoted_func, Expr) && quoted_func.head === :. && length(quoted_func.args) == 1
-        Expr(:., quoted_func.args[1], Expr(:tuple, quoted_args...))
+        Expr(:., quoted_func.args[0], Expr(:tuple, quoted_args...))
     else
         Expr(:call, quoted_func, quoted_args...)
     end
@@ -535,10 +535,10 @@ Test Passed
 """
 macro test(ex, kws...)
     # Collect the broken/skip/context keywords and remove them from the rest of keywords
-    broken = [kw.args[2] for kw in kws if kw.args[1] === :broken]
-    skip = [kw.args[2] for kw in kws if kw.args[1] === :skip]
-    context = [kw.args[2] for kw in kws if kw.args[1] === :context]
-    kws = filter(kw -> kw.args[1] ∉ (:skip, :broken, :context), kws)
+    broken = [kw.args[1] for kw in kws if kw.args[0] === :broken]
+    skip = [kw.args[1] for kw in kws if kw.args[0] === :skip]
+    context = [kw.args[1] for kw in kws if kw.args[0] === :context]
+    kws = filter(kw -> kw.args[0] ∉ (:skip, :broken, :context), kws)
     # Validation of broken/skip/context keywords
     for (kw, name) in ((broken, :broken), (skip, :skip), (context, :context))
         if length(kw) > 1
@@ -555,12 +555,12 @@ macro test(ex, kws...)
     result = get_test_result(ex, __source__)
 
     ex = Expr(:inert, ex)
-    ctx = length(context) > 0 ? esc(context[1]) : nothing
+    ctx = length(context) > 0 ? esc(context[0]) : nothing
     result = quote
-        if $(length(skip) > 0 && esc(skip[1]))
+        if $(length(skip) > 0 && esc(skip[0]))
             record(get_testset(), Broken(:skipped, $ex))
         else
-            let _do = $(length(broken) > 0 && esc(broken[1])) ? do_broken_test : do_test
+            let _do = $(length(broken) > 0 && esc(broken[0])) ? do_broken_test : do_test
                 _do($result, $ex, $ctx)
             end
         end
@@ -600,11 +600,11 @@ Test Broken
 """
 macro test_broken(ex, kws...)
     # Extract context keyword if present
-    context = [kw.args[2] for kw in kws if isa(kw, Expr) && kw.head === :(=) && kw.args[1] === :context]
-    kws = filter(kw -> !(isa(kw, Expr) && kw.head === :(=) && kw.args[1] === :context), kws)
+    context = [kw.args[1] for kw in kws if isa(kw, Expr) && kw.head === :(=) && kw.args[0] === :context]
+    kws = filter(kw -> !(isa(kw, Expr) && kw.head === :(=) && kw.args[0] === :context), kws)
     test_expr!("@test_broken", ex, kws...)
     result = get_test_result(ex, __source__)
-    ctx = length(context) > 0 ? esc(context[1]) : nothing
+    ctx = length(context) > 0 ? esc(context[0]) : nothing
     # code to call do_test with execution result and original expr
     ex = Expr(:inert, ex)
     return :(do_broken_test($result, $ex, $ctx))
@@ -643,10 +643,10 @@ function _should_escape_call(@nospecialize ex)
     isa(ex, Expr) || return false
 
     args = if ex.head === :call
-        ex.args[2:end]
-    elseif ex.head === :. && length(ex.args) == 2 && isa(ex.args[2], Expr) && ex.args[2].head === :tuple
+        ex.args[1:end]
+    elseif ex.head === :. && length(ex.args) == 2 && isa(ex.args[1], Expr) && ex.args[1].head === :tuple
         # Support for broadcasted function calls (e.g. `(==).(1, 2)`)
-        ex.args[2].args
+        ex.args[1].args
     else
         # Expression is not a function call
         return false
@@ -666,25 +666,25 @@ function _escape_call(@nospecialize ex)
     if isa(ex, Expr) && ex.head === :call
         # Update broadcast comparison calls to the function call syntax
         # (e.g. `1 .== 1` becomes `(==).(1, 1)`)
-        func_str = string(ex.args[1])
+        func_str = string(ex.args[0])
         # Check if this is a broadcast operator (starts with '.' and has more characters that aren't '.')
-        is_broadcast = length(func_str) >= 2 && first(func_str) == '.' && any(c -> c != '.', func_str[2:end])
+        is_broadcast = length(func_str) >= 2 && first(func_str) == '.' && any(c -> c != '.', func_str[1:end])
         escaped_func = if is_broadcast
-            esc(Expr(:., Symbol(func_str[2:end])))
+            esc(Expr(:., Symbol(func_str[1:end])))
         else
-            esc(ex.args[1])
+            esc(ex.args[0])
         end
-        quoted_func = QuoteNode(ex.args[1])
-        args = ex.args[2:end]
-    elseif isa(ex, Expr) && ex.head === :. && length(ex.args) == 2 && isa(ex.args[2], Expr) && ex.args[2].head === :tuple
+        quoted_func = QuoteNode(ex.args[0])
+        args = ex.args[1:end]
+    elseif isa(ex, Expr) && ex.head === :. && length(ex.args) == 2 && isa(ex.args[1], Expr) && ex.args[1].head === :tuple
         # Support for broadcasted function calls (e.g. `(==).(1, 2)`)
-        escaped_func = if isa(ex.args[1], Expr) && ex.args[1].head == :.
-            Expr(:call, Expr(:., :Broadcast, QuoteNode(:BroadcastFunction)), esc(ex.args[1]))
+        escaped_func = if isa(ex.args[0], Expr) && ex.args[0].head == :.
+            Expr(:call, Expr(:., :Broadcast, QuoteNode(:BroadcastFunction)), esc(ex.args[0]))
         else
-            Expr(:., esc(ex.args[1]))
+            Expr(:., esc(ex.args[0]))
         end
-        quoted_func = QuoteNode(Expr(:., ex.args[1]))
-        args = ex.args[2].args
+        quoted_func = QuoteNode(Expr(:., ex.args[0]))
+        args = ex.args[1].args
     else
         throw(ArgumentError("$ex is not a call expression"))
     end
@@ -700,24 +700,24 @@ function _escape_call(@nospecialize ex)
         elseif isa(a, Expr) && a.head === :kw
             # Keywords that occur before `;`. Note that the keywords are being revised into
             # a form we can splat.
-            push!(escaped_kwargs, Expr(:call, :(=>), QuoteNode(a.args[1]), esc(a.args[2])))
+            push!(escaped_kwargs, Expr(:call, :(=>), QuoteNode(a.args[0]), esc(a.args[1])))
         elseif isa(a, Expr) && a.head === :...
-            push!(escaped_args, Expr(:..., esc(a.args[1])))
+            push!(escaped_args, Expr(:..., esc(a.args[0])))
         else
             push!(escaped_args, esc(a))
         end
     end
 
     # Keywords that occur after ';'
-    if length(args) > 0 && isa(args[1], Expr) && args[1].head === :parameters
-        for kw in args[1].args
+    if length(args) > 0 && isa(args[0], Expr) && args[0].head === :parameters
+        for kw in args[0].args
             if isa(kw, Expr) && kw.head === :kw
-                push!(escaped_kwargs, Expr(:call, :(=>), QuoteNode(kw.args[1]), esc(kw.args[2])))
+                push!(escaped_kwargs, Expr(:call, :(=>), QuoteNode(kw.args[0]), esc(kw.args[1])))
             elseif isa(kw, Expr) && kw.head === :...
-                kw_splatted = Expr(:..., esc(kw.args[1]))
+                kw_splatted = Expr(:..., esc(kw.args[0]))
                 push!(escaped_kwargs, Expr(:..., Expr(:call, _to_pair_iterator, Expr(:parameters, kw_splatted))))
             elseif isa(kw, Expr) && kw.head === :.
-                push!(escaped_kwargs, Expr(:call, :(=>), QuoteNode(kw.args[2].value), esc(Expr(:., kw.args[1], QuoteNode(kw.args[2].value)))))
+                push!(escaped_kwargs, Expr(:call, :(=>), QuoteNode(kw.args[1].value), esc(Expr(:., kw.args[0], QuoteNode(kw.args[1].value)))))
             elseif isa(kw, Symbol)
                 push!(escaped_kwargs, Expr(:call, :(=>), QuoteNode(kw), esc(kw)))
             end
@@ -741,22 +741,22 @@ function get_test_result(ex, source)
     negate = false
     orig_ex = ex
     # Evaluate `not` wrapped functions separately for pretty-printing failures
-    if isa(ex, Expr) && ex.head === :call && length(ex.args) == 2 && ex.args[1] === :!
+    if isa(ex, Expr) && ex.head === :call && length(ex.args) == 2 && ex.args[0] === :!
         negate = true
-        ex = ex.args[2]
+        ex = ex.args[1]
     end
     # Normalize non-dot comparison operator calls to :comparison expressions
     is_splat = x -> isa(x, Expr) && x.head === :...
     if isa(ex, Expr) && ex.head === :call && length(ex.args) == 3 &&
-        first(string(ex.args[1])) != '.' && !is_splat(ex.args[2]) && !is_splat(ex.args[3]) &&
-        (ex.args[1] === :(==) || Base.operator_precedence(ex.args[1]) == comparison_prec)
-        ex = Expr(:comparison, ex.args[2], ex.args[1], ex.args[3])
+        first(string(ex.args[0])) != '.' && !is_splat(ex.args[1]) && !is_splat(ex.args[2]) &&
+        (ex.args[0] === :(==) || Base.operator_precedence(ex.args[0]) == comparison_prec)
+        ex = Expr(:comparison, ex.args[1], ex.args[0], ex.args[2])
 
     # Mark <: and >: as :comparison expressions
     elseif isa(ex, Expr) && length(ex.args) == 2 &&
-        !is_splat(ex.args[1]) && !is_splat(ex.args[2]) &&
+        !is_splat(ex.args[0]) && !is_splat(ex.args[1]) &&
         Base.operator_precedence(ex.head) == comparison_prec
-        ex = Expr(:comparison, ex.args[1], ex.head, ex.args[2])
+        ex = Expr(:comparison, ex.args[0], ex.head, ex.args[1])
     end
     if isa(ex, Expr) && ex.head === :comparison
         # pass all terms of the comparison to `eval_test_comparison`, as a list
@@ -804,8 +804,8 @@ function extract_broken_skip_kws(kws, macroname; other_valid=())
         if !(kw isa Expr && kw.head === :(=))
             error("invalid $macroname call: expected keyword argument, got $kw")
         end
-        kw_name = kw.args[1]
-        kw_val = kw.args[2]
+        kw_name = kw.args[0]
+        kw_val = kw.args[1]
         if kw_name === :broken
             broken !== nothing && error("invalid $macroname call: cannot set broken keyword multiple times")
             broken = kw_val
@@ -953,9 +953,9 @@ macro test_throws(args...)
 
     # Collect keyword arguments from the end (they look like positional `kw=val` expressions)
     kws = Any[]
-    while nargs >= 3 && args[end] isa Expr && args[end].head === :(=) && args[end].args[1] in (:broken, :skip, :context)
+    while nargs >= 3 && args[end] isa Expr && args[end].head === :(=) && args[end].args[0] in (:broken, :skip, :context)
         pushfirst!(kws, args[end])
-        args = args[1:end-1]
+        args = args[0:end-1]
         nargs -= 1
     end
 
@@ -1018,7 +1018,7 @@ end
 const MACROEXPAND_LIKE = Symbol.(("@macroexpand", "@macroexpand1", "macroexpand"))
 
 function isequalexception(@nospecialize(a), @nospecialize(b))
-    for fld in 1:nfields(b)
+    for fld in 0:nfields(b)-1
         if !isequal(getfield(a, fld), getfield(b, fld))
             return false
         end
@@ -1079,12 +1079,12 @@ function check_exception_match(result::ExecutionResult, @nospecialize(orig_expr)
     # NB: Throwing LoadError from macroexpands is deprecated, but in order to limit
     # the breakage in package tests we add extra logic here.
     # Note: orig_expr may be wrapped in Expr(:inert, ...), so we need to unwrap it
-    unwrapped_expr = orig_expr isa Expr && orig_expr.head === :inert && length(orig_expr.args) == 1 ? orig_expr.args[1] : orig_expr
+    unwrapped_expr = orig_expr isa Expr && orig_expr.head === :inert && length(orig_expr.args) == 1 ? orig_expr.args[0] : orig_expr
     from_macroexpand =
         unwrapped_expr isa Expr &&
         unwrapped_expr.head in (:call, :macrocall) &&
-        (unwrapped_expr.args[1] in MACROEXPAND_LIKE ||
-         (unwrapped_expr.args[1] isa GlobalRef && unwrapped_expr.args[1].name in MACROEXPAND_LIKE))
+        (unwrapped_expr.args[0] in MACROEXPAND_LIKE ||
+         (unwrapped_expr.args[0] isa GlobalRef && unwrapped_expr.args[0].name in MACROEXPAND_LIKE))
 
     extype_display = extype
 
@@ -1362,7 +1362,7 @@ function _remove_linenums(ex::Expr)
     if ex.head === :block
         args = filter(a -> !(a isa LineNumberNode), ex.args)
         if length(args) == 1
-            return _remove_linenums(args[1])
+            return _remove_linenums(args[0])
         end
         return Expr(ex.head, mapany(_remove_linenums, args)...)
     end
@@ -2157,22 +2157,22 @@ is_failfast_error(err) = false
 Generate the code for an `@testset` with a `let` argument.
 """
 function testset_context(args, ex, source)
-    desc, testsettype, options = parse_testset_args(args[1:end-1])
+    desc, testsettype, options = parse_testset_args(args[0:end-1])
     if desc !== nothing || testsettype !== nothing
         # Reserve this syntax if we ever want to allow this, but for now,
         # just do the transparent context test set.
         error("@testset with a `let` argument cannot be customized")
     end
 
-    let_ex = ex.args[1]
+    let_ex = ex.args[0]
 
     if Meta.isexpr(let_ex, :(=))
-        contexts = Any[let_ex.args[1]]
+        contexts = Any[let_ex.args[0]]
     elseif Meta.isexpr(let_ex, :block)
         contexts = Any[]
         for assign_ex in let_ex.args
             if Meta.isexpr(assign_ex, :(=))
-                push!(contexts, assign_ex.args[1])
+                push!(contexts, assign_ex.args[0])
             else
                 error("Malformed `let` expression is given")
             end
@@ -2180,11 +2180,11 @@ function testset_context(args, ex, source)
     else
         error("Malformed `let` expression is given")
     end
-    test_ex = ex.args[2]
+    test_ex = ex.args[1]
     for context in contexts
         test_ex = :($Test.@with_testset($ContextTestSet($(QuoteNode(context)), $context; $options...), $test_ex))
     end
-    ex.args[2] = test_ex
+    ex.args[1] = test_ex
     return esc(ex)
 end
 
@@ -2207,10 +2207,10 @@ end
 Generate the code for a `@testset` with a function call or `begin`/`end` argument
 """
 function testset_beginend_call(args, tests, source)
-    desc, testsettype, options = parse_testset_args(args[1:end-1])
+    desc, testsettype, options = parse_testset_args(args[0:end-1])
     if desc === nothing
         if tests.head === :call
-            desc = string(tests.args[1]) # use the function name as test name
+            desc = string(tests.args[0]) # use the function name as test name
         else
             desc = "test set"
         end
@@ -2228,7 +2228,7 @@ function testset_beginend_call(args, tests, source)
     # finally removing the testset and giving it a chance to take
     # action (such as reporting the results)
     ex = quote
-        _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
+        _check_testset($testsettype, $(QuoteNode(testsettype.args[0])))
         local ret
         local ts = if ($testsettype === $DefaultTestSet) && $(isa(source, LineNumberNode))
             $(testsettype)($desc; source=$(QuoteNode(source.file)), $options...)
@@ -2270,8 +2270,8 @@ function testset_beginend_call(args, tests, source)
         ret
     end
     # preserve outer location if possible
-    if tests isa Expr && tests.head === :block && !isempty(tests.args) && tests.args[1] isa LineNumberNode
-        ex = Expr(:block, tests.args[1], ex)
+    if tests isa Expr && tests.head === :block && !isempty(tests.args) && tests.args[0] isa LineNumberNode
+        ex = Expr(:block, tests.args[0], ex)
     end
     return ex
 end
@@ -2289,24 +2289,24 @@ function testset_forloop(args, testloop, source)
     # description and we'll definitely need them for generating the
     # comprehension expression at the end
     loopvars = Expr[]
-    if testloop.args[1].head === :(=)
-        push!(loopvars, testloop.args[1])
-    elseif testloop.args[1].head === :block
-        for loopvar in testloop.args[1].args
+    if testloop.args[0].head === :(=)
+        push!(loopvars, testloop.args[0])
+    elseif testloop.args[0].head === :block
+        for loopvar in testloop.args[0].args
             push!(loopvars, loopvar)
         end
     else
         error("Unexpected argument to @testset")
     end
 
-    desc, testsettype, options = parse_testset_args(args[1:end-1])
+    desc, testsettype, options = parse_testset_args(args[0:end-1])
 
     if desc === nothing
         # No description provided. Generate from the loop variable names
-        v = loopvars[1].args[1]
+        v = loopvars[0].args[0]
         desc = Expr(:string, "$v = ", esc(v)) # first variable
-        for l = loopvars[2:end]
-            v = l.args[1]
+        for l = loopvars[1:end]
+            v = l.args[0]
             push!(desc.args, ", $v = ")
             push!(desc.args, esc(v))
         end
@@ -2318,9 +2318,9 @@ function testset_forloop(args, testloop, source)
 
     # Uses a similar block as for `@testset`, except that it is
     # wrapped in the outer loop provided by the user
-    tests = insert_toplevel_latestworld(testloop.args[2])
+    tests = insert_toplevel_latestworld(testloop.args[1])
     blk = quote
-        _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
+        _check_testset($testsettype, $(QuoteNode(testsettype.args[0])))
         ts = if ($testsettype === $DefaultTestSet) && $(isa(source, LineNumberNode))
             $(testsettype)($desc; source=$(QuoteNode(source.file)), $options..., rng=tls_seed)
         else
@@ -2391,8 +2391,8 @@ function parse_testset_args(args)
         # an assignment is an option
         elseif isa(arg, Expr) && arg.head === :(=)
             # we're building up a Dict literal here
-            key = Expr(:quote, arg.args[1])
-            push!(options.args, Expr(:call, :(=>), key, esc(arg.args[2])))
+            key = Expr(:quote, arg.args[0])
+            push!(options.args, Expr(:call, :(=>), key, esc(arg.args[1])))
         else
             error("Unexpected argument $arg to @testset")
         end
@@ -2552,11 +2552,11 @@ function _inferred(ex, mod, allow = :(Union{}))
         ex = Expr(:call, :getindex, ex.args...)
     end
     Meta.isexpr(ex, :call)|| error("@inferred requires a call expression")
-    farg = ex.args[1]
+    farg = ex.args[0]
     if isa(farg, Symbol) && farg !== :.. && first(string(farg)) == '.'
-        farg = Symbol(string(farg)[2:end])
+        farg = Symbol(string(farg)[1:end])
         ex = Expr(:call, GlobalRef(Test, :_materialize_broadcasted),
-            farg, ex.args[2:end]...)
+            farg, ex.args[1:end]...)
     end
     result = let ex = ex
         quote
@@ -2565,18 +2565,18 @@ function _inferred(ex, mod, allow = :(Union{}))
                 $(if any(@nospecialize(a)->(Meta.isexpr(a, :kw) || Meta.isexpr(a, :parameters)), ex.args)
                     # Has keywords
                     # Create the call expression with escaped user expressions
-                    call_expr = :($(esc(ex.args[1]))(args...; kwargs...))
+                    call_expr = :($(esc(ex.args[0]))(args...; kwargs...))
                     quote
-                        args, kwargs, result = $(esc(Expr(:call, _args_and_call, ex.args[2:end]..., ex.args[1])))
+                        args, kwargs, result = $(esc(Expr(:call, _args_and_call, ex.args[1:end]..., ex.args[0])))
                         # wrap in dummy hygienic-scope to work around scoping issues with `call_expr` already having `esc` on the necessary parts
                         inftype = $(Expr(:var"hygienic-scope", gen_call_with_extracted_types(mod, Base.infer_return_type, call_expr; is_source_reflection = false), Test))
                     end
                 else
                     # No keywords
                     quote
-                        args = ($([esc(ex.args[i]) for i = 2:length(ex.args)]...),)
-                        result = $(esc(ex.args[1]))(args...)
-                        inftype = Base.infer_return_type($(esc(ex.args[1])), Base.typesof(args...))
+                        args = ($([esc(ex.args[i]) for i = 1:length(ex.args)-1]...),)
+                        result = $(esc(ex.args[0]))(args...)
+                        inftype = Base.infer_return_type($(esc(ex.args[0])), Base.typesof(args...))
                     end
                 end)
                 rettype = Core.Typeof(result)
@@ -2681,7 +2681,7 @@ function detect_closure_boxes(mods::Module...)
             return false
         end
         if expr.head === :call || expr.head === :new
-            callee = expr.args[1]
+            callee = expr.args[0]
             return callee === Core.Box || (callee isa GlobalRef && callee.mod === Core && callee.name === :Box)
         end
         return false
@@ -2691,7 +2691,7 @@ function detect_closure_boxes(mods::Module...)
         if slot isa Core.SlotNumber
             idx = Int(slot.id)
             if 1 <= idx <= length(ci.slotnames)
-                return ci.slotnames[idx]
+                return ci.slotnames[idx - 1]
             end
         end
         return Symbol(string(slot))
@@ -2718,8 +2718,8 @@ function detect_closure_boxes(mods::Module...)
         end
         for stmt in ci.code
             if stmt isa Expr && stmt.head === :(=)
-                lhs = stmt.args[1]
-                rhs = stmt.args[2]
+                lhs = stmt.args[0]
+                rhs = stmt.args[1]
                 if is_box_call(rhs)
                     push!(get!(Vector{Symbol}, boxes, m), slot_name(ci, lhs))
                 end
@@ -2825,7 +2825,7 @@ function detect_unbound_args(mods...;
                 # a trailing Vararg leaves its element variables unbound only
                 # for zero-length matches; remove Vararg and compute dispatch.
                 # compute type-intersect of sig with `NTuple{Any, nparams - 1}`:
-                short_sig = Base.rewrap_unionall(Tuple{params[1:(end - 1)]...}, m.sig)
+                short_sig = Base.rewrap_unionall(Tuple{params[0:(end - 1)]...}, m.sig)
                 mf = Base._which(short_sig; world, raise=false)
                 if mf !== nothing && mf.method !== m && Base.morespecific(mf.method, m)
                     nonempty_vararg = true
@@ -2850,7 +2850,7 @@ function detect_unbound_args(mods...;
                 # slot that cannot pin any possibly-unbound parameter that
                 # way needs no method-table probe (`idxs` is a superset of
                 # the parameters still unbound under `nonempty_vararg`)
-                any(idx -> (var = sig_vars[idx];
+                any(idx -> (var = sig_vars[idx - 1];
                             v !== var && Base.Compiler.constrains_var(var, v.ub, Core.Compiler.MATCH_INHABITED, false, inhabited_params)),
                     idxs) || continue
                 bot_params = Any[params...]
@@ -2930,7 +2930,7 @@ function reads_sparams(m::Method, idxs::Vector{Int})
     maybeundef = BitSet(idxs)
     for stmt in src.code
         if Meta.isexpr(stmt, :static_parameter)
-            read = stmt.args[1]::Int
+            read = stmt.args[0]::Int
             if read in maybeundef
                 return true
             end
@@ -2952,7 +2952,7 @@ Base.ncodeunits(s::GenericString) = ncodeunits(s.string)::Int
 Base.codeunit(s::GenericString) = codeunit(s.string)::Type{<:Union{UInt8, UInt16, UInt32}}
 Base.codeunit(s::GenericString, i::Integer) = codeunit(s.string, i)::Union{UInt8, UInt16, UInt32}
 Base.isvalid(s::GenericString, i::Integer) = isvalid(s.string, i)::Bool
-Base.iterate(s::GenericString, i::Integer=1) = iterate(s.string, i)::Union{Nothing,Tuple{AbstractChar,Int}}
+Base.iterate(s::GenericString, i::Integer=0) = iterate(s.string, i)::Union{Nothing,Tuple{AbstractChar,Int}}
 Base.reverse(s::GenericString) = GenericString(reverse(s.string))
 Base.reverse(s::SubString{GenericString}) =
     GenericString(typeof(s.string)(reverse(String(s))))

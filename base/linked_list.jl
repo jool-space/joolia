@@ -188,7 +188,7 @@ end
 # methods above keep serving Task scheduler lists.
 
 function push!(qr::ILLRef{WaitEntry}, val::WaitEntry)
-    _find_slot(val, qr.waitee) == 0 || error("val already in this list")
+    _find_slot(val, qr.waitee) < 0 || error("val already in this list")
     _acquire_slot!(val, qr.waitee)
     q = qr.list
     tail = q.tail
@@ -203,7 +203,7 @@ function push!(qr::ILLRef{WaitEntry}, val::WaitEntry)
 end
 
 function pushfirst!(qr::ILLRef{WaitEntry}, val::WaitEntry)
-    _find_slot(val, qr.waitee) == 0 || error("val already in this list")
+    _find_slot(val, qr.waitee) < 0 || error("val already in this list")
     i = _acquire_slot!(val, qr.waitee)
     q = qr.list
     head = q.head
@@ -238,7 +238,7 @@ end
 # was concurrently popped, which various cleanup paths rely upon.
 function list_deletefirst!(qr::ILLRef{WaitEntry}, val::WaitEntry)
     vi = _find_slot(val, qr.waitee)
-    vi == 0 && return qr.list
+    vi < 0 && return qr.list
     q = qr.list
     o = qr.waitee
     head = q.head
@@ -251,7 +251,7 @@ function list_deletefirst!(qr::ILLRef{WaitEntry}, val::WaitEntry)
         prev = head::WaitEntry
         while true
             previ = _find_slot(prev, o)
-            previ == 0 && return q
+            previ < 0 && return q
             prevslot = slots(prev)[previ]
             cur = prevslot.next
             cur === nothing && return q

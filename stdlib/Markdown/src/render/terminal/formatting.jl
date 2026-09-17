@@ -16,12 +16,12 @@ Call `f(io)`, and apply `annots` to the output created by doing so.
 function with_output_annotations(f::Function, io::AnnotIO, annots::Pair{Symbol, <:Any}...)
     @nospecialize annots
     aio = if io isa AnnotatedIOBuffer io else io.io end
-    start = position(aio) + 1
+    start = position(aio)
     v = f(io)
     stop = position(aio)
-    sortedindex = searchsortedlast(aio.annotations, (region=start:stop,), by=a -> a.region)
+    sortedindex = searchsortedlast(aio.annotations, (region=start:stop-1,), by=a -> a.region)
     for (i, annot) in enumerate(annots)
-        insert!(aio.annotations, sortedindex + i, (start:stop, annot...))
+        insert!(aio.annotations, sortedindex + 1 + i, (start:stop-1, annot...))
     end
     return v
 end
@@ -34,8 +34,8 @@ Wrap `content` into a vector of lines of at most `width` (according to
 """
 function wraplines(content::Union{Annot, SubString{<:Annot}}, width::Integer = 80, column::Integer = 0) where { Annot <: AnnotatedString}
     s, lines = String(content), SubString{Annot}[]
-    i, lastwrap, slen = firstindex(s), 0, ncodeunits(s)
-    most_recent_break_opportunity = 1
+    i, lastwrap, slen = firstindex(s), -1, ncodeunits(s)
+    most_recent_break_opportunity = -1
     while i < slen
         if isspace(s[i]) && s[i] != '\n'
             most_recent_break_opportunity = i
@@ -43,13 +43,13 @@ function wraplines(content::Union{Annot, SubString{<:Annot}}, width::Integer = 8
             push!(lines, content[nextind(s, lastwrap):prevind(s, i)])
             lastwrap = i
             column = 0
-        elseif column >= width && most_recent_break_opportunity > 1
+        elseif column >= width && most_recent_break_opportunity >= 0
             if lastwrap == most_recent_break_opportunity
                 nextbreak = findfirst(isspace, @view s[nextind(s, lastwrap):end])
                 if isnothing(nextbreak)
                     break
                 else
-                    most_recent_break_opportunity = lastwrap + nextbreak
+                    most_recent_break_opportunity = nextind(s, lastwrap) + nextbreak
                 end
                 i = most_recent_break_opportunity
             else
@@ -62,7 +62,7 @@ function wraplines(content::Union{Annot, SubString{<:Annot}}, width::Integer = 8
         column += textwidth(s[i])
         i = nextind(s, i)
     end
-    if lastwrap < slen
+    if lastwrap < slen - 1
         push!(lines, content[nextind(s, lastwrap):end])
     end
     lines
@@ -77,7 +77,7 @@ function insert_hlines(docs)
     v = Any[]
     for (n, doc) in enumerate(docs.content)
         push!(v, doc)
-        n == length(docs.content) || push!(v, HorizontalRule())
+        n == lastindex(docs.content) || push!(v, HorizontalRule())
     end
     return MD(v)
 end

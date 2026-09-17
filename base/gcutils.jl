@@ -232,7 +232,7 @@ julia> let
 ```
 """
 macro preserve(args...)
-    syms = args[1:end-1]
+    syms = args[0:end-1]
     for x in syms
         isa(x, Symbol) || error("Preserved variable must be a symbol")
     end

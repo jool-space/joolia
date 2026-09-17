@@ -66,7 +66,7 @@ function _cleanup_locked(h::WeakKeyDict)
     if h.dirty
         h.dirty = false
         idx = skip_deleted_floor!(h.ht)
-        while idx != 0
+        while idx >= 0
             if h.ht.keys[idx].value === nothing
                 _delete!(h.ht, idx)
             end
@@ -200,10 +200,10 @@ function iterate(t::WeakKeyDict{K,V}, state...) where {K, V}
             y = iterate(t.ht, state...)
             y === nothing && return nothing
             wkv, state = y
-            k = wkv[1].value
+            k = wkv[0].value
             GC.safepoint() # ensure `k` is now gc-rooted
             k === nothing && continue # indicates `k` is scheduled for deletion
-            kv = Pair{K,V}(k::K, wkv[2])
+            kv = Pair{K,V}(k::K, wkv[1])
             return (kv, state)
         end
     end
@@ -438,7 +438,6 @@ function iterate(h::WeakValueIdDict{K,V}, snapshot::Union{Nothing,Tuple{Vector{P
         snapshot = (live, 0)
     end
     pairs, i = snapshot
-    i += 1
-    i > length(pairs) && return nothing
-    return pairs[i], (pairs, i)
+    i >= length(pairs) && return nothing
+    return pairs[i], (pairs, i + 1)
 end

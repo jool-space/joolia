@@ -43,7 +43,7 @@ struct ArgInfo
 end
 
 function printstyled_ll(io::IO, x, s::Symbol, trailing_spaces="")
-    printstyled(io, x, bold=llstyle[s][1], color=llstyle[s][2])
+    printstyled(io, x, bold=llstyle[s][0], color=llstyle[s][1])
     print(io, trailing_spaces)
 end
 
@@ -71,8 +71,8 @@ function print_warntype_codeinfo(io::IO, src::Core.CodeInfo, @nospecialize(retty
         io = IOContext(io, :SOURCE_SLOTNAMES => slotnames)
         slottypes = src.slottypes
         nargs > 0 && println(io, "Arguments")
-        for i = 1:length(slotnames)
-            if i == nargs + 1
+        for i = 0:length(slotnames)-1
+            if i == nargs
                 println(io, "Locals")
             end
             print(io, "  ", slotnames[i])
@@ -98,13 +98,13 @@ function print_warntype_mi(io::IO, mi::Core.MethodInstance)
         println(io, "Static Parameters")
         sig = mi.def.sig
         warn_color = Base.warn_color() # more mild user notification
-        for i = 1:length(mi.sparam_vals)
+        for i = 0:length(mi.sparam_vals)-1
             sig = sig::UnionAll
             name = sig.var.name
             val = mi.sparam_vals[i]
             # Env entries from intersection may be wrapped as svec(tvar, constrained_bool)
             if val isa Core.SimpleVector
-                val = val[1]
+                val = val[0]
             end
             print_highlighted(io::IO, v::String, color::Symbol) =
                 if highlighting[:warntype]
@@ -171,7 +171,7 @@ function code_warntype(io::IO, arginfo::ArgInfo;
     if arginfo.oc !== nothing
         (; oc, tt) = arginfo
         isa(oc.source, Method) && (nargs = oc.source.nargs)
-        print_warntype_codeinfo(io, Base.code_typed_opaque_closure(oc, tt; optimize, interp)[1]..., nargs;
+        print_warntype_codeinfo(io, Base.code_typed_opaque_closure(oc, tt; optimize, interp)[0]..., nargs;
                                 lineprinter, label_dynamic_calls = optimize)
         return nothing
     end
@@ -231,7 +231,7 @@ function _dump_function(arginfo::ArgInfo, native::Bool, wrapper::Bool,
             # specialization and we can't infer anything more precise either.
             world = oc.source.primary_world
             mi = oc.source.specializations::Core.MethodInstance
-            Base.hasintersect(typeof(oc).parameters[1], tt) || (warning = OC_MISMATCH_WARNING)
+            Base.hasintersect(typeof(oc).parameters[0], tt) || (warning = OC_MISMATCH_WARNING)
         else
             mi = Base.specialize_method(oc.source, Tuple{typeof(oc.captures), tt.parameters...}, Core.svec())
             isdispatchtuple(mi.specTypes) || (warning = GENERIC_SIG_WARNING)
@@ -560,7 +560,7 @@ function print_native_tokens(io, tokens, arch::Union{Val{:x86}, Val{:arm}})
             continue
         end
         m = match(r"^#([0-9a-fx.-]+)(\s*)(.*)", tokens)
-        if !x86 && m !== nothing && occursin(num_regex, m.captures[1])
+        if !x86 && m !== nothing && occursin(num_regex, m.captures[0])
             num, spaces, tokens = m.captures
             printstyled_ll(io, "#" * num, :number, spaces)
             continue

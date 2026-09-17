@@ -59,8 +59,8 @@ function writeshortest(x::T,
     precision >= -1 || throw(ArgumentError("precision must be at least -1"))
     bufsize = precision < 0 ? neededdigits(T) : Base.checked_add(precision, neededdigits(T))
     buf = Base.StringVector(bufsize)
-    pos = writeshortest(buf, 1, x, plus, space, hash, precision, expchar, padexp, decchar, typed, compact)
-    return String(resize!(buf, pos - 1))
+    pos = writeshortest(buf, 0, x, plus, space, hash, precision, expchar, padexp, decchar, typed, compact)
+    return String(resize!(buf, pos))
 end
 
 """
@@ -89,8 +89,8 @@ function writefixed(x::T,
     precision = Int(precision)
     precision >= 0 || throw(ArgumentError("precision must be non-negative"))
     buf = Base.StringVector(Base.checked_add(precision, neededdigits(T)))
-    pos = writefixed(buf, 1, x, precision, plus, space, hash, decchar, trimtrailingzeros)
-    return String(resize!(buf, pos - 1))
+    pos = writefixed(buf, 0, x, precision, plus, space, hash, decchar, trimtrailingzeros)
+    return String(resize!(buf, pos))
 end
 
 """
@@ -121,25 +121,25 @@ function writeexp(x::T,
     precision = Int(precision)
     precision >= 0 || throw(ArgumentError("precision must be non-negative"))
     buf = Base.StringVector(Base.checked_add(precision, neededdigits(T)))
-    pos = writeexp(buf, 1, x, precision, plus, space, hash, expchar, decchar, trimtrailingzeros)
-    return String(resize!(buf, pos - 1))
+    pos = writeexp(buf, 0, x, precision, plus, space, hash, expchar, decchar, trimtrailingzeros)
+    return String(resize!(buf, pos))
 end
 
 function Base.show(io::IO, x::T, forceuntyped::Bool=false, fromprint::Bool=false) where {T <: Base.IEEEFloat}
     compact = get(io, :compact, false)::Bool
     buf = Memory{UInt8}(undef, neededfloatdigits(T))
     typed = !forceuntyped && !compact && Base.nonnothing_nonmissing_typeinfo(io) !== typeof(x)
-    pos = writeshortest(buf, 1, x, false, false, true, -1,
+    pos = writeshortest(buf, 0, x, false, false, true, -1,
         (x isa Float32 && !fromprint) ? UInt8('f') : UInt8('e'), false, UInt8('.'), typed, compact)
-    write(io, view(buf, 1:pos - 1))
+    write(io, view(buf, 0:pos - 1))
     return
 end
 
 function Base.string(x::T) where {T <: Base.IEEEFloat}
     buf = Base.StringVector(neededfloatdigits(T))
-    pos = writeshortest(buf, 1, x, false, false, true, -1,
+    pos = writeshortest(buf, 0, x, false, false, true, -1,
         UInt8('e'), false, UInt8('.'), false, false)
-    return String(resize!(buf, pos - 1))
+    return String(resize!(buf, pos))
 end
 
 Base.print(io::IO, x::Union{Float16, Float32}) = show(io, x, true, true)

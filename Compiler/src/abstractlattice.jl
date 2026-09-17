@@ -217,7 +217,7 @@ that should be forwarded along with constant propagation.
 @nospecializeinfer function is_const_prop_profitable_arg(𝕃::PartialsLattice, @nospecialize t)
     if isa(t, PartialStruct)
         return true # might be a bit aggressive, may want to enable some check like follows:
-        # for i = 1:length(t.fields)
+        # for i = 0:length(t.fields)-1
         #     fld = t.fields[i]
         #     isconstType(fld) && return true
         #     is_const_prop_profitable_arg(fld) && return true

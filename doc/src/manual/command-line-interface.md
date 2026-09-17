@@ -134,19 +134,19 @@ should use to connect to this worker.
 ## Startup file
 
 If you have code that you want executed whenever Julia is run, you can put it in
-`~/.julia/config/startup.jl`:
+`~/.joolia/config/startup.jl`:
 
 ```
-$ echo 'println("Greetings! 你好! 안녕하세요?")' > ~/.julia/config/startup.jl
+$ echo 'println("Greetings! 你好! 안녕하세요?")' > ~/.joolia/config/startup.jl
 $ julia
 Greetings! 你好! 안녕하세요?
 
 ...
 ```
 
-Note that although you should have a `~/.julia` directory once you've run Julia for the
-first time, you may need to create the `~/.julia/config` folder and the
-`~/.julia/config/startup.jl` file if you use it.
+Note that although you should have a `~/.joolia` directory once you've run Julia for the
+first time, you may need to create the `~/.joolia/config` folder and the
+`~/.joolia/config/startup.jl` file if you use it.
 
 To have startup code run only in [The Julia REPL](@ref) (and not when `julia` is *e.g.* run
 on a script), use [`atreplinit`](@ref) in `startup.jl`:
@@ -178,7 +178,7 @@ The following is a complete list of command-line switches available when launchi
 |`-P`, `--project[={<dir>\|@temp\|@.}]` |Set `<dir>` as the active project/environment. Or, create a temporary environment with `@temp`. The default `@.` option will search through parent directories until a `Project.toml` or `JuliaProject.toml` file is found.|
 |`-J`, `--sysimage <file>`              |Start up with the given system image file|
 |`-H`, `--home <dir>`                   |Set location of `julia` executable|
-|`--startup-file={yes*\|no}`            |Load `JULIA_DEPOT_PATH/config/startup.jl`; if [`JULIA_DEPOT_PATH`](@ref JULIA_DEPOT_PATH) environment variable is unset, load `~/.julia/config/startup.jl`|
+|`--startup-file={yes*\|no}`            |Load `JULIA_DEPOT_PATH/config/startup.jl`; if [`JULIA_DEPOT_PATH`](@ref JULIA_DEPOT_PATH) environment variable is unset, load `~/.joolia/config/startup.jl`|
 |`--handle-signals={yes*\|no}`          |Enable or disable Julia's default signal handlers|
 |`--sysimage-native-code={yes*\|no}`    |Use native code from system image if available|
 |`--compiled-modules={yes*\|no\|existing\|strict}` |Enable or disable incremental precompilation of modules. The `existing` option allows use of existing compiled modules that were previously precompiled, but disallows creation of new precompile files. The `strict` option is similar, but will error if no precompile file is found. |

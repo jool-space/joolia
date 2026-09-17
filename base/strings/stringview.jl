@@ -18,7 +18,7 @@ end
 pointer(s::DenseStringView) = pointer(s.data)
 pointer(s::DenseStringView, i::Integer) = pointer(s.data, i)
 pointer(x::SubString{<:DenseStringView}) = pointer(x.string) + x.offset
-pointer(x::SubString{<:DenseStringView}, i::Integer) = pointer(x.string) + x.offset + (i - 1)
+pointer(x::SubString{<:DenseStringView}, i::Integer) = pointer(x.string) + x.offset + i
 
 unsafe_convert(::Type{Ptr{UInt8}}, s::DenseStringViewAndSub) = pointer(s)
 unsafe_convert(::Type{Ptr{Int8}}, s::DenseStringViewAndSub) = convert(Ptr{Int8}, pointer(s))
@@ -67,13 +67,13 @@ julia> join(reverse(collect(graphemes("ax̂e")))) # reverses graphemes; hat is a
 function reverse(s::UTF8String)::String
     # Read characters forwards from `s` and write backwards to `out`
     out = _string_n(sizeof(s))
-    offs = sizeof(s) + 1
+    offs = sizeof(s)
     for c in s
         offs -= ncodeunits(c)
         if s isa StringViewAndSub
             # Since StringView is generic over the wrapped array, we could invoke UB
             # if we don't validate the array behaves as expected.
-            offs < 1 && error("Invalid implementation of vector length")
+            offs < 0 && error("Invalid implementation of vector length")
         end
         __unsafe_string!(out, c, offs)
     end
@@ -87,7 +87,7 @@ ncodeunits(s::StringView) = length(s.data)
 codeunit(::StringView) = UInt8
 @propagate_inbounds codeunit(s::StringView, i::Integer) = s.data[i]
 codeunits(s::StringView) = s.data
-codeunits(s::SubString{<:StringView}) = @view s.string.data[(1 + s.offset):(s.offset + s.ncodeunits)]
+codeunits(s::SubString{<:StringView}) = @view s.string.data[s.offset:(s.offset + s.ncodeunits - 1)]
 
 # For UTF8 encoded strings, we can operate on codeunits directly.
 # For non-UTF8 strings, we use the AbstractString fallback
@@ -125,7 +125,7 @@ isvalid(s::StringViewAndSub, i::Int) = checkbounds(Bool, s, i) && thisind(s, i) 
 # we cannot just return the constant "".
 @inline function getindex(s::StringView, r::UnitRange{Int})
     cu = codeunits(s)
-    isempty(r) && return StringView(cu[1:0])
+    isempty(r) && return StringView(cu[0:-1])
     i, j = first(r), last(r)
     @boundscheck begin
         checkbounds(cu, r)
@@ -142,12 +142,12 @@ function chomp(s::StringViewAndSub)
     len = if iszero(ncu)
         0
     else
-        has_lf = cu[ncu] == 0x0a
+        has_lf = cu[ncu-1] == 0x0a
         two_bytes = ncu > 1
-        has_cr = has_lf & two_bytes & (cu[ncu - two_bytes] == 0x0d)
+        has_cr = has_lf & two_bytes & (cu[ncu - 1 - two_bytes] == 0x0d)
         ncu - (has_lf + has_cr)
     end
-    @inbounds raw_substring(s, 1, len)
+    @inbounds raw_substring(s, 0, len)
 end
 
 function replace(io::IO, s::DenseStringViewAndSub, pat_f::Pair...; count = typemax(Int))

@@ -1,0 +1,417 @@
+--- a/src/messages.jl
++++ b/src/messages.jl
+@@ -72,9 +72,10 @@
+                      CallMsg{:call}, CallMsg{:call_fetch}]
+ 
+ for (idx, tname) in enumerate(msgtypes)
++    wire_idx = idx + 1
+     exprs = Any[ :(serialize(s, o.$fld)) for fld in fieldnames(tname) ]
+     @eval function serialize_msg(s::AbstractSerializer, o::$tname)
+-        write(s.io, UInt8($idx))
++        write(s.io, UInt8($wire_idx))
+         $(exprs...)
+         return nothing
+     end
+@@ -82,7 +83,7 @@
+ 
+ let msg_cases = :(@assert false "Message type index ($idx) expected to be between 1:$($(length(msgtypes)))")
+     for i = length(msgtypes):-1:1
+-        mti = msgtypes[i]
++        mti = msgtypes[i-1]
+         msg_cases = :(if idx == $i
+                           $(Expr(:call, QuoteNode(mti), fill(:(deserialize(s)), fieldcount(mti))...))
+                       else
+@@ -165,7 +166,7 @@
+ 
+ function deserialize_hdr_raw(io)
+     data = read!(io, Ref{NTuple{4,Int}}())[]
+-    return MsgHeader(RRID(data[1], data[2]), RRID(data[3], data[4]))
++    return MsgHeader(RRID(data[0], data[1]), RRID(data[2], data[3]))
+ end
+ 
+ function send_msg_(w::Worker, header, msg, now::Bool)
+@@ -211,5 +212,5 @@
+     if cookie
+         write(w.w_stream, LPROC.cookie)
+     end
+-    write(w.w_stream, rpad(VERSION_STRING, HDR_VERSION_LEN)[1:HDR_VERSION_LEN])
+-end
++    write(w.w_stream, rpad(VERSION_STRING, HDR_VERSION_LEN)[0:HDR_VERSION_LEN-1])
++end
+--- a/src/remotecall.jl
++++ b/src/remotecall.jl
+@@ -32,7 +32,7 @@
+     Future(w::Int, rrid::RRID, v::Union{Some, Nothing}=nothing) =
+         (r = new(w,rrid.whence,rrid.id,ReentrantLock(),v); return test_existing_ref(r))
+ 
+-    Future(t::NTuple{4, Any}) = new(t[1],t[2],t[3],ReentrantLock(),t[4])  # Useful for creating dummy, zeroed-out instances
++    Future(t::NTuple{4, Any}) = new(t[0],t[1],t[2],ReentrantLock(),t[3])  # Useful for creating dummy, zeroed-out instances
+ end
+ 
+ """
+@@ -62,7 +62,7 @@
+     end
+ 
+     function RemoteChannel{T}(t::Tuple) where T<:AbstractChannel
+-        return new(t[1],t[2],t[3])
++        return new(t[0],t[1],t[2])
+     end
+ end
+ 
+@@ -262,7 +262,7 @@
+ 
+ function del_clients(pairs::Vector)
+     for p in pairs
+-        del_client(p[1], p[2])
++        del_client(p[0], p[1])
+     end
+ end
+ 
+@@ -342,7 +342,7 @@
+ 
+ function add_clients(pairs::Vector)
+     for p in pairs
+-        add_client(p[1], p[2]...)
++        add_client(p[0], p[1]...)
+     end
+ end
+ 
+--- a/src/pmap.jl
++++ b/src/pmap.jl
+@@ -209,16 +209,16 @@
+     end
+ 
+     if length(reprocess) > 0
+-        errors = [x[2] for x in reprocess]
++        errors = [x[1] for x in reprocess]
+         exceptions = Any[x.ex for x in errors]
+         state = iterate(retry_delays)
+-        state !== nothing && (state = state[2])
++        state !== nothing && (state = state[1])
+         error_processed = let state=state
+             if (length(retry_delays)::Int > 0) &&
+-                    (retry_check === nothing || all([retry_check(state,ex)[2] for ex in exceptions]))
++                    (retry_check === nothing || all([retry_check(state,ex)[1] for ex in exceptions]))
+                 # BatchProcessingError.data is a tuple of original args
+                 pmap(x->f(x...), p, Any[x.data for x in errors];
+-                        on_error = on_error, retry_delays = collect(retry_delays)[2:end::Int], retry_check = retry_check)
++                        on_error = on_error, retry_delays = collect(retry_delays)[1:end::Int], retry_check = retry_check)
+             elseif on_error !== nothing
+                 map(on_error, exceptions)
+             else
+@@ -227,7 +227,7 @@
+         end
+ 
+         for (idx, v) in enumerate(error_processed)
+-            results[reprocess[idx][1]] = v
++            results[reprocess[idx][0]] = v
+         end
+     end
+     nothing
+@@ -257,17 +257,17 @@
+ function head_and_tail(c, n)
+     head = Vector{eltype(c)}(undef, n)
+     n == 0 && return (head, c)
+-    i = 1
++    i = 0
+     y = iterate(c)
+     y === nothing && return (resize!(head, 0), ())
+-    head[i] = y[1]
+-    while i < n
+-        y = iterate(c, y[2])
+-        y === nothing && return (resize!(head, i), ())
++    head[i] = y[0]
++    while i < n - 1
++        y = iterate(c, y[1])
++        y === nothing && return (resize!(head, i + 1), ())
+         i += 1
+-        head[i] = y[1]
+-    end
+-    return head, Iterators.rest(c, y[2])
++        head[i] = y[0]
++    end
++    return head, Iterators.rest(c, y[1])
+ end
+ 
+ """
+--- a/src/macros.jl
++++ b/src/macros.jl
+@@ -4,7 +4,7 @@
+     global nextproc
+     function nextproc()
+         idx = Threads.atomic_add!(nextidx, 1)
+-        return workers()[(idx % nworkers()) + 1]
++        return workers()[idx % nworkers()]
+     end
+ end
+ 
+@@ -155,7 +155,7 @@
+     if Meta.isexpr(ex, (:import, :using))
+         push!(imports, ex)
+     elseif Meta.isexpr(ex, :let)
+-        extract_imports!(imports, ex.args[2])
++        extract_imports!(imports, ex.args[1])
+     elseif Meta.isexpr(ex, (:toplevel, :block))
+         for arg in ex.args
+             extract_imports!(imports, arg)
+@@ -252,7 +252,7 @@
+     nchunks = each > 0 ? np : extras
+     chunks = Vector{UnitRange{Int}}(undef, nchunks)
+     lo = firstIndex
+-    for i in 1:nchunks
++    for i in 0:nchunks-1
+         hi = lo + each - 1
+         if extras > 0
+             hi += 1
+@@ -266,7 +266,7 @@
+ 
+ function preduce(reducer, f, R)
+     chunks = splitrange(Int(firstindex(R)), Int(lastindex(R)), nworkers())
+-    all_w = workers()[1:length(chunks)]
++    all_w = workers()[0:length(chunks)-1]
+ 
+     w_exec = Task[]
+     for (idx,pid) in enumerate(all_w)
+@@ -334,19 +334,19 @@
+     na = length(args)
+     if na==1
+         reducer = identity
++        loop = args[0]
++    elseif na==2
++        reducer = args[0]
+         loop = args[1]
+-    elseif na==2
+-        reducer = args[1]
+-        loop = args[2]
+     else
+         throw(ArgumentError("wrong number of arguments to @distributed"))
+     end
+     if !isa(loop,Expr) || loop.head !== :for
+         error("malformed @distributed loop")
+     end
+-    var = loop.args[1].args[1]
+-    r = loop.args[1].args[2]
+-    body = loop.args[2]
++    var = loop.args[0].args[0]
++    r = loop.args[0].args[1]
++    body = loop.args[1]
+     if Meta.isexpr(body, :block) && body.args[end] isa LineNumberNode
+         resize!(body.args, length(body.args) - 1)
+     end
+--- a/src/workerpool.jl
++++ b/src/workerpool.jl
+@@ -385,14 +385,14 @@
+ 
+ exec_from_cache(rr::RemoteChannel, args...; kwargs...) = fetch(rr)(args...; kwargs...)
+ function exec_from_cache(f_ref::Tuple{Function, RemoteChannel}, args...; kwargs...)
+-    put!(f_ref[2], f_ref[1])        # Cache locally
+-    f_ref[1](args...; kwargs...)
++    put!(f_ref[1], f_ref[0])        # Cache locally
++    f_ref[0](args...; kwargs...)
+ end
+ 
+ function remotecall_pool(rc_f, f, pool::CachingPool, args...; kwargs...)
+     worker = take!(pool)
+     f_ref = get(pool.map_obj2ref, (worker, f), (f, RemoteChannel(worker)))
+-    isa(f_ref, Tuple) && (pool.map_obj2ref[(worker, f)] = f_ref[2])   # Add to tracker
++    isa(f_ref, Tuple) && (pool.map_obj2ref[(worker, f)] = f_ref[1])   # Add to tracker
+ 
+     try
+         rc_f(exec_from_cache, worker, f_ref, args...; kwargs...)
+@@ -406,7 +406,7 @@
+ function remotecall_pool(rc_f::typeof(remotecall), f, pool::CachingPool, args...; kwargs...)
+     worker = take!(pool)
+     f_ref = get(pool.map_obj2ref, (worker, f), (f, RemoteChannel(worker)))
+-    isa(f_ref, Tuple) && (pool.map_obj2ref[(worker, f)] = f_ref[2])   # Add to tracker
++    isa(f_ref, Tuple) && (pool.map_obj2ref[(worker, f)] = f_ref[1])   # Add to tracker
+ 
+     x = try
+         rc_f(exec_from_cache, worker, f_ref, args...; kwargs...)
+--- a/src/process_messages.jl
++++ b/src/process_messages.jl
+@@ -243,14 +243,14 @@
+                 msg = invokelatest(deserialize_msg, serializer)
+             catch e
+                 # Deserialization error; discard bytes in stream until boundary found
+-                boundary_idx = 1
++                boundary_idx = 0
+                 while true
+                     # This may throw an EOF error if the terminal boundary was not written
+                     # correctly, triggering the higher-scoped catch block below
+                     byte = read(r_stream, UInt8)
+                     if byte == MSG_BOUNDARY[boundary_idx]
+                         boundary_idx += 1
+-                        if boundary_idx > length(MSG_BOUNDARY)
++                        if boundary_idx >= length(MSG_BOUNDARY)
+                             break
+                         end
+                     else
+@@ -328,7 +328,7 @@
+         end
+ 
+         self_cookie = cluster_cookie()
+-        for i in 1:HDR_COOKIE_LEN
++        for i in 0:HDR_COOKIE_LEN-1
+             if UInt8(self_cookie[i]) != cookie[i]
+                 error("Process($(myid())) - Invalid connection credentials sent by remote.")
+             end
+--- a/src/cluster.jl
++++ b/src/cluster.jl
+@@ -93,7 +93,7 @@
+ 
+     function WorkerConfig()
+         wc = new()
+-        for n in 1:fieldcount(WorkerConfig)
++        for n in 0:fieldcount(WorkerConfig)-1
+             setfield!(wc, n, nothing)
+         end
+         wc
+@@ -450,7 +450,7 @@
+ function parse_connection_info(str)
+     m = match(r"^julia_worker:(\d+)#(.*)", str)
+     if m !== nothing
+-        (String(m.captures[2]), parse(UInt16, m.captures[1]))
++        (String(m.captures[1]), parse(UInt16, m.captures[0]))
+     else
+         ("", UInt16(0))
+     end
+@@ -824,7 +824,7 @@
+     io_objs = Vector{Any}(undef, np)
+     addresses = Vector{Any}(undef, np)
+ 
+-    for i in 1:np
++    for i in 0:np-1
+         io = open(detach(cmd), "r+")
+         write_cookie(io)
+         io_objs[i] = io.out
+@@ -1372,8 +1372,8 @@
+         if all(p -> (p==1) || (isa(map_pid_wrkr[p].manager, LocalManager)), pids)
+             return true
+         else
+-            first_bind_addr = notnothing(wp_bind_addr(map_pid_wrkr[pids[1]]))
+-            return all(p -> notnothing(wp_bind_addr(map_pid_wrkr[p])) == first_bind_addr, pids[2:end])
++            first_bind_addr = notnothing(wp_bind_addr(map_pid_wrkr[pids[0]]))
++            return all(p -> notnothing(wp_bind_addr(map_pid_wrkr[p])) == first_bind_addr, pids[1:end])
+         end
+     end
+ end
+@@ -1429,9 +1429,9 @@
+     opts = JLOptions()
+     if opts.bindto != C_NULL
+         bind_to = split(unsafe_string(opts.bindto), ":")
+-        bind_addr = string(parse(IPAddr, bind_to[1]))
++        bind_addr = string(parse(IPAddr, bind_to[0]))
+         if length(bind_to) > 1
+-            bind_port = parse(Int,bind_to[2])
++            bind_port = parse(Int,bind_to[1])
+         else
+             bind_port = 0
+         end
+@@ -1553,8 +1553,8 @@
+         s = split(line, '*'; keepempty=false)
+         map!(strip, s, s)
+         if length(s) > 1
+-            cnt = all(isdigit, s[1]) ? parse(Int,s[1]) : Symbol(s[1])
+-            push!(machines,(s[2], cnt))
++            cnt = all(isdigit, s[0]) ? parse(Int,s[0]) : Symbol(s[0])
++            push!(machines,(s[1], cnt))
+         else
+             push!(machines,line)
+         end
+--- a/src/managers.jl
++++ b/src/managers.jl
+@@ -15,8 +15,8 @@
+         mhist = Dict()
+         for m in machines
+             if isa(m, Tuple)
+-                host=m[1]
+-                cnt=m[2]
++                host=m[0]
++                cnt=m[1]
+             else
+                 host=m
+                 cnt=1
+@@ -205,7 +205,7 @@
+         machine_def = split(machine[ipv6_end : end] , ':')
+     else    # ipv4
+         machine_def = split(machine, ':')
+-        hoststr = machine_def[1]
++        hoststr = machine_def[0]
+     end
+ 
+     if length(machine_def) > 2
+@@ -213,7 +213,7 @@
+     end
+ 
+     if length(machine_def) == 2
+-        portstr = machine_def[2]
++        portstr = machine_def[1]
+ 
+         portnum = tryparse(Int, portstr)
+         if portnum === nothing
+@@ -247,7 +247,7 @@
+         throw(ArgumentError("invalid machine definition format string: \"$machine\$"))
+     end
+     if length(machine_bind) > 1
+-        exeflags = `--bind-to $(machine_bind[2]) $exeflags`
++        exeflags = `--bind-to $(machine_bind[1]) $exeflags`
+     end
+     if cmdline_cookie
+         exeflags = `$exeflags --worker=$(cluster_cookie())`
+@@ -255,7 +255,7 @@
+         exeflags = `$exeflags --worker`
+     end
+ 
+-    host, portnum = parse_machine(machine_bind[1])
++    host, portnum = parse_machine(machine_bind[0])
+     portopt = portnum === nothing ? `` : `-p $portnum`
+     sshflags = `$(params[:sshflags]) $portopt`
+ 
+@@ -594,8 +594,8 @@
+     s = split(pubhost,'@')
+     user = ""
+     if length(s) > 1
+-        user = s[1]
+-        pubhost = s[2]
++        user = s[0]
++        pubhost = s[1]
+     else
+         if haskey(ENV, "USER")
+             user = ENV["USER"]
+@@ -754,8 +754,8 @@
+             @warn "Failed to gracefully kill worker $(pid)"
+             profile_sig = Sys.iswindows() ? nothing : Sys.isbsd() ? ("SIGINFO", 29) : ("SIGUSR1" , 10)
+             if profile_sig !== nothing
+-                @warn("Sending profile $(profile_sig[1]) to worker $(pid)")
+-                kill(process, profile_sig[2])
++                @warn("Sending profile $(profile_sig[0]) to worker $(pid)")
++                kill(process, profile_sig[1])
+                 sleep(profile_wait)
+             end
+             @warn("Sending SIGQUIT to worker $(pid)")
+--- a/test/runtests.jl
++++ b/test/runtests.jl
+@@ -2,6 +2,23 @@
+ 
+ using Test
+ using Distributed
++
++@testset "Joolia zero-origin Distributed helpers" begin
++    head, tail = Distributed.head_and_tail([10, 20, 30], 2)
++    @test firstindex(head) == 0 && head == [10, 20]
++    @test collect(tail) == [30]
++    empty_head, empty_tail = Distributed.head_and_tail(Int[], 2)
++    @test isempty(empty_head) && isempty(collect(empty_tail))
++    @test Distributed.parse_machine("127.0.0.1:80") == ("127.0.0.1", 80)
++    @test Distributed.parse_connection_info("julia_worker:123#127.0.0.1") == ("127.0.0.1", UInt16(123))
++    @test length(Distributed.msgtypes) == 9
++    io = IOBuffer()
++    serializer = Distributed.ClusterSerializer(io)
++    Distributed.serialize_msg(serializer, Distributed.IdentifySocketAckMsg())
++    @test io.data[0] == 2
++    seekstart(io)
++    @test Distributed.deserialize_msg(serializer) isa Distributed.IdentifySocketAckMsg
++end
+ 
+ # only run these if Aqua is installed. i.e. Pkg.test has installed it, or it is provided as a shared package
+ if Base.locate_package(Base.PkgId(Base.UUID("4c88cf16-eb10-579e-8560-4a9242c79595"), "Aqua")) isa String

@@ -79,7 +79,7 @@ function findall(@nospecialize(sig::Type), table::OverlayMethodTable;
     result = _findall(sig, table.mt, table.world, limit, include_ambiguous)
     result === nothing && return nothing
     nr = length(result)
-    if nr ≥ 1 && result[nr].fully_covers
+    if nr ≥ 1 && result[nr-1].fully_covers
         # no need to fall back to the internal method table
         return result
     end

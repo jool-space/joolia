@@ -209,10 +209,10 @@ const NO_POSITION = ParseStreamPosition(0, 0)
 
 #-------------------------------------------------------------------------------
 """
-    ParseStream(text::AbstractString,          index::Integer=1; version=VERSION)
+    ParseStream(text::AbstractString,          index::Integer=0; version=VERSION)
     ParseStream(text::IO;                                        version=VERSION)
-    ParseStream(text::Vector{UInt8},           index::Integer=1; version=VERSION)
-    ParseStream(ptr::Ptr{UInt8}, len::Integer, index::Integer=1; version=VERSION)
+    ParseStream(text::Vector{UInt8},           index::Integer=0; version=VERSION)
+    ParseStream(ptr::Ptr{UInt8}, len::Integer, index::Integer=0; version=VERSION)
 
 Construct a `ParseStream` from input which may come in various forms:
 * An string (zero copy for `String` and `SubString`)
@@ -265,7 +265,7 @@ mutable struct ParseStream
     function ParseStream(text_buf::Vector{UInt8}, text_root, next_byte::Integer,
                          version::VersionNumber)
         io = IOBuffer(text_buf)
-        seek(io, next_byte-1)
+        seek(io, next_byte)
         lexer = Tokenize.Lexer(io)
         # To avoid keeping track of the exact Julia development version where new
         # features were added or comparing prerelease strings, we treat prereleases
@@ -274,12 +274,12 @@ mutable struct ParseStream
         # like an acceptable tradeoff.
         ver = (version.major, version.minor)
         # Initial sentinel node (covering all ignored bytes before the first token)
-        sentinel = RawGreenNode(SyntaxHead(K"TOMBSTONE", EMPTY_FLAGS), next_byte-1, K"TOMBSTONE")
+        sentinel = RawGreenNode(SyntaxHead(K"TOMBSTONE", EMPTY_FLAGS), next_byte, K"TOMBSTONE")
         new(text_buf,
             text_root,
             lexer,
             Vector{SyntaxToken}(),
-            1,
+            0,
             Vector{Vector{ParseStreamPosition}}(),
             RawGreenNode[sentinel],
             next_byte,  # Initialize next_byte from the parameter
@@ -289,41 +289,41 @@ mutable struct ParseStream
     end
 end
 
-function ParseStream(text::Vector{UInt8}, index::Integer=1; version=VERSION)
+function ParseStream(text::Vector{UInt8}, index::Integer=0; version=VERSION)
     ParseStream(text, text, index, version)
 end
 
 # Buffer with unknown owner. Not exactly recommended, but good for C interop
-function ParseStream(ptr::Ptr{UInt8}, len::Integer, index::Integer=1; version=VERSION)
+function ParseStream(ptr::Ptr{UInt8}, len::Integer, index::Integer=0; version=VERSION)
     ParseStream(unsafe_wrap(Vector{UInt8}, ptr, len), nothing, index, version)
 end
 
 # Buffers originating from strings
-function ParseStream(text::String, index::Integer=1; version=VERSION)
+function ParseStream(text::String, index::Integer=0; version=VERSION)
     ParseStream(unsafe_wrap(Vector{UInt8}, text),
                 text, index, version)
 end
-function ParseStream(text::SubString{String}, index::Integer=1; version=VERSION)
+function ParseStream(text::SubString{String}, index::Integer=0; version=VERSION)
     # See also IOBuffer(SubString("x"))
     ParseStream(unsafe_wrap(Vector{UInt8}, pointer(text), sizeof(text)),
                 text, index, version)
 end
-function ParseStream(text::AbstractString, index::Integer=1; version=VERSION)
+function ParseStream(text::AbstractString, index::Integer=0; version=VERSION)
     ParseStream(String(text), index; version=version)
 end
 
 # IO-based cases
 # TODO: switch ParseStream to use a Memory internally on newer versions of Julia
 VERSION < v"1.11.0-DEV.753" && function ParseStream(io::IOBuffer; version=VERSION)
-    ParseStream(io.data, io, position(io)+1, version)
+    ParseStream(io.data, io, position(io), version)
 end
 function ParseStream(io::Base.GenericIOBuffer; version=VERSION)
     textbuf = unsafe_wrap(Vector{UInt8}, pointer(io.data), length(io.data))
-    ParseStream(textbuf, io, position(io)+1, version)
+    ParseStream(textbuf, io, position(io), version)
 end
 function ParseStream(io::IO; version=VERSION)
     textbuf = read(io)
-    ParseStream(textbuf, textbuf, 1, version)
+    ParseStream(textbuf, textbuf, 0, version)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", stream::ParseStream)
@@ -351,12 +351,12 @@ end
 # Return true when a terminal (token) was emitted last at stream position `pos`
 function token_is_last(stream, pos)
     # In the unified structure, check if the node at pos is a terminal
-    return pos.node_index > 0 && pos.node_index <= length(stream.output) &&
+    return pos.node_index > 0 && pos.node_index <= length(stream.output)-1 &&
            is_terminal(stream.output[pos.node_index])
 end
 
 function lookahead_token_first_byte(stream, i)
-    i == 1 ? _next_byte(stream) : stream.lookahead[i-1].next_byte
+    i == stream.lookahead_index ? _next_byte(stream) : stream.lookahead[i-1].next_byte
 end
 
 function lookahead_token_last_byte(stream, i)
@@ -382,7 +382,7 @@ function _buffer_lookahead_tokens(lexer, lookahead)
             f |= set_numeric_flags(Int(raw.op_precedence))
         end
         push!(lookahead, SyntaxToken(SyntaxHead(k, f), k,
-                                     had_whitespace, raw.endbyte + 2))
+                                     had_whitespace, raw.endbyte + 1))
         token_count += 1
         if k == K"EndMarker"
             break
@@ -412,7 +412,7 @@ end
     # unrolled optimized version for that fast path. Empirically it seems we
     # only hit the slow path about 5% of the time here.
     i = stream.lookahead_index
-    @inbounds if n == 1 && i+2 <= length(stream.lookahead)
+    @inbounds if n == 1 && i+1 < length(stream.lookahead)
         if skip_newlines
             k = kind(stream.lookahead[i])
             if !(k == K"Whitespace" || k == K"Comment" || k == K"NewlineWs")
@@ -442,12 +442,12 @@ end
 @noinline function __lookahead_index(stream, n, skip_newlines)
     i = stream.lookahead_index
     while true
-        if i+1 > length(stream.lookahead)
-            n_to_delete = stream.lookahead_index-1
+        if i >= length(stream.lookahead)
+            n_to_delete = stream.lookahead_index
             if n_to_delete > 0.9*length(stream.lookahead)
                 Base._deletebeg!(stream.lookahead, n_to_delete)
                 i -= n_to_delete
-                stream.lookahead_index = 1
+                stream.lookahead_index = 0
             end
             _buffer_lookahead_tokens(stream.lexer, stream.lookahead)
             continue
@@ -539,7 +539,7 @@ Retroactively inspecting or modifying the parser's output can be confusing, so
 using this function should be avoided where possible.
 """
 function peek_behind(stream::ParseStream, pos::ParseStreamPosition)
-    if pos.node_index > 0 && pos.node_index <= length(stream.output)
+    if pos.node_index > 0 && pos.node_index <= length(stream.output)-1
         node = stream.output[pos.node_index]
         if is_terminal(node)
             return (kind=kind(node),
@@ -619,7 +619,7 @@ end
 function peek_behind_pos(stream::ParseStream; skip_trivia::Bool=true,
                          skip_parens::Bool=true)
     # Work backwards through the output
-    node_idx = length(stream.output)
+    node_idx = length(stream.output)-1
     byte_idx = stream.next_byte
 
     # Skip parens nodes if requested
@@ -828,7 +828,7 @@ end
 # Get position of last item emitted into the output stream
 function Base.position(stream::ParseStream)
     byte_idx = stream.next_byte
-    node_idx = length(stream.output)
+    node_idx = length(stream.output)-1
 
     ParseStreamPosition(byte_idx, node_idx)
 end
@@ -849,7 +849,7 @@ function emit(stream::ParseStream, mark::ParseStreamPosition, kind::Kind,
     byte_span = current_byte - mark_byte
 
     # Calculate node span (number of children, exclusive of the node itself)
-    node_span = length(stream.output) - mark.node_index
+    node_span = length(stream.output) - 1 - mark.node_index
 
     # Create non-terminal RawGreenNode
     node = RawGreenNode(SyntaxHead(kind, flags), byte_span, node_span)
@@ -968,14 +968,14 @@ Return the `Vector{UInt8}` text buffer being parsed by this `ParseStream`.
 """
 unsafe_textbuf(stream) = stream.textbuf
 
-first_byte(stream::ParseStream) = first(stream.output).byte_span + 1 # After sentinel
+first_byte(stream::ParseStream) = first(stream.output).byte_span # After sentinel
 last_byte(stream::ParseStream) = stream.next_byte - 1
 any_error(stream::ParseStream) = any_error(stream.diagnostics)
 
 # Return last non-whitespace byte which was parsed
 function last_non_whitespace_byte(stream::ParseStream)
     byte_pos = stream.next_byte
-    for i = length(stream.output):-1:1
+    for i = length(stream.output)-1:-1:1
         node = stream.output[i]
         if is_terminal(node)
             if kind(node) in KSet"Comment Whitespace NewlineWs ErrorEofMultiComment" || kind(node) == K"error" && node.byte_span == 0
@@ -990,7 +990,7 @@ end
 
 function Base.empty!(stream::ParseStream)
     # Keep only the sentinel
-    if !isempty(stream.output) && kind(stream.output[1]) == K"TOMBSTONE"
+    if !isempty(stream.output) && kind(stream.output[0]) == K"TOMBSTONE"
         resize!(stream.output, 1)
     else
         empty!(stream.output)
@@ -998,5 +998,5 @@ function Base.empty!(stream::ParseStream)
         push!(stream.output, RawGreenNode(SyntaxHead(K"TOMBSTONE", EMPTY_FLAGS), 0, K"TOMBSTONE"))
     end
     # Reset next_byte to initial position
-    stream.next_byte = 1
+    stream.next_byte = 0
 end

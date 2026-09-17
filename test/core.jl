@@ -2,6 +2,312 @@
 
 # test core language features
 
+# Test joolia's native bootstrap and zero-based Core without loading Base or Test.
+if Core.Intrinsics.not_int(Core.isdefined(Core.Main, :Base))
+    Core.eval(Core.Main, :(baremodule JooliaCoreTests
+    const I = Core.Intrinsics
+    const count = Core.Box(0)
+    function check(ok::Bool, label::String)
+        ok || throw(ErrorException(label))
+        count.contents = I.add_int(count.contents, 1)
+        nothing
+    end
+    function throws(f, T, label::String)
+        try
+            f()
+        catch err
+            check(isa(err, T), label)
+            return err
+        end
+        throw(ErrorException(label))
+    end
+    membership(x, T) = isa(x, T)
+    const TypeEgalReturn = Union{Core.TypeofBottom,Core.Const,Core.TypeEgal{Core.TypeEgal}}
+    check(membership(Core.TypeEgal, TypeEgalReturn), "kind value belongs to singleton union")
+    check(Core.:<:(Core.TypeEgal{Core.TypeEgal}, TypeEgalReturn), "singleton subtype agrees with membership")
+    check(membership(DataType, Union{Nothing,Core.TypeEgal{DataType}}), "DataType singleton union membership")
+    check(membership(UnionAll, Union{Nothing,Core.TypeEgal{UnionAll}}), "UnionAll singleton union membership")
+    check(I.not_int(membership(Int, Union{Nothing,Core.TypeEgal{DataType}})), "singleton union rejects another type value")
+    check(I.not_int(membership(Core.TypeEq, TypeEgalReturn)), "TypeEgal return union rejects another kind")
+    const negone = I.neg_int(1)
+    const intmax = Core.typemax_Int
+    const intmin = I.add_int(intmax, 1)
+    readfield(x, i::Int) = getfield(x, i)
+    tuplefield(x::Tuple{Int,Int}, i::Int) = getfield(x, i)
+    firstfield(x::Tuple{Int,Int}) = getfield(x, 0)
+    lastfield(x::Tuple{Int,Int}) = getfield(x, 1)
+    fielddefined(x, i::Int) = isdefined(x, i)
+    tupletype(i::Int) = fieldtype(Tuple{Int,Symbol}, i)
+    readmem(r::MemoryRef{Int}) = Core.memoryrefget(r, :not_atomic, true)
+    writemem(r::MemoryRef{Int}, x::Int) = Core.memoryrefset!(r, x, :not_atomic, true)
+    shift(r, i::Int) = Core.memoryrefnew(r, i, true)
+    offset(r) = Core.memoryrefoffset(r)
+    shift(r::Memory{Int}, i::Int) = Core.memoryrefnew(r, i, true)
+    shift(r::MemoryRef{Int}, i::Int) = Core.memoryrefnew(r, i, true)
+    offset(r::MemoryRef{Int}) = Core.memoryrefoffset(r)
+    loadptr(p::Ptr{Int}, i::Int) = I.pointerref(p, i, 1)
+    storeptr(p::Ptr{Int}, x::Int, i::Int) = I.pointerset(p, x, i, 1)
+
+    mutable struct Fields
+        x::Int
+        y::Any
+        Fields(x) = new(x)
+    end
+    macro atomic(ex)
+        Expr(:escape, Expr(:atomic, ex))
+    end
+    mutable struct Attributes
+        const x::Int
+        @atomic y::Int
+        Attributes(x, y) = new(x, y)
+    end
+    struct SplatFields
+        x::Int
+        y::Symbol
+        SplatFields(args...) = new(args...)
+    end
+    struct Parametric{T}
+        x::T
+        Parametric{T}(x) where {T} = new{T}(x)
+    end
+
+    check(isdefined(Core.Main, :Base) === false, "Base must be absent")
+    t = (11, 22)
+    check(firstfield(t) === 11, "constant first tuple field")
+    check(lastfield(t) === 22, "constant last tuple field")
+    check(tuplefield(t, 0) === 11, "dynamic first tuple field")
+    check(tuplefield(t, 1) === 22, "dynamic last tuple field")
+    check(readfield((:a, 22), 0) === :a, "heterogeneous tuple field")
+    err = throws(() -> readfield(t, 2), BoundsError, "tuple upper bound")
+    check(err.i === 2 || err.i === (2,), "bounds error preserves index")
+    throws(() -> readfield(t, negone), BoundsError, "tuple negative index")
+    throws(() -> readfield((), 0), BoundsError, "empty tuple")
+    throws(() -> readfield(t, intmax), BoundsError, "tuple maximum index")
+    check(tupletype(0) === Int, "first field type")
+    check(tupletype(1) === Symbol, "last field type")
+    throws(() -> tupletype(2), BoundsError, "fieldtype upper bound")
+    throws(() -> tupletype(negone), BoundsError, "fieldtype negative index")
+    throws(() -> tupletype(intmax), BoundsError, "fieldtype large index does not truncate")
+    throws(() -> tupletype(intmin), BoundsError, "fieldtype minimum index")
+    check(fieldtype(Tuple{Vararg{Int}}, 0) === Int, "vararg first field type")
+    check(fieldtype(Tuple{Vararg{Int}}, 30) === Int, "vararg field type")
+    check(fieldtype(NamedTuple{(:x,:y),Tuple{Int,Symbol}}, :x) === Int, "named tuple symbol field type")
+    check(fieldtype(NamedTuple{(:x,:y),Tuple{Int,Symbol}}, 1) === Symbol, "named tuple positional field type")
+    check(fieldtype(Union{Tuple{Int},Tuple{Symbol}}, 0) === Union{Int,Symbol}, "union field type")
+
+    named = NamedTuple{(:x,:y),Tuple{Int,Symbol}}((7,:eight))
+    check(readfield(named, 0) === 7, "named tuple first value")
+    check(readfield(named, 1) === :eight, "named tuple last value")
+    tv = TypeVar(:T)
+    app = Core.apply_type_or_typeapp(tv, Int, Symbol)
+    check(app.param === Symbol && app.head.param === Int && app.head.head === tv,
+          "deferred type application visits every parameter")
+    nested = Core.apply_type_or_typeapp(Tuple, Int, app)
+    check(nested.param === app && nested.head.param === Int,
+          "nested deferred type application visits every parameter")
+    symbolicfield(x::Fields, name::Symbol) = getfield(x, name)
+    typeddefined(x::Fields, i::Int) = isdefined(x, i)
+    f = Fields(7)
+    check(symbolicfield(f, :x) === 7, "dynamic symbol selects first field")
+    check(typeddefined(f, 0), "compiled first field defined")
+    check(typeddefined(f, 1) === false, "compiled uninitialized field")
+    check(fielddefined(f, 0), "first field defined")
+    check(fielddefined(f, 1) === false, "second field uninitialized")
+    check(fielddefined(f, 2) === false, "field beyond end undefined")
+    check(fielddefined(f, negone) === false, "negative field undefined")
+    setfield!(f, 0, 9)
+    check(f.x === 9, "numeric setfield agrees with symbolic access")
+    setfield!(f, 1, :ready)
+    check(readfield(f, 1) === :ready, "last field assignment")
+    check(symbolicfield(f, :y) === :ready, "dynamic symbol selects last field")
+    check(Core.swapfield!(f, 0, 12) === 9, "numeric swapfield")
+    result = Core.replacefield!(f, 0, 12, 15)
+    check(result.success, "numeric replacefield")
+    result = Core.modifyfield!(f, 0, I.add_int, 2)
+    check(result.first === 15 && result.second === 17, "numeric modifyfield")
+    fresh = Fields(1)
+    check(Core.setfieldonce!(fresh, 1, :once), "numeric setfieldonce")
+    check(Core.setfieldonce!(fresh, 1, :twice) === false, "setfieldonce already assigned")
+    throws(() -> setfield!(f, 2, 1), BoundsError, "setfield upper bound")
+    throws(() -> setfield!(f, negone, 1), BoundsError, "setfield negative index")
+    attrs = Attributes(3, 4)
+    throws(() -> setfield!(attrs, 0, 5), ErrorException, "const field attribute uses zero origin")
+    check(getfield(attrs, 1, :sequentially_consistent) === 4, "atomic field attribute uses zero origin")
+    setfield!(attrs, 1, 6, :sequentially_consistent)
+    check(getfield(attrs, :y, :sequentially_consistent) === 6, "atomic numeric store")
+    splat = SplatFields(3, :four)
+    check(splat.x === 3 && splat.y === :four, "lowered typed splat constructor")
+    check(Parametric{Int}(8).x === 8, "parametric constructor")
+    closure = let x = 31; () -> x; end
+    check(closure() === 31, "closure capture")
+
+    sv = Core.svec(:first, :last)
+    check(Core._svec_ref(sv, 0) === :first, "SimpleVector first element")
+    check(Core._svec_ref(sv, 1) === :last, "SimpleVector last element")
+    throws(() -> Core._svec_ref(sv, 2), BoundsError, "SimpleVector upper bound")
+    throws(() -> Core._svec_ref(sv, negone), BoundsError, "SimpleVector negative index")
+    throws(() -> Core._svec_ref(Core.svec(), 0), BoundsError, "empty SimpleVector")
+
+    mem = Memory{Int}(undef, (256,))
+    first = Core.memoryref(mem)
+    last = Core.memoryref(mem, UInt8(255))
+    check(offset(first) === 0, "default memory reference offset")
+    check(offset(last) === 255, "UInt8 addresses the 256th element")
+    writemem(first, 41)
+    writemem(last, 99)
+    check(readmem(shift(first, 0)) === 41, "zero reference displacement")
+    check(readmem(shift(last, I.neg_int(255))) === 41, "negative reference displacement")
+    check(offset(shift(shift(first, 100), 155)) === 255, "composed reference displacements")
+    check(readmem(last) === 99, "last memory element")
+    throws(() -> shift(mem, 256), BoundsError, "memory upper bound")
+    throws(() -> shift(mem, negone), BoundsError, "memory negative index")
+    throws(() -> shift(mem, intmax), BoundsError, "memory maximum index")
+    throws(() -> shift(last, intmax), BoundsError, "reference large positive displacement")
+    throws(() -> shift(first, intmin), BoundsError, "reference large negative displacement")
+    throws(() -> shift(last, 1), BoundsError, "reference upper bound")
+    throws(() -> shift(first, negone), BoundsError, "reference negative bound")
+    empty = Memory{Int}(undef, 0)
+    emptyref = Core.memoryref(empty)
+    check(offset(emptyref) === 0, "empty reference origin")
+    throws(() -> readmem(emptyref), BoundsError, "empty reference cannot be read")
+    throws(() -> shift(empty, 0), BoundsError, "empty memory has no element zero")
+
+    boxed = Memory{Any}(undef, 2)
+    br = shift(boxed, 0)
+    Core.memoryrefset!(br, :boxed, :not_atomic, true)
+    check(Core.memoryrefget(br, :not_atomic, true) === :boxed, "boxed memory origin")
+    check(offset(shift(br, 1)) === 1, "boxed memory displacement")
+    unionmem = Memory{Union{Int,Nothing}}(undef, 2)
+    ur = shift(unionmem, 1)
+    Core.memoryrefset!(ur, 123, :not_atomic, true)
+    check(Core.memoryrefget(ur, :not_atomic, true) === 123, "union memory last element")
+    check(offset(shift(ur, negone)) === 0, "union memory displacement")
+    ghost = Memory{Nothing}(undef, 2)
+    gr = shift(ghost, 1)
+    check(Core.memoryrefget(gr, :not_atomic, true) === nothing, "zero-size memory element")
+    check(offset(gr) === 1, "zero-size memory offset")
+    throws(() -> shift(gr, 1), BoundsError, "zero-size memory upper bound")
+    atomic = Core.AtomicMemory{Int}(undef, 2)
+    ar = shift(atomic, 0)
+    Core.memoryrefset!(ar, 18, :sequentially_consistent, true)
+    check(Core.memoryrefget(ar, :sequentially_consistent, true) === 18, "atomic memory origin")
+
+    function pointerchecks(mem::Memory{Int})
+        p = I.bitcast(Ptr{Int}, mem.ptr)
+        check(loadptr(p, 0) === 41, "pointer first element")
+        check(loadptr(p, 255) === 99, "pointer last element")
+        storeptr(p, 101, 255)
+        check(loadptr(p, 255) === 101, "pointer store at last element")
+        Core.donotdelete(mem)
+    end
+    pointerchecks(mem)
+    a = Array{Int,3}(undef, (2,3,4))
+    check(Core.arraysize(a, 0) === 2, "dimension zero")
+    check(Core.arraysize(a, 1) === 3, "dimension one")
+    check(Core.arraysize(a, 2) === 4, "dimension two")
+    check(Core.arraysize(a, 3) === 1, "implicit trailing dimension")
+    throws(() -> Core.arraysize(a, negone), BoundsError, "negative dimension")
+    check(a.ref.mem.length === 24, "array allocation dimension product")
+    Core.arrayset(false, a, 10, 0, 0, 0)
+    Core.arrayset(false, a, 20, 1, 0, 0)
+    Core.arrayset(false, a, 30, 0, 1, 0)
+    Core.arrayset(false, a, 40, 0, 0, 1)
+    Core.arrayset(false, a, 90, 1, 2, 3)
+    check(Core.arrayref(false, a, 0) === 10, "linear origin")
+    check(Core.arrayref(false, a, 1) === 20, "dimension zero has stride one")
+    check(Core.arrayref(false, a, 2) === 30, "dimension one stride")
+    check(Core.arrayref(false, a, 6) === 40, "dimension two stride")
+    check(Core.const_arrayref(false, a, 23) === 90, "last linear element")
+    check(Core.arrayref(false, a, 1, 2, 3, 0) === 90, "trailing singleton index")
+    check(Core.arrayref(true, a, 1, 2, 3) === 90, "unchecked valid Cartesian access")
+    throws(() -> Core.arrayref(false, a, 24), BoundsError, "linear upper bound")
+    throws(() -> Core.arrayref(false, a, negone), BoundsError, "linear negative bound")
+    throws(() -> Core.arrayref(false, a, 2, 0, 0), BoundsError, "Cartesian upper bound")
+    throws(() -> Core.arrayref(false, a, 0, 0), BoundsError, "missing nonsingleton dimension")
+    throws(() -> Core.arrayref(false, a, 0, 0, 0, 1), BoundsError, "trailing dimension upper bound")
+    throws(() -> Core.arrayref(false, a), BoundsError, "no indices on nonsingleton array")
+    scalar = Array{Int,0}(undef, ())
+    Core.arrayset(false, scalar, 71)
+    check(Core.arrayref(false, scalar) === 71, "zero-dimensional array access")
+    check(Core.arrayref(false, scalar, 0) === 71, "zero-dimensional linear access")
+    singleton = Array{Int,3}(undef, (2,1,1))
+    Core.arrayset(false, singleton, 81, 1, 0)
+    check(Core.arrayref(false, singleton, 1) === 81, "omitted singleton dimension")
+    throws(() -> Core.arrayref(false, Array{Int,1}(undef, 0), 0), BoundsError, "empty array access")
+    check(Core._apply(tuple, (1,2), (3,)) === (1,2,3), "Core-only deprecated apply")
+    check(Array{Int,4}(undef, (2,3,4,5)).ref.mem.length === 120, "variadic dimensions")
+    check(Array{Int,0}(undef, ()).ref.mem.length === 1, "zero-dimensional array")
+    check(Array{Int,2}(undef, (0,3)).ref.mem.length === 0, "empty array")
+    throws(() -> Array{Int,2}(undef, (negone,3)), ArgumentError, "negative allocation dimension")
+    throws(() -> Array{Int,2}(undef, (intmax,2)), ArgumentError, "dimension multiplication overflow")
+    bytes = Array{UInt8,1}(undef, 1)
+    Core.memoryrefset!(bytes.ref, 0x78, :not_atomic, true)
+    check(Symbol(bytes) === :x, "symbol from byte array")
+    function lower(ex)
+        file = "core-bootstrap"
+        p = ccall(:jl_string_ptr, Ptr{UInt8}, (Any,), file)
+        ccall(:jl_fl_lower, Any, (Any, Any, Ptr{UInt8}, Int32, UInt, Int32),
+              ex, JooliaCoreTests, p, Int32(1), Core.typemax_UInt, Int32(0))
+    end
+    function hascall(x, name::Symbol, position::Int, value::Int)
+        if x isa Core.CodeInfo
+            return hascall(x.code, name, position, value)
+        elseif x isa Expr
+            if x.head === :call && I.slt_int(position, Core.arraysize(x.args, 0))
+                callee = Core.arrayref(false, x.args, 0)
+                if callee isa GlobalRef && callee.mod === Core && callee.name === name
+                    Core.arrayref(false, x.args, position) === value && return true
+                end
+            end
+            return hascall(x.args, name, position, value)
+        elseif x isa Core.SimpleVector
+            i = 0
+            while I.slt_int(i, Core._svec_len(x))
+                hascall(Core._svec_ref(x, i), name, position, value) && return true
+                i = I.add_int(i, 1)
+            end
+        elseif x isa Array
+            i = 0
+            while I.slt_int(i, Core.arraysize(x, 0))
+                hascall(Core.arrayref(false, x, i), name, position, value) && return true
+                i = I.add_int(i, 1)
+            end
+        end
+        false
+    end
+    lowered = lower(:(A[begin,end]))
+    check(hascall(lowered, :firstindex, 2, 0), "begin lowering uses dimension zero")
+    check(hascall(lowered, :lastindex, 2, 1), "end lowering uses dimension one")
+    check(hascall(lower(:(A[(1,2)...,end])), :+, 1, 0), "splatted end dimension counts from zero")
+    check(hascall(lower(:(A[(1,2)...,begin])), :+, 1, 0), "splatted begin dimension counts from zero")
+    lowered = lower(:((a,b) = f()))
+    check(hascall(lowered, :indexed_iterate, 2, 0), "destructuring starts at zero")
+    check(hascall(lowered, :indexed_iterate, 2, 1), "destructuring advances to one")
+    check(hascall(lowered, :getfield, 2, 0), "destructuring reads value field zero")
+    check(hascall(lowered, :getfield, 2, 1), "destructuring reads state field one")
+    function fieldoffset(T, i::Int)
+        ccall(:jl_get_field_offset, UInt, (Any, Int32), T, Int32(i))
+    end
+    check(fieldoffset(Fields, 0) === UInt(0), "native first field offset")
+    check(fieldoffset(Fields, 1) === UInt(Core.sizeof(Int)), "native second field offset")
+    throws(() -> fieldoffset(Fields, 2), BoundsError, "native field offset upper bound")
+    throws(() -> fieldoffset(Fields, negone), BoundsError, "native field offset negative bound")
+    function parse(text::String, index::Int)
+        p = ccall(:jl_string_ptr, Ptr{UInt8}, (Any,), text)
+        ccall(:jl_fl_parse, Any, (Ptr{UInt8}, UInt, Any, UInt, UInt, Any),
+              p, UInt(Core.sizeof(text)), "core-bootstrap", UInt(1), UInt(index), :atom)
+    end
+    parsed = parse("123", 0)
+    check(Core._svec_ref(parsed, 0) === 123, "native parser starts at byte zero")
+    check(Core._svec_ref(parsed, 1) === 3, "native parser returns after-end offset")
+    err = throws(() -> parse("123", 4), BoundsError, "native parser bounds")
+    check(err.i === 4 || err.i === (4,), "native parser preserves zero-based bounds index")
+    check(isdefined(Core.Main, :Base) === false, "tests did not load Base")
+    Core.println("joolia Core-only checks passed: ", count.contents)
+    end))
+    ccall(:jl_exit, Core.Cvoid, (Core.Int32,), Core.Int32(0))
+end
+
 using Random, InteractiveUtils
 
 const Bottom = Union{}

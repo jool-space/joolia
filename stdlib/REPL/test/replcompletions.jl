@@ -204,6 +204,37 @@ test_complete_context_pos(s, m=@__MODULE__; shift::Bool=true) =
 test_complete_foo(s; shift::Bool=true) = test_complete_context(s, Main.CompletionFoo; shift)
 test_complete_noshift(s) = map_completion_text(@inferred(completions(s, lastindex(s), Main, false)))
 
+@testset "zero-origin completion cursor boundaries" begin
+    @test REPL.completion_cursor("", 0) == -1
+    @test REPL.completion_cursor("abc", 0) == -1
+    @test REPL.completion_cursor("abc", 3) == 2
+    @test REPL.completion_cursor("αx", 2) == 0
+    @test REPL.completion_cursor("αx", 3) == 2
+
+    c, r, ok = completions("Comp", 3)
+    @test ok && r == 0:3
+    @test "Complex" in completion_text.(c)
+    @test bslash_completions("\\alpha", 5)[1][1] == 0:5
+    @test bslash_completions("", -1)[1][1] == 0:-1
+
+    term = REPL.Terminals.TTYTerminal("dumb", stdin, stdout, stderr)
+    provider = REPL.REPLCompletionProvider()
+    prompt = REPL.Prompt("julia> "; complete=provider)
+    state = REPL.LineEdit.init_state(term, prompt)
+    write(state.input_buffer, "Comp")
+    seekend(state.input_buffer)
+    _, reg, ok = REPL.complete_line(provider, state, Main)
+    @test ok && reg == (0=>4)
+    take!(state.input_buffer)
+    seekstart(state.input_buffer)
+    _, reg, ok = REPL.complete_line(provider, state, Main)
+    @test ok && reg == (0=>0)
+    write(state.input_buffer, "α")
+    seekend(state.input_buffer)
+    _, reg, ok = REPL.complete_line(provider, state, Main)
+    @test ok && reg == (0=>2)
+end
+
 test_bslashcomplete(s) =  map_named_completion(@inferred(bslash_completions(s, lastindex(s)))[2])
 
 test_methods_list(@nospecialize(f), tt) = map(x -> string(x.method), Base._methods_by_ftype(Base.signature_type(f, tt), 10, Base.get_world_counter()))
@@ -1628,6 +1659,22 @@ end
 let s = "CompletionFoo.tuple."
     c, r, res = test_complete(s)
     @test isempty(c)
+end
+
+@testset "zero-origin backslash completion positions" begin
+    completed, range, ok = bslash_completions("\\alpha", lastindex("\\alpha"))
+    @test ok
+    @test range == 0:lastindex("\\alpha")
+    @test any(c -> c.completion == "α", completed)
+
+    completed, range, ok = bslash_completions("\\_n", lastindex("\\_n"))
+    @test ok
+    @test range == 0:lastindex("\\_n")
+    @test any(c -> c.completion == "ₙ", completed)
+
+    completed, range, ok = bslash_completions("x", lastindex("x"))
+    @test !ok
+    @test range == 0:-1
 end
 
 @testset "sub/superscripts" begin

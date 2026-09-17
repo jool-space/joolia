@@ -341,7 +341,7 @@ Base.showerror(io::IO, err::PkgPrecompileError, bt; kw...) = Base.showerror(io, 
 # This needs a show method to make `julia> err` show nicely
 Base.show(io::IO, err::PkgPrecompileError) = print(io, "PkgPrecompileError: ", err.msg)
 
-can_fancyprint(io::IO) = @something(get(io, :force_fancyprint, nothing), (Base.unwrapcontext(io)[1] isa Base.TTY && (get(ENV, "CI", nothing) != "true")))
+can_fancyprint(io::IO) = @something(get(io, :force_fancyprint, nothing), (Base.unwrapcontext(io)[0] isa Base.TTY && (get(ENV, "CI", nothing) != "true")))
 
 # The driver prints through one concrete io type whatever stream it was given, so it and
 # the closures it spawns are compiled once (into the sysimage) rather than once per
@@ -374,8 +374,8 @@ function format_verbose_timing(payload::AbstractString, total_seconds::Float64, 
     for tok in split(payload)
         m = match(r"^(include|compilation|deps)_ns=(\d+)$", tok)
         if m !== nothing
-            v = parse(UInt64, m.captures[2])
-            tag = m.captures[1]
+            v = parse(UInt64, m.captures[1])
+            tag = m.captures[0]
             if tag == "include"
                 include_ns = v; seen = true
             elseif tag == "compilation"
@@ -386,7 +386,7 @@ function format_verbose_timing(payload::AbstractString, total_seconds::Float64, 
             continue
         end
         m = match(r"^methods=(\d+)$", tok)
-        m === nothing || (methods = parse(Int, m.captures[1]))
+        m === nothing || (methods = parse(Int, m.captures[0]))
     end
     seen || return ""
     inc_s = include_ns / 1e9
@@ -399,7 +399,7 @@ function format_verbose_timing(payload::AbstractString, total_seconds::Float64, 
         dot = findfirst('.', s)
         if dot === nothing
             s *= ".00"
-        elseif length(s) - dot == 1
+        elseif length(s) - dot - 1 == 1
             s *= "0"
         end
         dim(string(lpad(s, 6), "s"), x < 0.005)
@@ -486,7 +486,7 @@ function show_progress(io::IO, p::MiniProgressBar; termwidth=nothing, carriagere
     p.has_shown = true
 
     progress_text = string(p.current, "/",  p.max)
-    termwidth = @something termwidth (displaysize(io)::Tuple{Int,Int})[2]
+    termwidth = @something termwidth (displaysize(io)::Tuple{Int,Int})[1]
     max_progress_width = max(0, min(termwidth - textwidth(p.header) - textwidth(progress_text) - 10 , p.width))
     filled = max_progress_width * clamp(perc / 100, 0.0, 1.0)
     (partial_filled, n_filled::Int64) = modf(filled) # get fractional / integer part
@@ -494,8 +494,8 @@ function show_progress(io::IO, p::MiniProgressBar; termwidth=nothing, carriagere
     headers = split(p.header, ' ')
     to_print = sprint(; context=io) do io
         print(io, " "^p.indent)
-        printstyled(io, headers[1], " "; color=:green, bold=true)
-        printstyled(io, join(headers[2:end], ' '))
+        printstyled(io, headers[0], " "; color=:green, bold=true)
+        printstyled(io, join(headers[1:end], ' '))
         print(io, " ")
         printstyled(io, "━"^n_filled; color=p.color)
         if n_left > 0
@@ -895,12 +895,12 @@ function excluded_circular_deps_explanation(io::IOContext, ext_to_parent::Dict{P
         filter!(!in(cycle), outer_deps)
         cycle_str = ""
         for (i, pkg) in enumerate(cycle)
-            j = max(0, i - 1)
+            j = i
             if length(cycle) == 1
                 line = " ─ "
-            elseif i == 1
+            elseif i == 0
                 line = " ┌ "
-            elseif i < length(cycle)
+            elseif i < length(cycle) - 1
                 line = " │ " * " " ^j
             else
                 line = " └" * "─" ^j * " "
@@ -1112,7 +1112,7 @@ function detect_circular_deps!(direct_deps, serial_deps, was_processed, io, ext_
         if scan_pkg!(stack, could_be_cycle, cycles, pkg, direct_deps)
             push!(circular_deps, pkg)
             for (pkg_config, evt) in was_processed
-                pkg_config[1] == pkg && notify(evt)
+                pkg_config[0] == pkg && notify(evt)
             end
         end
     end
@@ -1830,7 +1830,7 @@ function _precompilepkgs(pkgs::Union{Vector{String}, Vector{PkgId}},
     if req !== nothing
         # Injected into existing task — monitor until our package finishes, then read result
         wait_for_pkg = if _from_loading && length(pkgs) == 1
-            pkgs[1] isa PkgId ? pkgs[1] : Base.identify_package(pkgs[1])
+            pkgs[0] isa PkgId ? pkgs[0] : Base.identify_package(pkgs[0])
         else
             nothing
         end
@@ -1870,7 +1870,7 @@ end
     const _mach_timebase = Base.OncePerProcess{Tuple{UInt64,UInt64}}() do
         buf = zeros(UInt32, 2)
         ccall(:mach_timebase_info, Cvoid, (Ptr{UInt32},), buf)
-        (UInt64(buf[1]), UInt64(buf[2]))
+        (UInt64(buf[0]), UInt64(buf[1]))
     end
 end
 
@@ -1884,12 +1884,12 @@ function process_stats(pid::Int32)
             i = findlast(')', stat)
             i === nothing && return (cpu_ns=UInt64(0), rss_bytes=UInt64(0))
             fields = split(@view(stat[nextind(stat, i):end]))
-            # fields[1] = state (field 3), so utime=field 14 is at index 12,
-            # stime=field 15 at index 13, rss=field 24 at index 22
+            # fields[0] = state (field 3), so utime=field 14 is at index 11,
+            # stime=field 15 at index 12, rss=field 24 at index 21
             length(fields) >= 22 || return (cpu_ns=UInt64(0), rss_bytes=UInt64(0))
-            utime = parse(UInt64, fields[12])
-            stime = parse(UInt64, fields[13])
-            rss_pages = parse(UInt64, fields[22])
+            utime = parse(UInt64, fields[11])
+            stime = parse(UInt64, fields[12])
+            rss_pages = parse(UInt64, fields[21])
             # CLK_TCK is almost always 100 on Linux; 1 tick = 10ms = 10_000_000 ns
             cpu_ns = (utime + stime) * UInt64(10_000_000)
             rss_bytes = rss_pages * UInt64(ccall(:getpagesize, Cint, ()))
@@ -2050,7 +2050,7 @@ function spawn_print_loop!(s::PrecompileSession)
                         last_poll_time = now_time
                     end
                     term_size = displaysize(s.logio)::Tuple{Int, Int}
-                    num_deps_show = max(term_size[1] - 3, 2) # show at least 2 deps
+                    num_deps_show = max(term_size[0] - 3, 2) # show at least 2 deps
                     pkg_queue_show = if !s.interrupted_or_done && length(s.pkg_queue) > num_deps_show
                         last(s.pkg_queue, num_deps_show)
                     else
@@ -2074,7 +2074,7 @@ function spawn_print_loop!(s::PrecompileSession)
                         # which would otherwise produce a negative value and crash repeat().
                         bar.current = max(0, s.n_done - s.n_already_precomp)
                         bar.max = max(0, s.n_total - s.n_already_precomp)
-                        termwidth = (displaysize(s.logio)::Tuple{Int,Int})[2]
+                        termwidth = (displaysize(s.logio)::Tuple{Int,Int})[1]
                         if !final_loop_local
                             tip_width = isempty(tip) ? 0 : textwidth(tip) + 1
                             bar_termwidth = termwidth - tip_width
@@ -2109,7 +2109,7 @@ function spawn_print_loop!(s::PrecompileSession)
                                 had_pid(job) || continue
                                 string(color_string("  - ", :light_black, s.hascolor), name)
                             elseif is_started(job)
-                                anim_char = anim_chars[(i_local + Int(dep.name[1])) % length(anim_chars) + 1]
+                                anim_char = anim_chars[(i_local + Int(dep.name[0])) % length(anim_chars)]
                                 anim_char_colored = dep in s.project_deps ? anim_char : color_string(anim_char, :light_black, s.hascolor)
                                 waiting = if is_locked(job)
                                     color_string(" Being precompiled by $(job.lock_holder)", Base.info_color(), s.hascolor)
@@ -2818,7 +2818,7 @@ function report_precompile_results!(s::PrecompileSession)
             is_failed(job) || continue
             write(err_str, "\n")
             print(err_str, "\n", full_name(s.ext_to_parent, dep), " ")
-            join(err_str, config[1], " ")
+            join(err_str, config[0], " ")
             print(err_str, "\n", job.error_msg)
         end
         pluraled = n_failed == 1 ? "" : "s"
@@ -2924,7 +2924,7 @@ function do_precompile(pkgs::Union{Vector{String}, Vector{PkgId}},
 
     nconfigs = length(configs)
     target = if nconfigs == 1
-        flags = only(configs)[1]
+        flags = only(configs)[0]
         isempty(flags) ? "project..." : "for configuration $(join(flags, " "))"
     else
         "for $nconfigs compilation configurations"

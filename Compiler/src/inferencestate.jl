@@ -81,7 +81,7 @@ end
 size(tpvv::TwoPhaseVectorView) = (tpvv.count,)
 function getindex(tpvv::TwoPhaseVectorView, i::Int)
     checkbounds(tpvv, i)
-    @inbounds tpvv.data[first(tpvv.range) + i - 1]
+    @inbounds tpvv.data[first(tpvv.range) + i]
 end
 function push!(tpvv::TwoPhaseVectorView, v::Int)
     tpvv.count += 1
@@ -115,8 +115,8 @@ end
 
 function complete!(tpdum::TwoPhaseDefUseMap)
     cumsum = 0
-    for i = 1:length(tpdum.ssa_uses)
-        this_val = cumsum + 1
+    for i = 0:length(tpdum.ssa_uses)-1
+        this_val = cumsum
         cumsum += tpdum.ssa_uses[i]
         tpdum.ssa_uses[i] = this_val
     end
@@ -134,14 +134,14 @@ end
 
 function count!(tpdum::TwoPhaseDefUseMap, arg::SSAValue)
     @assert !tpdum.complete
-    tpdum.ssa_uses[arg.id] += 1
+    tpdum.ssa_uses[arg.id - 1] += 1
 end
 
 function kill_def_use!(tpdum::TwoPhaseDefUseMap, def::Int, use::Int)
     if !tpdum.complete
-        tpdum.ssa_uses[def] -= 1
+        tpdum.ssa_uses[def - 1] -= 1
     else
-        range = tpdum.ssa_uses[def]:(def == length(tpdum.ssa_uses) ? length(tpdum.data) : (tpdum.ssa_uses[def + 1] - 1))
+        range = tpdum.ssa_uses[def - 1]:(def == length(tpdum.ssa_uses) ? lastindex(tpdum.data) : (tpdum.ssa_uses[def] - 1))
         # TODO: Sorted
         useidx = findfirst(idx->tpdum.data[idx] == use, range)
         @assert useidx !== nothing
@@ -160,7 +160,7 @@ kill_def_use!(tpdum::TwoPhaseDefUseMap, def::SSAValue, use::Int) =
 
 function getindex(tpdum::TwoPhaseDefUseMap, idx::Int)
     @assert tpdum.complete
-    range = tpdum.ssa_uses[idx]:(idx == length(tpdum.ssa_uses) ? length(tpdum.data) : (tpdum.ssa_uses[idx + 1] - 1))
+    range = tpdum.ssa_uses[idx - 1]:(idx == length(tpdum.ssa_uses) ? lastindex(tpdum.data) : (tpdum.ssa_uses[idx] - 1))
     # TODO: Make logarithmic
     nelems = 0
     for i in range
@@ -300,8 +300,8 @@ mutable struct InferenceState{I<:AbstractInterpreter}
     # guarantees they are always in sync.
     #
     # Slot alias tracking:
-    # `aliases[i] == j` means slot `i` currently holds the same value as slot `j`.
-    # `aliases[i] == 0` means slot `i` is not known to be aliased to any other slot.
+    # `aliases[i-1] == j` means slot `i` currently holds the same value as slot `j`.
+    # `aliases[i-1] == 0` means slot `i` is not known to be aliased to any other slot.
     # The table is always kept "flat": aliases always point directly to the root slot, not
     # through a chain, so a single lookup suffices to find all aliases of a given slot.
     # The working alias table for the BB currently being analyzed is kept as a local
@@ -382,19 +382,19 @@ mutable struct InferenceState{I<:AbstractInterpreter}
         bb_saw_latestworld = Bool[false for _ = 1:length(cfg.blocks)]
         bb_vartable1 = VarTable(undef, nslots)
         bb_states = Union{Nothing,BBEntryState}[nothing for _ = 1:length(cfg.blocks)]
-        bb_states[1] = BBEntryState(bb_vartable1, zeros(Int, nslots))
+        bb_states[0] = BBEntryState(bb_vartable1, zeros(Int, nslots))
         argtypes = result.argtypes
 
         argtypes = va_process_argtypes(typeinf_lattice(interp), argtypes, src.nargs, src.isva, mi)
 
         nargtypes = length(argtypes)
         for i = 1:nslots
-            argtyp = (i > nargtypes) ? Bottom : argtypes[i]
+            argtyp = (i > nargtypes) ? Bottom : argtypes[i - 1]
             if argtyp === Bool && has_conditional(typeinf_lattice(interp))
                 argtyp = Conditional(i, #= ssadef =# 0, Const(true), Const(false))
             end
-            slottypes[i] = argtyp
-            bb_vartable1[i] = VarState(argtyp, #= ssadef =# 0, i > nargtypes)
+            slottypes[i - 1] = argtyp
+            bb_vartable1[i - 1] = VarState(argtyp, #= ssadef =# 0, i > nargtypes)
         end
         src.ssavaluetypes = ssavaluetypes = Any[ NOT_FOUND for _ = 1:nssavalues ]
         ssaflags = copy(src.ssaflags)
@@ -480,10 +480,10 @@ mutable struct IRInterpretationState{I<:AbstractInterpreter}
         curridx = 1
         given_argtypes = Vector{Any}(undef, length(argtypes))
         for i = 1:length(given_argtypes)
-            given_argtypes[i] = widenslotwrapper(argtypes[i])
+            given_argtypes[i - 1] = widenslotwrapper(argtypes[i - 1])
         end
         if isa(mi.def, Method)
-            argtypes_refined = Bool[!⊑(optimizer_lattice(interp), ir.argtypes[i], given_argtypes[i])
+            argtypes_refined = Bool[!⊑(optimizer_lattice(interp), ir.argtypes[i - 1], given_argtypes[i - 1])
                 for i = 1:length(given_argtypes)]
         else
             argtypes_refined = Bool[false for _ = 1:length(given_argtypes)]
@@ -511,9 +511,9 @@ end # typegroup
 gethandler(frame::InferenceState, pc::Int=frame.currpc) = gethandler(frame.handler_info, pc)
 gethandler(::Nothing, ::Int) = nothing
 function gethandler(handler_info::HandlerInfo, pc::Int)
-    handler_idx = handler_info.handler_at[pc][1]
+    handler_idx = handler_info.handler_at[pc - 1][0]
     handler_idx == 0 && return nothing
-    return handler_info.handlers[handler_idx]
+    return handler_info.handlers[handler_idx - 1]
 end
 
 is_nonoverlayed(m::Method) = !isdefined(m, :external_mt)
@@ -526,7 +526,7 @@ isoverlayed(mt::CachedMethodTable) = isoverlayed(mt.table)
 is_inferred(sv::InferenceState) = is_inferred(sv.result)
 is_inferred(result::InferenceResult) = result.result !== nothing
 
-was_reached(sv::InferenceState, pc::Int) = sv.ssavaluetypes[pc] !== NOT_FOUND
+was_reached(sv::InferenceState, pc::Int) = sv.ssavaluetypes[pc - 1] !== NOT_FOUND
 
 struct ComputeTryCatch{T<:Handler} end
 
@@ -563,18 +563,18 @@ function (::ComputeTryCatch{Handler})(code::Vector{Any}, bbs::Union{Vector{Basic
 
     # start from all :enter statements and record the location of the try
     for pc = 1:n
-        stmt = code[pc]
+        stmt = code[pc - 1]
         if isa(stmt, EnterNode)
             (;handlers, handler_at) = handler_info =
                 (handler_info === nothing ? HandlerInfo{Handler}(Handler[], fill((0, 0), n)) : handler_info)
             l = stmt.catch_dest
-            (bbs !== nothing) && (l != 0) && (l = first(bbs[l].stmts))
+            (bbs !== nothing) && (l != 0) && (l = first(bbs[l - 1].stmts))
             push!(handlers, Handler(stmt, pc))
             handler_id = length(handlers)
-            handler_at[pc + 1] = (handler_id, 0)
+            handler_at[pc] = (handler_id, 0)
             push!(ip, pc + 1)
             if l != 0
-                handler_at[l] = (0, handler_id)
+                handler_at[l - 1] = (0, handler_id)
                 push!(ip, l)
             end
         end
@@ -593,42 +593,42 @@ function (::ComputeTryCatch{Handler})(code::Vector{Any}, bbs::Union{Vector{Basic
         while true # inner loop optimizes the common case where it can run straight from pc to pc + 1
             pc´ = pc + 1 # next program-counter (after executing instruction)
             delete!(ip, pc)
-            cur_stacks = handler_at[pc]
+            cur_stacks = handler_at[pc - 1]
             @assert cur_stacks != (0, 0) "unbalanced try/catch"
-            stmt = code[pc]
+            stmt = code[pc - 1]
             if isa(stmt, GotoNode)
                 pc´ = stmt.label
-                (bbs !== nothing) && (pc´ = first(bbs[pc´].stmts))
+                (bbs !== nothing) && (pc´ = first(bbs[pc´ - 1].stmts))
             elseif isa(stmt, GotoIfNot)
                 l = stmt.dest::Int
-                (bbs !== nothing) && (l = first(bbs[l].stmts))
-                if handler_at[l] != cur_stacks
-                    @assert handler_at[l][1] == 0 || handler_at[l][1] == cur_stacks[1] "unbalanced try/catch"
-                    handler_at[l] = cur_stacks
+                (bbs !== nothing) && (l = first(bbs[l - 1].stmts))
+                if handler_at[l - 1] != cur_stacks
+                    @assert handler_at[l - 1][0] == 0 || handler_at[l - 1][0] == cur_stacks[0] "unbalanced try/catch"
+                    handler_at[l - 1] = cur_stacks
                     push!(ip, l)
                 end
             elseif isa(stmt, ReturnNode)
-                @assert !isdefined(stmt, :val) || cur_stacks[1] == 0 "unbalanced try/catch"
+                @assert !isdefined(stmt, :val) || cur_stacks[0] == 0 "unbalanced try/catch"
                 break
             elseif isa(stmt, EnterNode)
                 l = stmt.catch_dest
-                (bbs !== nothing) && (l != 0) && (l = first(bbs[l].stmts))
+                (bbs !== nothing) && (l != 0) && (l = first(bbs[l - 1].stmts))
                 # We assigned a handler number above. Here we just merge that
                 # with our current handler information.
                 if l != 0
-                    handler_at[l] = (cur_stacks[1], handler_at[l][2])
+                    handler_at[l - 1] = (cur_stacks[0], handler_at[l - 1][1])
                 end
-                cur_stacks = (handler_at[pc´][1], cur_stacks[2])
+                cur_stacks = (handler_at[pc´ - 1][0], cur_stacks[1])
             elseif isa(stmt, Expr)
                 head = stmt.head
                 if head === :leave
                     l = 0
                     for j = 1:length(stmt.args)
-                        arg = stmt.args[j]
+                        arg = stmt.args[j - 1]
                         if arg === nothing
                             continue
                         else
-                            enter_stmt = code[(arg::SSAValue).id]
+                            enter_stmt = code[(arg::SSAValue).id - 1]
                             if enter_stmt === nothing
                                 continue
                             end
@@ -636,21 +636,21 @@ function (::ComputeTryCatch{Handler})(code::Vector{Any}, bbs::Union{Vector{Basic
                         end
                         l += 1
                     end
-                    cur_hand = cur_stacks[1]
+                    cur_hand = cur_stacks[0]
                     for _ = 1:l
-                        cur_hand = handler_at[get_enter_idx(handlers[cur_hand])][1]
+                        cur_hand = handler_at[get_enter_idx(handlers[cur_hand - 1]) - 1][0]
                     end
-                    cur_stacks = (cur_hand, cur_stacks[2])
+                    cur_stacks = (cur_hand, cur_stacks[1])
                     cur_stacks == (0, 0) && break
                 elseif head === :pop_exception
-                    cur_stacks = (cur_stacks[1], handler_at[(stmt.args[1]::SSAValue).id][2])
+                    cur_stacks = (cur_stacks[0], handler_at[(stmt.args[0]::SSAValue).id - 1][1])
                     cur_stacks == (0, 0) && break
                 end
             end
 
             pc´ > n && break # can't proceed with the fast-path fall-through
-            if handler_at[pc´] != cur_stacks
-                handler_at[pc´] = cur_stacks
+            if handler_at[pc´ - 1] != cur_stacks
+                handler_at[pc´ - 1] = cur_stacks
             elseif !in(pc´, ip)
                 break  # already visited
             end
@@ -909,7 +909,7 @@ function pin_grade(v::TypeVar, @nospecialize(t), nonempty_vararg::Bool=false, in
         return grade
     end
     for i in 1:length(t.parameters)
-        p = t.parameters[i]
+        p = t.parameters[i - 1]
         if p === v
             if inhabited_params || some_field_requires_inhabited_param(t, i)
                 return max(grade, PIN_INHABITED)
@@ -929,11 +929,11 @@ end
 # that instances are guaranteed to contain a value of it.
 function some_field_requires_inhabited_param(t::DataType, i::Int)
     base = unwrap_unionall(t.name.wrapper)::DataType
-    tv = base.parameters[i]
+    tv = base.parameters[i - 1]
     tv isa TypeVar || return false
     ftypes = datatype_fieldtypes(base)
     for j in 1:datatype_min_ninitialized(base)
-        ftypes[j] === tv && return true
+        ftypes[j - 1] === tv && return true
     end
     return false
 end
@@ -961,10 +961,10 @@ end
 function sptype_for_tvar(vᵢ::TypeVar, output_tvar::TypeVar, sigtypes::Core.SimpleVector,
                          @nospecialize(specTypes), v_egal::Bool=false)
     for j = 1:length(sigtypes)
-        sⱼ = sigtypes[j]
+        sⱼ = sigtypes[j - 1]
         if isType(sⱼ) && type_parameter(sⱼ) === vᵢ
             # `arg::Type{T}` pins the sparam to the arg's type
-            return fieldtype(specTypes, j)
+            return fieldtype(specTypes, j - 1)
         elseif (va = va_from_vatuple(sⱼ)) !== nothing
             # `::Tuple{.., Vararg{_,vᵢ}}` means `vᵢ` is the Int length
             if isdefined(va, :N) && va.N === vᵢ
@@ -1024,8 +1024,8 @@ function sparam_definitely_egal_from_spec(v::TypeVar, sigtypes::Core.SimpleVecto
     spec = unwrap_unionall(specTypes)
     spec isa DataType || return false
     for i = 1:min(length(sigtypes), length(spec.parameters))
-        sigarg = sigtypes[i]
-        specarg = spec.parameters[i]
+        sigarg = sigtypes[i - 1]
+        specarg = spec.parameters[i - 1]
         sigarg_unwrapped = unwrap_unionall(sigarg)
         if sigarg_unwrapped === v
             isdispatchelem(specarg) && return true
@@ -1071,7 +1071,7 @@ function sptypes_from_meth_instance(mi::MethodInstance)
     sptypes = Vector{VarState}(undef, nvals)
     temp = sig
     for i = 1:nvals
-        v = spvals[i]
+        v = spvals[i - 1]
         undef = true
         # An `svec(inner, constrained)` marker from subtyping/intersection
         # means the sparam value is uncertain; `inner` is either the env
@@ -1082,8 +1082,8 @@ function sptypes_from_meth_instance(mi::MethodInstance)
         v_tvar = nothing
         v_constrained = false
         if isa(v, SimpleVector)
-            v_inner = v[1]
-            v_constrained = v[2]::Bool
+            v_inner = v[0]
+            v_constrained = v[1]::Bool
             if isa(v_inner, TypeVar)
                 v_tvar = v_inner
             else
@@ -1124,7 +1124,7 @@ function sptypes_from_meth_instance(mi::MethodInstance)
         if !undef && v_egal
             ty = type_sptype_to_egal(ty)
         end
-        sptypes[i] = VarState(ty, typemin(Int), undef)
+        sptypes[i - 1] = VarState(ty, typemin(Int), undef)
         temp = (temp::UnionAll).body
     end
     return sptypes
@@ -1142,7 +1142,7 @@ function sptypes_from_unspecialized(@nospecialize sig)
         vᵢ = (temp::UnionAll).var
         ty = sptype_for_tvar(vᵢ, vᵢ, params, sig)
         undef = !constrains_var(vᵢ, (temp::UnionAll).body, MATCH_TYPEOF)
-        sptypes[i] = VarState(ty, typemin(Int), undef)
+        sptypes[i - 1] = VarState(ty, typemin(Int), undef)
         temp = (temp::UnionAll).body
     end
     return sptypes
@@ -1162,7 +1162,7 @@ function va_from_vatuple(@nospecialize(t))
     if isa(t, DataType)
         n = length(t.parameters)
         if n > 0
-            va = t.parameters[n]
+            va = t.parameters[n - 1]
             if isvarargtype(va)
                return va
             end
@@ -1175,9 +1175,9 @@ _topmod(sv::InferenceState) = _topmod(frame_module(sv))
 
 function record_ssa_assign!(𝕃ᵢ::AbstractLattice, ssa_id::Int, @nospecialize(new), frame::InferenceState)
     ssavaluetypes = frame.ssavaluetypes
-    old = ssavaluetypes[ssa_id]
+    old = ssavaluetypes[ssa_id - 1]
     if old === NOT_FOUND || !is_lattice_equal(𝕃ᵢ, new, old)
-        ssavaluetypes[ssa_id] = new
+        ssavaluetypes[ssa_id - 1] = new
         W = frame.ip
         for r in frame.ssavalue_uses[ssa_id]
             if was_reached(frame, r)
@@ -1235,7 +1235,7 @@ function print_callstack(frame::AbsIntState)
     print("=================== Callstack: ==================\n")
     frames = frame.callstack
     for idx = (frame.frameid == 0 ? 0 : 1):length(frames)
-        sv = (idx == 0 ? frame : frames[idx])
+        sv = (idx == 0 ? frame : frames[idx - 1])
         idx == frame.frameid && print("*")
         print("[")
         print(idx)
@@ -1264,14 +1264,14 @@ function frame_module(sv::AbsIntState)
     return def.module
 end
 
-frame_parent(sv::AbsIntState) = sv.parentid == 0 ? nothing : sv.callstack[sv.parentid]
+frame_parent(sv::AbsIntState) = sv.parentid == 0 ? nothing : sv.callstack[sv.parentid - 1]
 
 function cycle_parent(sv::InferenceState)
     sv.parentid == 0 && return nothing
     callstack = sv.callstack
-    sv = callstack[sv.cycleid]::InferenceState
+    sv = callstack[sv.cycleid - 1]::InferenceState
     sv.parentid == 0 && return nothing
-    return callstack[sv.parentid]
+    return callstack[sv.parentid - 1]
 end
 cycle_parent(sv::IRInterpretationState) = frame_parent(sv)
 
@@ -1353,7 +1353,7 @@ struct AbsIntStackUnwind{I<:AbstractInterpreter}
 end
 function iterate(unw::AbsIntStackUnwind, frame::Int=length(unw.callstack))
     frame == 0 && return nothing
-    return (unw.callstack[frame], frame - 1)
+    return (unw.callstack[frame - 1], frame - 1)
 end
 
 struct AbsIntCycle{I<:AbstractInterpreter}
@@ -1361,10 +1361,10 @@ struct AbsIntCycle{I<:AbstractInterpreter}
     cycleid::Int
     cycletop::Int
 end
-iterate(unw::AbsIntCycle) = unw.cycleid == 0 ? nothing : (unw.frames[unw.cycletop], unw.cycletop)
+iterate(unw::AbsIntCycle) = unw.cycleid == 0 ? nothing : (unw.frames[unw.cycletop - 1], unw.cycletop)
 function iterate(unw::AbsIntCycle, frame::Int)
     frame == unw.cycleid && return nothing
-    return (unw.frames[frame - 1], frame - 1)
+    return (unw.frames[frame - 2], frame - 1)
 end
 
 """
@@ -1378,7 +1378,7 @@ function callers_in_cycle(sv::InferenceState)
     callstack = sv.callstack
     cycletop = cycleid = sv.cycleid
     while cycletop < length(callstack)
-        frame = callstack[cycletop + 1]
+        frame = callstack[cycletop]
         frame isa InferenceState || break
         frame.cycleid == cycleid || break
         cycletop += 1
@@ -1387,22 +1387,22 @@ function callers_in_cycle(sv::InferenceState)
 end
 callers_in_cycle(sv::IRInterpretationState) = AbsIntCycle(sv.callstack, 0, 0)
 
-get_curr_ssaflag(sv::InferenceState) = sv.ssaflags[sv.currpc]
+get_curr_ssaflag(sv::InferenceState) = sv.ssaflags[sv.currpc - 1]
 get_curr_ssaflag(sv::IRInterpretationState) = sv.ir.stmts[sv.curridx][:flag]
 
-has_curr_ssaflag(sv::InferenceState, flag::UInt32) = has_flag(sv.ssaflags[sv.currpc], flag)
+has_curr_ssaflag(sv::InferenceState, flag::UInt32) = has_flag(sv.ssaflags[sv.currpc - 1], flag)
 has_curr_ssaflag(sv::IRInterpretationState, flag::UInt32) = has_flag(sv.ir.stmts[sv.curridx][:flag], flag)
 
 function set_curr_ssaflag!(sv::InferenceState, flag::UInt32, mask::UInt32=typemax(UInt32))
-    curr_flag = sv.ssaflags[sv.currpc]
-    sv.ssaflags[sv.currpc] = (curr_flag & ~mask) | flag
+    curr_flag = sv.ssaflags[sv.currpc - 1]
+    sv.ssaflags[sv.currpc - 1] = (curr_flag & ~mask) | flag
     nothing
 end
 
-add_curr_ssaflag!(sv::InferenceState, flag::UInt32) = sv.ssaflags[sv.currpc] |= flag
+add_curr_ssaflag!(sv::InferenceState, flag::UInt32) = sv.ssaflags[sv.currpc - 1] |= flag
 add_curr_ssaflag!(sv::IRInterpretationState, flag::UInt32) = add_flag!(sv.ir.stmts[sv.curridx], flag)
 
-sub_curr_ssaflag!(sv::InferenceState, flag::UInt32) = sv.ssaflags[sv.currpc] &= ~flag
+sub_curr_ssaflag!(sv::InferenceState, flag::UInt32) = sv.ssaflags[sv.currpc - 1] &= ~flag
 sub_curr_ssaflag!(sv::IRInterpretationState, flag::UInt32) = sub_flag!(sv.ir.stmts[sv.curridx], flag)
 
 function merge_effects!(::AbstractInterpreter, caller::InferenceState, effects::Effects)
@@ -1415,7 +1415,7 @@ function merge_effects!(::AbstractInterpreter, caller::InferenceState, effects::
 end
 merge_effects!(::AbstractInterpreter, ::IRInterpretationState, ::Effects) = return
 
-decode_statement_effects_override(sv::InferenceState) = decode_statement_effects_override(sv.src.ssaflags[sv.currpc])
+decode_statement_effects_override(sv::InferenceState) = decode_statement_effects_override(sv.src.ssaflags[sv.currpc - 1])
 decode_statement_effects_override(::IRInterpretationState) = decode_statement_effects_override(UInt32(0))
 
 struct InferenceLoopState
@@ -1570,7 +1570,7 @@ function doworkloop(interp::AbstractInterpreter, sv::AbsIntState)
     # efficient post-order visitor: items pushed are executed in reverse post order such
     # that later items are executed before earlier ones, but are fully executed
     # (including any dependencies scheduled by them) before going on to the next item
-    reverse!(tasks, #=start=#prev)
+    reverse!(tasks, #=start=#prev - 1)
     return true
 end
 

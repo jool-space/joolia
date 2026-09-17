@@ -381,7 +381,12 @@ end
     end
 end
 
+# Separators must preserve digits adjacent to a sign or the first digit.
 @testset "Underscores in big_str" begin
+    @test big"12_345" == BigInt(12345)
+    @test big"-12_345" == BigInt(-12345)
+    @test big"+12_345" == BigInt(12345)
+    @test big"-170_141183460469231731687303715884105728123" == parse(BigInt, "-170141183460469231731687303715884105728123")
     @test big"1_0_0_0" == BigInt(1000)
     @test_throws ArgumentError big"1_0_0_0_"
     @test_throws ArgumentError big"_1_0_0_0"
@@ -471,4 +476,18 @@ end
     @test Base.BitIntegerType === Union{
         Type{ Int8}, Type{ Int16}, Type{ Int32}, Type{ Int64}, Type{ Int128},
         Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128}}
+end
+
+# Rounded division selects quotient zero and remainder one from divrem.
+@testset "zero-origin rounded divrem selection" begin
+    for (x, y, q, r) in ((500001, 1000000, 1, -499999), (1, 1000000, 0, 1),
+                          (-500001, 1000000, -1, 499999), (7, 2, 4, -1))
+        @test div(x, y, RoundNearest) == q
+        @test rem(x, y, RoundNearest) == r
+        @test divrem(x, y, RoundNearest) == (q, r)
+    end
+    @test div(5, 2, RoundNearestTiesAway) == 3
+    @test rem(5, 2, RoundNearestTiesAway) == -1
+    @test div(-5, 2, RoundNearestTiesUp) == -2
+    @test rem(-5, 2, RoundNearestTiesUp) == -1
 end

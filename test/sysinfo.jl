@@ -70,8 +70,8 @@ end
     Base.Sys.CPUinfo("Apple M1 Pro", 2400, 0x00000000026784da, 0x0000000000000000, 0x0000000000fda30e, 0x0000000046a731ea, 0x0000000000000000)
     Base.Sys.CPUinfo("Apple M1 Pro", 2400, 0x00000000017726c0, 0x0000000000000000, 0x00000000009491de, 0x0000000048134f1e, 0x0000000000000000)]
 
-    @test repr(example_cpus[1]) == "Base.Sys.CPUinfo(\"Apple M1 Pro\", 2400, 0x000000000d913b08, 0x0000000000000000, 0x0000000005f4243c, 0x00000000352a550a, 0x0000000000000000)"
-    @test repr("text/plain", example_cpus[1]) == "Apple M1 Pro: \n        speed         user         nice          sys         idle          irq\n     2400 MHz     227622 s          0 s      99886 s     891967 s          0 s  "
+    @test repr(example_cpus[0]) == "Base.Sys.CPUinfo(\"Apple M1 Pro\", 2400, 0x000000000d913b08, 0x0000000000000000, 0x0000000005f4243c, 0x00000000352a550a, 0x0000000000000000)"
+    @test repr("text/plain", example_cpus[0]) == "Apple M1 Pro: \n        speed         user         nice          sys         idle          irq\n     2400 MHz     227622 s          0 s      99886 s     891967 s          0 s  "
     @test sprint(Sys.cpu_summary, example_cpus) == "Apple M1 Pro: \n       speed         user         nice          sys         idle          irq\n#1  2400 MHz     227622 s          0 s      99886 s     891967 s          0 s  \n#2  2400 MHz     227558 s          0 s      97810 s     896220 s          0 s  \n#3  2400 MHz      40339 s          0 s      16622 s    1185362 s          0 s  \n#4  2400 MHz      24586 s          0 s       9737 s    1209225 s          0 s  \n"
 end
 
@@ -95,4 +95,16 @@ end
     ]
     output = sprint(Sys.cpu_summary, cpus)
     @test occursin("#2  2000 MHz", output)
+end
+
+# Native CPU buffers and summaries include both endpoints of zero-origin collections.
+@testset "zero-origin CPU information" begin
+    cpus = Sys.cpu_info()
+    @test !isempty(cpus)
+    @test cpus[0].model isa String
+    @test cpus[end].model isa String
+    @test all(cpu -> cpu.speed isa Int32, cpus)
+    @test sprint(Sys.cpu_summary, Sys.CPUinfo[]) == ""
+    cpu = Sys.CPUinfo("single", 1234, 0, 0, 0, 0, 0)
+    @test occursin("1234 MHz", sprint(Sys.cpu_summary, [cpu]))
 end

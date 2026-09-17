@@ -720,3 +720,39 @@ end
     @test_broken @inferred(maximum(exp, A; dims = 1))[1] === missing
     @test_broken @inferred(extrema(exp, A; dims = 1))[1] === (missing, missing)
 end
+
+
+@testset "zero-origin reduction dimensions" begin
+    A = reshape([3, 1, 4, 2, 5, 0], 2, 3)
+    @test axes(sum(A, dims=0)) == (Base.ZeroTo(1), Base.ZeroTo(3))
+    @test sum(A, dims=0) == reshape([4, 6, 5], 1, 3)
+    @test sum(A, dims=1) == reshape([12, 3], 2, 1)
+    @test sum(A, dims=(0, 1)) == reshape([15], 1, 1)
+
+    B = Bool[true false true; false true false]
+    @test all(B, dims=0) == Bool[false false false]
+    @test any(B, dims=0) == Bool[true true true]
+    @test all(B, dims=1) == Bool[false, false]
+    @test any(B, dims=1) == reshape(Bool[true, true], 2, 1)
+
+    E = Array{Int}(undef, 0, 2)
+    @test size(sum(E, dims=0)) == (1, 2)
+    @test size(sum(E, dims=1)) == (0, 1)
+    @test size(sum(E, dims=2)) == (0, 2)
+    @test_throws ArgumentError minimum(E, dims=0)
+    @test minimum(E, dims=1) == zeros(Int, 0, 1)
+
+    mn, mi = findmin(A, dims=0)
+    mx, xi = findmax(A, dims=0)
+    @test mn == reshape([1, 2, 0], 1, 3)
+    @test mx == reshape([3, 4, 5], 1, 3)
+    @test mi == reshape([CartesianIndex(1, 0), CartesianIndex(1, 1), CartesianIndex(1, 2)], 1, 3)
+    @test xi == reshape([CartesianIndex(0, 0), CartesianIndex(0, 1), CartesianIndex(0, 2)], 1, 3)
+
+    mn, mi = findmin(A, dims=1)
+    mx, xi = findmax(A, dims=1)
+    @test mn == reshape([3, 0], 2, 1)
+    @test mx == reshape([5, 2], 2, 1)
+    @test mi == reshape([CartesianIndex(0, 0), CartesianIndex(1, 2)], 2, 1)
+    @test xi == reshape([CartesianIndex(0, 2), CartesianIndex(1, 1)], 2, 1)
+end

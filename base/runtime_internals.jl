@@ -236,8 +236,8 @@ const _NAMEDTUPLE_NAME = NamedTuple.body.body.name
 
 function _fieldnames(@nospecialize t)
     if t.name === _NAMEDTUPLE_NAME
-        if t.parameters[1] isa Tuple
-            return t.parameters[1]
+        if t.parameters[0] isa Tuple
+            return t.parameters[0]
         else
             throw(ArgumentError("type does not have definite field names"))
         end
@@ -365,14 +365,14 @@ The return type is `Symbol`, except when `x <: Tuple`, in which case the index o
 
 # Examples
 ```jldoctest
-julia> fieldname(Rational, 1)
+julia> fieldname(Rational, 0)
 :num
 
-julia> fieldname(Rational, 2)
+julia> fieldname(Rational, 1)
 :den
 
-julia> fieldname(Tuple{String,Int}, 2)
-2
+julia> fieldname(Tuple{String,Int}, 1)
+1
 ```
 """
 function fieldname(t::DataType, i::Integer)
@@ -381,19 +381,19 @@ function fieldname(t::DataType, i::Integer)
         field_label = n_fields == 1 ? "field" : "fields"
         throw(ArgumentError("Cannot access field $i since type $t only has $n_fields $field_label."))
     end
-    throw_need_pos_int(i) = throw(ArgumentError("Field numbers must be positive integers. $i is invalid."))
+    throw_need_pos_int(i) = throw(ArgumentError("Field numbers must be nonnegative integers. $i is invalid."))
 
     isabstracttype(t) && throw_not_def_field()
     names = _fieldnames(t)
     n_fields = length(names)::Int
-    i > n_fields && throw_field_access(t, i, n_fields)
-    i < 1 && throw_need_pos_int(i)
+    i >= n_fields && throw_field_access(t, i, n_fields)
+    i < 0 && throw_need_pos_int(i)
     return @inbounds names[i]::Symbol
 end
 
 fieldname(t::UnionAll, i::Integer) = fieldname(unwrap_unionall(t), i)
 fieldname(t::Type{<:Tuple}, i::Integer) =
-    i < 1 || i > fieldcount(t) ? throw(BoundsError(t, i)) : Int(i)
+    i < 0 || i >= fieldcount(t) ? throw(BoundsError(t, i)) : Int(i)
 
 """
     fieldnames(x::DataType)
@@ -414,7 +414,7 @@ julia> fieldnames(typeof(1+im))
 (:re, :im)
 
 julia> fieldnames(Tuple{String,Int})
-(1, 2)
+(0, 1)
 ```
 """
 fieldnames(t::DataType) = (fieldcount(t); # error check to make sure type is specific enough
@@ -447,7 +447,7 @@ julia> hasfield(Foo, :x)
 false
 ```
 """
-hasfield(T::Type, name::Symbol) = fieldindex(T, name, false) > 0
+hasfield(T::Type, name::Symbol) = fieldindex(T, name, false) >= 0
 
 """
     nameof(t::DataType)::Symbol
@@ -530,11 +530,10 @@ function isconst(@nospecialize(t::Type), s::Int)
     # TODO: what to do for `Union`?
     isa(t, DataType) || return false # uncertain
     ismutabletype(t) || return true # immutable structs are always const
-    1 <= s <= length(t.name.names) || return true # OOB reads are "const" since they always throw
+    0 <= s < length(t.name.names) || return true # OOB reads are "const" since they always throw
     constfields = t.name.constfields
     constfields === C_NULL && return false
-    s -= 1
-    return unsafe_load(Ptr{UInt32}(constfields), 1 + s÷32) & (1 << (s%32)) != 0
+    return unsafe_load(Ptr{UInt32}(constfields), s÷32) & (1 << (s%32)) != 0
 end
 
 """
@@ -554,11 +553,10 @@ function isfieldatomic(@nospecialize(t::Type), s::Int)
     # TODO: what to do for `Union`?
     isa(t, DataType) || return false # uncertain
     ismutabletype(t) || return false # immutable structs are never atomic
-    1 <= s <= length(t.name.names) || return false # OOB reads are not atomic (they always throw)
+    0 <= s < length(t.name.names) || return false # OOB reads are not atomic (they always throw)
     atomicfields = t.name.atomicfields
     atomicfields === C_NULL && return false
-    s -= 1
-    return unsafe_load(Ptr{UInt32}(atomicfields), 1 + s÷32) & (1 << (s%32)) != 0
+    return unsafe_load(Ptr{UInt32}(atomicfields), s÷32) & (1 << (s%32)) != 0
 end
 
 """
@@ -783,7 +781,7 @@ function getindex(dtfd::DataTypeFieldDesc, i::Int)
     layout = unsafe_load(layout_ptr)
     fielddesc_type = (layout.flags >> 1) & 3
     nfields = layout.nfields
-    @boundscheck ((1 <= i <= nfields) || throw(BoundsError(dtfd, i)))
+    @boundscheck ((0 <= i < nfields) || throw(BoundsError(dtfd, i)))
     if fielddesc_type == 0  # JL_FIELDDESC_8
         return FieldDesc(unsafe_load(Ptr{FieldDescStorage{UInt8}}(fd_ptr), i))
     elseif fielddesc_type == 1  # JL_FIELDDESC_16
@@ -1220,7 +1218,7 @@ julia> struct Foo
            y::String
        end
 
-julia> fieldoffset(Foo, 2)
+julia> fieldoffset(Foo, 1)
 0x0000000000000008
 
 julia> fieldoffset(Foo, :x)
@@ -1230,7 +1228,7 @@ julia> fieldoffset(Foo, :x)
 We can use it to summarize information about a struct:
 
 ```jldoctest
-julia> structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 1:fieldcount(T)];
+julia> structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 0:fieldcount(T)-1];
 
 julia> structinfo(Base.Filesystem.StatStruct)
 14-element Vector{Tuple{UInt64, Symbol, Core.AnyType}}:
@@ -1271,7 +1269,7 @@ julia> struct Foo
 julia> fieldtype(Foo, :x)
 Int64
 
-julia> fieldtype(Foo, 2)
+julia> fieldtype(Foo, 1)
 String
 ```
 """
@@ -1281,7 +1279,7 @@ fieldtype
     fieldindex(T, name::Symbol, err:Bool=true)
 
 Get the index of a named field, throwing an error if the field does not exist (when err==true)
-or returning 0 (when err==false).
+or returning -1 (when err==false).
 
 # Examples
 ```jldoctest
@@ -1291,7 +1289,7 @@ julia> struct Foo
        end
 
 julia> fieldindex(Foo, :y)
-2
+1
 
 julia> fieldindex(Foo, :z)
 ERROR: FieldError: type Foo has no field `z`, available fields: `x`, `y`
@@ -1299,7 +1297,7 @@ Stacktrace:
 [...]
 
 julia> fieldindex(Foo, :z, false)
-0
+-1
 ```
 
 !!! compat "Julia 1.13"
@@ -1312,13 +1310,13 @@ end
 function _fieldindex_maythrow(T::DataType, name::Symbol)
     @_foldable_meta
     @noinline
-    return Int(ccall(:jl_field_index, Cint, (Any, Any, Cint), T, name, true)+1)
+    return Int(ccall(:jl_field_index, Cint, (Any, Any, Cint), T, name, true))
 end
 
 function _fieldindex_nothrow(T::DataType, name::Symbol)
     @_total_meta
     @noinline
-    return Int(ccall(:jl_field_index, Cint, (Any, Any, Cint), T, name, false)+1)
+    return Int(ccall(:jl_field_index, Cint, (Any, Any, Cint), T, name, false))
 end
 
 function fieldindex(t::UnionAll, name::Symbol, err::Bool=true)
@@ -1333,9 +1331,9 @@ function _fieldindex(@nospecialize(t), name::Symbol, err::Bool)
     idx = _fieldindex_noerror(t, name)
     if idx === nothing
         err && throw(ArgumentError("type does not have definite fields"))
-        return 0
+        return -1
     end
-    if idx == 0 && err
+    if idx == -1 && err
         t = _fieldindex_error_type(t)
         t === nothing && throw(ArgumentError("type does not have definite fields"))
         return fieldindex(t, name, true)
@@ -1357,7 +1355,7 @@ end
 
 function datatype_fieldcount(t::DataType)
     if t.name === _NAMEDTUPLE_NAME
-        names, types = t.parameters[1], t.parameters[2]
+        names, types = t.parameters[0], t.parameters[1]
         if names isa Tuple
             return length(names)
         end
@@ -1588,7 +1586,7 @@ function rewrap_free_typevars(@nospecialize(t), pre=Core.svec())
     # UnionAll cannot directly wrap a Vararg; the caller must wrap it in Tuple first
     isvarargtype(t) && return t
     fv = find_free_typevars(t)
-    for i in length(fv):-1:1
+    for i in (length(fv)-1):-1:0
         v = fv[i]::TypeVar
         wrap = true
         for p in pre
@@ -1696,7 +1694,7 @@ end
 
 function matches_to_methods(ms::Array{Any,1}, tn::Core.TypeName, mod)
     # Lack of specialization => a comprehension triggers too many invalidations via _collect, so collect the methods manually
-    ms = Method[(ms[i]::Core.MethodMatch).method for i in 1:length(ms)]
+    ms = Method[(ms[i]::Core.MethodMatch).method for i in 0:(length(ms)-1)]
     # Remove methods not part of module
     mod === nothing || filter!(ms) do m
         return parentmodule(m) ∈ mod
@@ -1869,7 +1867,7 @@ function may_invoke_generator(method::Method, @nospecialize(atype), sparams::Sim
 
     firstarg = 1
     for i = 1:nsparams
-        if isa(sparams[i], SimpleVector)
+        if isa(sparams[i-1], SimpleVector)
             if (ast_slotflag(code, firstarg + i) & SLOT_USED) != 0
                 return false
             end
@@ -1878,7 +1876,7 @@ function may_invoke_generator(method::Method, @nospecialize(atype), sparams::Sim
     nargs = Int(method.nargs)
     non_va_args = method.isva ? nargs - 1 : nargs
     for i = 1:non_va_args
-        if !isdispatchelem(at.parameters[i])
+        if !isdispatchelem(at.parameters[i-1])
             if (ast_slotflag(code, firstarg + i + nsparams) & SLOT_USED) != 0
                 return false
             end
@@ -1889,7 +1887,7 @@ function may_invoke_generator(method::Method, @nospecialize(atype), sparams::Sim
         # contribute to the va tuple are dispatch elements
         if (ast_slotflag(code, firstarg + nargs + nsparams) & SLOT_USED) != 0
             for i = (non_va_args+1):length(at.parameters)
-                if !isdispatchelem(at.parameters[i])
+                if !isdispatchelem(at.parameters[i-1])
                     return false
                 end
             end
@@ -1984,13 +1982,13 @@ function visit(f, mt::Core.MethodTable)
 end
 function visit(f, mc::Core.TypeMapLevel)
     function avisit(f, e::Memory{Any})
-        # slot 1 holds the smallintset index; key/value pairs follow, so values
-        # live on the odd slots starting at 3 (see mtcache layout in src/typemap.c)
-        for i in 3:2:length(e)
+        # slot 0 holds the smallintset index; key/value pairs follow, so values
+        # live on the even slots starting at 2 (see mtcache layout in src/typemap.c)
+        for i in 2:2:(length(e)-1)
             isassigned(e, i) || continue
             ei = e[i]
             if ei isa Memory{Any}
-                for j in 3:2:length(ei)
+                for j in 2:2:(length(ei)-1)
                     isassigned(ei, j) || continue
                     visit(f, ei[j])
                 end
@@ -2044,7 +2042,8 @@ function iterate(specs::MethodSpecializations, i::Int)
     i >= n && return nothing
     item = nothing
     while i < n && item === nothing
-        item = s[i+=1]
+        item = s[i]
+        i += 1
     end
     item === nothing && return nothing
     return (item, i)

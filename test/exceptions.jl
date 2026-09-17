@@ -402,3 +402,32 @@ end
 catch
     current_exceptions()
 end) == 2
+
+# Exception stack order and optional backtraces use zero-origin positions.
+@testset "zero-origin current exceptions" begin
+    for with_bt in (false, true)
+        @test isempty(current_exceptions(; backtrace=with_bt))
+        outer = ErrorException("outer")
+        inner = ErrorException("inner")
+        try
+            throw(outer)
+        catch
+            stack = current_exceptions(; backtrace=with_bt)
+            @test length(stack) == 1
+            @test stack[0].exception === outer
+            try
+                throw(inner)
+            catch
+                stack = current_exceptions(; backtrace=with_bt)
+                @test length(stack) == 2
+                @test stack[0].exception === outer
+                @test stack[1].exception === inner
+                for entry in stack
+                    @test with_bt ? entry.backtrace isa Vector : entry.backtrace === nothing
+                end
+            end
+            @test current_exceptions(; backtrace=with_bt)[0].exception === outer
+        end
+        @test isempty(current_exceptions(; backtrace=with_bt))
+    end
+end

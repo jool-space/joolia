@@ -309,7 +309,7 @@ end
         sleep(3)
     end
     wait(t_loop)
-    @test lock_times[1] >= 3
+    @test lock_times[0] >= 3
     @test minimum(lock_times) < 1
 end
 

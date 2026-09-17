@@ -106,7 +106,7 @@ for (root, dirs, files) in walkdir(valid_test_folder)
             end
             rel in toml_1_1_files || continue
             push!(tested_valid, rel)
-            v = check_valid(splitext(file)[1])
+            v = check_valid(first(splitext(file)))
             @test v broken=rel in failures_valid context = rel
         end
     end

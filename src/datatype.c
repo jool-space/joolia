@@ -903,7 +903,7 @@ static void jl_process_field_attrs(jl_svec_t *fattrs, jl_svec_t *fnames, int mut
             JL_TYPECHK(typeassert, long, fldi);
             JL_TYPECHK(typeassert, symbol, attr);
             size_t fldn = jl_unbox_long(fldi);
-            if (fldn < 1 || fldn > nfields)
+            if (fldn >= nfields)
                 jl_errorf("invalid field attribute %lld", (long long)fldn);
             if ((jl_sym_t*)attr == jl_atomic_sym || (jl_sym_t*)attr == jl_const_sym) {
                 if (!mutabl)
@@ -916,7 +916,7 @@ static void jl_process_field_attrs(jl_svec_t *fattrs, jl_svec_t *fnames, int mut
     }
 
     for (size_t i = 0; i + 1 < jl_svec_len(fattrs); i += 2) {
-        size_t fldn = jl_unbox_long(jl_svecref(fattrs, i)) - 1;
+        size_t fldn = jl_unbox_long(jl_svecref(fattrs, i));
         jl_sym_t *attr = (jl_sym_t*)jl_svecref(fattrs, i + 1);
 
         if (attr == jl_atomic_sym) {
@@ -1867,7 +1867,7 @@ JL_DLLEXPORT jl_value_t *jl_get_nth_field(jl_value_t *v, size_t i)
 {
     jl_datatype_t *st = (jl_datatype_t*)jl_typeof(v);
     if (i >= jl_datatype_nfields(st))
-        jl_bounds_error_int(v, i + 1);
+        jl_bounds_error_int(v, i);
     size_t offs = jl_field_offset(st, i);
     if (jl_field_isptr(st, i)) {
         return jl_atomic_load_relaxed((_Atomic(jl_value_t*)*)((char*)v + offs));
@@ -2377,7 +2377,7 @@ JL_DLLEXPORT int jl_field_isdefined(jl_value_t *v, size_t i) JL_NOTSAFEPOINT
 JL_DLLEXPORT int jl_field_isdefined_checked(jl_value_t *v, size_t i)
 {
     if (jl_is_module(v)) {
-        jl_type_error("isdefined", (jl_value_t*)jl_symbol_type, jl_box_long(i + 1));
+        jl_type_error("isdefined", (jl_value_t*)jl_symbol_type, jl_box_long(i));
     }
     if (i >= jl_nfields(v))
         return 0;
@@ -2386,9 +2386,9 @@ JL_DLLEXPORT int jl_field_isdefined_checked(jl_value_t *v, size_t i)
 
 JL_DLLEXPORT size_t jl_get_field_offset(jl_datatype_t *ty, int field) JL_CANSAFEPOINT
 {
-    if (!jl_struct_try_layout(ty) || field > jl_datatype_nfields(ty) || field < 1)
+    if (!jl_struct_try_layout(ty) || field < 0 || (size_t)field >= jl_datatype_nfields(ty))
         jl_bounds_error_int((jl_value_t*)ty, field);
-    return jl_field_offset(ty, field - 1);
+    return jl_field_offset(ty, field);
 }
 
 static jl_value_t *get_nth_pointer(jl_value_t *v, size_t i)

@@ -128,19 +128,19 @@ end
 function Format(f::AbstractString)
     bytes = codeunits(f)
     len = length(bytes)
-    pos = 1
+    pos = 0
     numarguments = 0
 
     b = 0x00
     local last_percent_pos
 
     # skip ahead to first format specifier
-    while pos <= len
+    while pos < len
         b = bytes[pos]
         pos += 1
         if b == UInt8('%')
             last_percent_pos = pos-1
-            pos > len && throw(InvalidFormatStringError("Format specifier is incomplete", f, last_percent_pos, last_percent_pos))
+            pos >= len && throw(InvalidFormatStringError("Format specifier is incomplete", f, last_percent_pos, last_percent_pos))
             if bytes[pos] == UInt8('%')
                 # escaped '%'
                 b = bytes[pos]
@@ -150,9 +150,9 @@ function Format(f::AbstractString)
             end
         end
     end
-    strs = [1:pos - 1 - (b == UInt8('%'))]
+    strs = [0:pos - 1 - (b == UInt8('%'))]
     fmts = []
-    while pos <= len
+    while pos < len
         b = bytes[pos]
         pos += 1
         # positioned at start of first format str %
@@ -172,7 +172,7 @@ function Format(f::AbstractString)
             else
                 break
             end
-            pos > len && throw(InvalidFormatStringError("Format specifier is incomplete", f, last_percent_pos, pos-1))
+            pos >= len && throw(InvalidFormatStringError("Format specifier is incomplete", f, last_percent_pos, pos-1))
             b = bytes[pos]
             pos += 1
         end
@@ -192,7 +192,7 @@ function Format(f::AbstractString)
                 width = 10 * width + (b - UInt8('0'))
                 b = bytes[pos]
                 pos += 1
-                pos > len && break
+                pos >= len && break
             end
         end
         # parse precision
@@ -200,11 +200,11 @@ function Format(f::AbstractString)
         parsedprecdigits = false
         dynamic_precision = false
         if b == UInt8('.')
-            pos > len && throw(InvalidFormatStringError("Precision specifier is missing precision", f, last_percent_pos, pos-1))
+            pos >= len && throw(InvalidFormatStringError("Precision specifier is missing precision", f, last_percent_pos, pos-1))
             parsedprecdigits = true
             b = bytes[pos]
             pos += 1
-            if pos <= len
+            if pos < len
                 if b == UInt8('*')
                     dynamic_precision = true
                     numarguments += 1
@@ -216,7 +216,7 @@ function Format(f::AbstractString)
                         precision = 10precision + (b - UInt8('0'))
                         b = bytes[pos]
                         pos += 1
-                        pos > len && break
+                        pos >= len && break
                     end
                 end
             end
@@ -224,16 +224,16 @@ function Format(f::AbstractString)
         # parse length modifier (ignored)
         if b == UInt8('h') || b == UInt8('l')
             prev = b
-            pos > len && throw(InvalidFormatStringError("Length modifier is missing type specifier", f, last_percent_pos, pos-1))
+            pos >= len && throw(InvalidFormatStringError("Length modifier is missing type specifier", f, last_percent_pos, pos-1))
             b = bytes[pos]
             pos += 1
             if b == prev
-                pos > len && throw(InvalidFormatStringError("Length modifier is missing type specifier", f, last_percent_pos, pos-1))
+                pos >= len && throw(InvalidFormatStringError("Length modifier is missing type specifier", f, last_percent_pos, pos-1))
                 b = bytes[pos]
                 pos += 1
             end
         elseif b in b"Ljqtz" # q was a synonym for ll above, see `man 3 printf`. Not to be used.
-            pos > len && throw(InvalidFormatStringError("Length modifier is missing type specifier", f, last_percent_pos, pos-1))
+            pos >= len && throw(InvalidFormatStringError("Length modifier is missing type specifier", f, last_percent_pos, pos-1))
             b = bytes[pos]
             pos += 1
         end
@@ -254,12 +254,12 @@ function Format(f::AbstractString)
         numarguments += 1
         push!(fmts, Spec{type}(leftalign, plus, space, zero, hash, width, precision, dynamic_width, dynamic_precision))
         start = pos
-        while pos <= len
+        while pos < len
             b = bytes[pos]
             pos += 1
             if b == UInt8('%')
                 last_percent_pos = pos-1
-                pos > len && throw(InvalidFormatStringError("Format specifier is incomplete", f, last_percent_pos, last_percent_pos))
+                pos >= len && throw(InvalidFormatStringError("Format specifier is incomplete", f, last_percent_pos, last_percent_pos))
                 if bytes[pos] == UInt8('%')
                     # escaped '%'
                     b = bytes[pos]
@@ -439,7 +439,7 @@ function fmt(buf, pos, arg, spec::Spec{T}) where {T <: Ints}
     end
     while i > 0
         @inbounds buf[pos + i - 1] = bs == 16 ?
-            (T == Val{'x'} ? hex[(x & 0x0f) + 1] : HEX[(x & 0x0f) + 1]) :
+            (T == Val{'x'} ? hex[x & 0x0f] : HEX[x & 0x0f]) :
             (48 + (bs == 8 ? (x & 0x07) : rem(x, 10)))
         if bs == 8
             x >>= 3
@@ -612,7 +612,7 @@ function fmt(buf, pos, arg, spec::Spec{T}) where {T <: Floats}
                 end
                 frac = u > 9 || hash || prec > 0
                 while i > 1
-                    buf[newpos + i] = T == Val{'a'} ? hex[(u & 0x0f) + 1] : HEX[(u & 0x0f) + 1]
+                    buf[newpos + i] = T == Val{'a'} ? hex[u & 0x0f] : HEX[u & 0x0f]
                     u >>= 4
                     i -= 1
                     prec -= 1
@@ -620,7 +620,7 @@ function fmt(buf, pos, arg, spec::Spec{T}) where {T <: Floats}
                 if frac
                     buf[newpos + 1] = UInt8('.')
                 end
-                buf[newpos] = T == Val{'a'} ? hex[(u & 0x0f) + 1] : HEX[(u & 0x0f) + 1]
+                buf[newpos] = T == Val{'a'} ? hex[u & 0x0f] : HEX[u & 0x0f]
                 newpos += n + frac
                 while prec > 0
                     buf[newpos] = UInt8('0')
@@ -680,7 +680,7 @@ fmt(buf, pos, arg, spec::Spec{Pointer}) = fmt(buf, pos, UInt64(arg), ptrfmt(spec
 
 # position counters
 function fmt(buf, pos, arg::Ref{<:Integer}, ::Spec{PositionCounter})
-    arg[] = pos - 1
+    arg[] = pos
     pos
 end
 
@@ -817,7 +817,7 @@ const UNROLL_UPTO = 16
 @inline function format(buf::Vector{UInt8}, pos::Integer, f::Format, args...)
     # write out first substring
     escapechar = false
-    for i in f.substringranges[1]
+    for i in f.substringranges[0]
         b = f.str[i]
         if !escapechar
             buf[pos] = b
@@ -830,11 +830,11 @@ const UNROLL_UPTO = 16
     # for each format, write out arg and next substring
     # unroll up to 16 formats
     N = length(f.formats)
-    argp = 1
+    argp = 0
     Base.@nexprs 16 i -> begin
-        if N >= i
+        if N > i
             pos, argp = fmt(buf, pos, args, argp, f.formats[i])
-            for j in f.substringranges[i + 1]
+            for j in f.substringranges[i+1]
                 b = f.str[j]
                 if !escapechar
                     buf[pos] = b
@@ -847,9 +847,9 @@ const UNROLL_UPTO = 16
         end
     end
     if N > 16
-        for i = 17:length(f.formats)
+        for i = 16:lastindex(f.formats)
             pos, argp = fmt(buf, pos, args, argp, f.formats[i])
-            for j in f.substringranges[i + 1]
+            for j in f.substringranges[i+1]
                 b = f.str[j]
                 if !escapechar
                     buf[pos] = b
@@ -902,15 +902,15 @@ plength(::Spec{PositionCounter}, x) = 0
     len = sum(length, substringranges)
     N = length(formats)
     # unroll up to 16 formats
-    argp = 1
+    argp = 0
     Base.@nexprs 16 i -> begin
-        if N >= i
+        if N > i
             l, argp = plength(formats[i], args, argp)
             len = Base.checked_add(len, l)
         end
     end
     if N > 16
-        for i = 17:length(formats)
+        for i = 16:lastindex(formats)
             l, argp = plength(formats[i], args, argp)
             len = Base.checked_add(len, l)
         end
@@ -935,16 +935,16 @@ function format end
 function format(io::IO, f::Format, args::Vararg{Any,N}) where N # => Nothing
     f.numarguments == length(args) || argmismatch(f.numarguments, length(args))
     buf = Base.StringVector(computelen(f.substringranges, f.formats, args))
-    pos = format(buf, 1, f, args...)
-    write(io, resize!(buf, pos - 1))
+    pos = format(buf, 0, f, args...)
+    write(io, resize!(buf, pos))
     return
 end
 
 function format(f::Format, args::Vararg{Any,N}) where N # => String
     f.numarguments == length(args) || argmismatch(f.numarguments, length(args))
     buf = Base.StringVector(computelen(f.substringranges, f.formats, args))
-    pos = format(buf, 1, f, args...)
-    return String(resize!(buf, pos - 1))
+    pos = format(buf, 0, f, args...)
+    return String(resize!(buf, pos))
 end
 
 """

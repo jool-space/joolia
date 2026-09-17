@@ -18,7 +18,7 @@ struct CapturedException <: Exception
         # Typically the result of a catch_backtrace()
 
         # Process bt_raw so that it can be safely serialized
-        bt_lines = process_backtrace(stacktrace(bt_raw))[1:min(100, end)] # Limiting this to 100 lines.
+        bt_lines = process_backtrace(stacktrace(bt_raw))[0:min(99, end)] # Limiting this to 100 lines.
         CapturedException(ex, bt_lines)
     end
 
@@ -60,7 +60,7 @@ iterate(c::CompositeException, state...) = iterate(c.exceptions, state...)
 
 function showerror(io::IO, ex::CompositeException)
     if !isempty(ex)
-        showerror(io, ex.exceptions[1])
+        showerror(io, ex.exceptions[0])
         remaining = length(ex) - 1
         if remaining > 0
             print(io, "\n\n...and ", remaining, " more exception", remaining > 1 ? "s" : "", ".\n")
@@ -172,7 +172,7 @@ const task_state_abandoned = UInt8(3)
         end
     elseif field === :backtrace
         # TODO: this field name should be deprecated in 2.0
-        return current_exceptions(t)[end][2]
+        return current_exceptions(t)[end][1]
     elseif field === :exception
         # TODO: this field name should be deprecated in 2.0
         return t._isexception ? t.result : nothing
@@ -353,7 +353,7 @@ function unsafe_abandon!(t::Task, next_task::Task, @nospecialize(result))
     return ok
 end
 
-Threads.threadid(t::Task) = Int(ccall(:jl_get_task_tid, Int16, (Any,), t)+1)
+Threads.threadid(t::Task) = Int(ccall(:jl_get_task_tid, Int16, (Any,), t))
 function Threads.threadpool(t::Task)
     tpid = ccall(:jl_get_task_threadpoolid, Int8, (Any,), t)
     return Threads._tpid_to_sym(tpid)
@@ -442,15 +442,15 @@ function schedule_on_notify!(t::Task, waiter::Task)
     if !istaskdone(t)
         # since this is similar to schedule, we should observe the sticky
         # bit, even if we don't call `schedule` with early-return below
-        if waiter.sticky && Threads.threadid(waiter) == 0 && !GC.in_finalizer()
+        if waiter.sticky && Threads.threadid(waiter) == -1 && !GC.in_finalizer()
             # Issue #41324
-            # t.sticky && tid == 0 is a task that needs to be co-scheduled with
+            # t.sticky && tid == -1 is a task that needs to be co-scheduled with
             # the parent task. If the parent (current_task) is not sticky we must
             # set it to be sticky.
             # XXX: Ideally we would be able to unset this
             current_task().sticky = true
             tid = Threads.threadid()
-            ccall(:jl_set_task_tid, Cint, (Any, Cint), waiter, tid-1)
+            ccall(:jl_set_task_tid, Cint, (Any, Cint), waiter, tid)
         end
         donenotify = t.donenotify::ThreadSynchronizer
         lock(donenotify)
@@ -576,7 +576,7 @@ function wait_enqueue!(x::DoneWait, w::WaitEntry, first::Bool)
         return false
     end
     # a duplicate of an already-registered task shares its slot
-    if _find_slot(w, donenotify) == 0
+    if _find_slot(w, donenotify) < 0
         push!(waitqueue(t), w)
     end
     unlock(donenotify)
@@ -586,7 +586,7 @@ end
 function wait_recheck(x::DoneWait, w::WaitEntry)
     t = x.t
     istaskdone(t) || return false
-    return _find_slot(w, t.donenotify::ThreadSynchronizer) != 0
+    return _find_slot(w, t.donenotify::ThreadSynchronizer) >= 0
 end
 
 function wait_dequeue!(x::DoneWait, w::WaitEntry, why::UInt8)
@@ -759,12 +759,12 @@ function showerror(io::IO, ex::ScheduledAfterSyncException)
         print(io, "(no values)")
         return
     end
-    show(io, ex.values[1])
+    show(io, ex.values[0])
     if length(ex.values) == 1
         print(io, " is")
     elseif length(ex.values) == 2
         print(io, " and one more ")
-        print(io, nameof(typeof(ex.values[2])))
+        print(io, nameof(typeof(ex.values[1])))
         print(io, " are")
     else
         print(io, " and ", length(ex.values) - 1, " more objects are")
@@ -1035,7 +1035,7 @@ function errormonitor(t::Task)
                     flush(errs)
                     # and then the actual error, as best we can
                     Core.print(Core.stderr, "while handling: ")
-                    Core.println(Core.stderr, current_exceptions(t)[end][1])
+                    Core.println(Core.stderr, current_exceptions(t)[end][0])
                 catch e
                     # give up
                     Core.print(Core.stderr, "\nSYSTEM: caught exception of type ", typeof(e).name.name,
@@ -1066,7 +1066,7 @@ function _lift_one_interp_helper(expr::Expr, in_quote_context::Bool, escs::Int, 
         elseif escs == 0
             # if escs is non-zero, then we cannot hoist expr.args without violating hygiene rules
             newarg = gensym()
-            push!(letargs, :($(esc(newarg)) = $(esc(expr.args[1]))))
+            push!(letargs, :($(esc(newarg)) = $(esc(expr.args[0]))))
             return newarg  # Don't recurse into the lifted $() exprs
         end
     elseif expr.head === :meta || expr.head === :inert
@@ -1136,7 +1136,7 @@ function task_done_hook(t::Task)
         end
     end
 
-    if err && !handled && Threads.threadid() == 1
+    if err && !handled && Threads.threadid() == 0
         if isa(result, InterruptException) && isempty(Workqueue)
             backend = repl_backend_task()
             backend isa Task && throwto(backend, result)
@@ -1150,7 +1150,7 @@ function task_done_hook(t::Task)
         # If an InterruptException happens while blocked in the event loop, try handing
         # the exception to the REPL task since the current task is done.
         # issue #19467
-        if Threads.threadid() == 1 && isa(e, InterruptException) && isempty(Workqueue)
+        if Threads.threadid() == 0 && isa(e, InterruptException) && isempty(Workqueue)
             backend = repl_backend_task()
             backend isa Task && throwto(backend, e)
         end
@@ -1220,7 +1220,7 @@ end
 
 const StickyWorkqueue = IntrusiveLinkedListSynchronized{Task}
 const Workqueues = OncePerThread{StickyWorkqueue}(StickyWorkqueue)
-const Workqueue = Workqueues[1] # default work queue is thread 1 // TODO: deprecate this variable
+const Workqueue = Workqueues[0] # default work queue is thread 0 // TODO: deprecate this variable
 
 workqueue_for(tid::Int) = Workqueues[tid]
 
@@ -1240,7 +1240,7 @@ function enq_work(t::Task)
     # Sticky tasks go into their thread's work queue.
     if t.sticky
         tid = Threads.threadid(t)
-        if tid == 0
+        if tid == -1
             # The task is not yet stuck to a thread. Stick it to the current
             # thread and do the same to the parent task (the current task) so
             # that the tasks are correctly co-scheduled (issue #41324).
@@ -1252,7 +1252,7 @@ function enq_work(t::Task)
                 @goto not_sticky
             else
                 tid = Threads.threadid()
-                ccall(:jl_set_task_tid, Cint, (Any, Cint), t, tid-1)
+                ccall(:jl_set_task_tid, Cint, (Any, Cint), t, tid)
                 current_task().sticky = true
             end
         end
@@ -1274,14 +1274,14 @@ function enq_work(t::Task)
         if tp === :foreign || Threads.threadpoolsize(tp) == 1
             # There's only one thread in the task's assigned thread pool;
             # use its work queue.
-            tid = (tp === :interactive) ? 1 : Threads.threadpoolsize(:interactive)+1
-            ccall(:jl_set_task_tid, Cint, (Any, Cint), t, tid-1)
+            tid = (tp === :interactive) ? 0 : Threads.threadpoolsize(:interactive)
+            ccall(:jl_set_task_tid, Cint, (Any, Cint), t, tid)
             push!(workqueue_for(tid), t)
         else
             # Otherwise, put the task in the multiqueue.
             Partr.multiq_insert(t, t.priority)
             tid = Threads.threadid(t)
-            if tid != 0 && tid != Threads.threadid()
+            if tid != -1 && tid != Threads.threadid()
                 # The task's tid is pinned to another thread: typically it is that
                 # thread's current task, parked hosting its thread-sleep logic in
                 # wait(), and only that thread can resume it, so wake it directly
@@ -1290,7 +1290,7 @@ function enq_work(t::Task)
                 # number of running threads still scales with enqueued work — the
                 # task is not sticky, so its tid may be cleared later, making it
                 # runnable by any pool thread.
-                if ccall(:jl_wakeup_thread, Cint, (Int16,), (tid - 1) % Int16) == 0
+                if ccall(:jl_wakeup_thread, Cint, (Int16,), tid % Int16) == 0
                     ccall(:jl_wakeup_threadpool, Cvoid, (Int8,), Threads._sym_to_tpid(tp))
                 end
             else
@@ -1300,7 +1300,7 @@ function enq_work(t::Task)
             return t
         end
     end
-    ccall(:jl_wakeup_thread, Cint, (Int16,), (tid - 1) % Int16)
+    ccall(:jl_wakeup_thread, Cint, (Int16,), tid % Int16)
     return t
 end
 
@@ -1527,7 +1527,7 @@ function wait_forever()
                 wait()
             end
         catch e
-            if Threads.threadid() == 1 && isa(e, InterruptException) && isempty(Workqueue)
+            if Threads.threadid() == 0 && isa(e, InterruptException) && isempty(Workqueue)
                 # An InterruptException landed on this internal scheduler task while
                 # the thread was idle (it parked here after running a completed task).
                 # N.B.: SIGINT no longer force-throws InterruptException on any
@@ -1576,7 +1576,7 @@ function ensure_rescheduled(othertask::Task)
         # we failed to yield to othertask
         # return it to the head of a queue to be retried later
         tid = Threads.threadid(othertask)
-        Wother = tid == 0 ? W : workqueue_for(tid)
+        Wother = tid == -1 ? W : workqueue_for(tid)
         pushfirst!(Wother, othertask)
     end
     # if the current task was queued,

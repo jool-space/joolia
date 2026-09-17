@@ -311,7 +311,7 @@ function log_record_id(_module, level, message, log_kws)
     end
 end
 
-default_group(file) = Symbol(splitext(basename(file))[1])
+default_group(file) = Symbol(splitext(basename(file))[0])
 
 function issimple(@nospecialize val)
     val isa String && return true
@@ -320,7 +320,7 @@ function issimple(@nospecialize val)
     val isa Number && return true
     val isa Char && return true
     if val isa Expr
-        val.head === :quote && issimple(val.args[1]) && return true
+        val.head === :quote && issimple(val.args[0]) && return true
         val.head === :inert && return true
     end
     return false
@@ -328,9 +328,9 @@ end
 function issimplekw(@nospecialize val)
     if val isa Expr
         if val.head === :kw
-            val = val.args[2]
+            val = val.args[1]
             if val isa Expr && val.head === :escape
-                issimple(val.args[1]) && return true
+                issimple(val.args[0]) && return true
             end
         end
     end
@@ -361,13 +361,13 @@ function logmsg_code(_module, file, line, level, message, exs...)
         # complexity by adding the code for testing the UndefVarError by hand
         checkerrors = nothing
         for kwarg in reverse(log_data.kwargs)
-            if isa(kwarg.args[2].args[1], Symbol)
-                checkerrors = Expr(:if, Expr(:isdefined, kwarg.args[2]), checkerrors, Expr(:call, Expr(:core, :UndefVarError), QuoteNode(kwarg.args[2].args[1]), QuoteNode(:local)))
+            if isa(kwarg.args[1].args[0], Symbol)
+                checkerrors = Expr(:if, Expr(:isdefined, kwarg.args[1]), checkerrors, Expr(:call, Expr(:core, :UndefVarError), QuoteNode(kwarg.args[1].args[0]), QuoteNode(:local)))
             end
         end
         if isa(message, Symbol)
             message = esc(message)
-            checkerrors = Expr(:if, Expr(:isdefined, message), checkerrors, Expr(:call, Expr(:core, :UndefVarError), QuoteNode(message.args[1]), QuoteNode(:local)))
+            checkerrors = Expr(:if, Expr(:isdefined, message), checkerrors, Expr(:call, Expr(:core, :UndefVarError), QuoteNode(message.args[0]), QuoteNode(:local)))
         end
         logrecord = quote
             let err = $checkerrors
@@ -510,7 +510,7 @@ end
     if !real
         # drop the frames of the logging machinery itself
         i = findfirst(fr -> fr.func === :logging_error, bt)
-        i === nothing || deleteat!(bt, 1:i)
+        i === nothing || deleteat!(bt, 0:i)
     end
     handle_message(
         logger, Error, msg, _module, :logevent_error, id, filepath, line;
@@ -522,7 +522,7 @@ end
 # Any[key1,val1, ...] for simplicity in construction on the C side.
 function logmsg_shim(level, message, _module, group, id, file, line, kwargs)
     @nospecialize
-    real_kws = Any[(kwargs[i], kwargs[i+1]) for i in 1:2:length(kwargs)]
+    real_kws = Any[(kwargs[i], kwargs[i+1]) for i in 0:2:length(kwargs)-1]
     @logmsg(convert(LogLevel, level), message,
             _module=_module, _id=id, _group=group,
             _file=String(file), _line=line, real_kws...)

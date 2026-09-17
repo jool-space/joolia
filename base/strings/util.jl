@@ -33,8 +33,8 @@ function startswith(a::AbstractString, b::AbstractString)
     while true
         j === nothing && return true # ran out of prefix: success!
         i === nothing && return false # ran out of source: failure
-        i[1] == j[1] || return false # mismatch: failure
-        i, j = iterate(a, i[2]), iterate(b, j[2])
+        i[0] == j[0] || return false # mismatch: failure
+        i, j = iterate(a, i[1]), iterate(b, j[1])
     end
 end
 startswith(str::AbstractString, chars::Chars) = !isempty(str) && first(str)::AbstractChar in chars
@@ -60,8 +60,8 @@ function endswith(a::AbstractString, b::AbstractString)
     while true
         j === nothing && return true # ran out of suffix: success!
         i === nothing && return false # ran out of source: failure
-        i[1] == j[1] || return false # mismatch: failure
-        i, j = iterate(a, i[2]), iterate(b, j[2])
+        i[0] == j[0] || return false # mismatch: failure
+        i, j = iterate(a, i[1]), iterate(b, j[1])
     end
 end
 endswith(str::AbstractString, chars::Chars) = !isempty(str) && last(str) in chars
@@ -71,7 +71,7 @@ function startswith(a::DenseUTF8String, b::DenseUTF8String)
     if ncodeunits(a) < cub
         false
     elseif _memcmp(a, b, sizeof(b)) == 0
-        nextind(a, cub) == cub + 1 # check that end of `b` doesn't match a partial character in `a`
+        nextind(a, cub - 1) == cub # check that end of `b` doesn't match a partial character in `a`
     else
         false
     end
@@ -79,7 +79,7 @@ end
 
 # nothrow+foldable: `String`/`SubString{String}` buffers are immutable, the
 # byte-wise `_memcmp` is bounded by `sizeof(b) ≤ ncodeunits(a)`, and
-# `nextind(a, cub)` operates on a valid index (`0 ≤ cub ≤ ncodeunits(a)`).
+# `nextind(a, cub - 1)` operates on a valid index (`0 ≤ cub ≤ ncodeunits(a)`).
 @assume_effects :nothrow :foldable function startswith(a::Union{String,SubString{String}}, b::Union{String,SubString{String}})
     @invoke startswith(a::DenseUTF8String, b::DenseUTF8String)
 end
@@ -105,8 +105,8 @@ end
 startswith(io::IO, prefix::AbstractString) = startswith(io, String(prefix)::String)
 
 function endswith(a::DenseUTF8String, b::DenseUTF8String)
-    astart = ncodeunits(a) - ncodeunits(b) + 1
-    if astart < 1
+    astart = ncodeunits(a) - ncodeunits(b)
+    if astart < 0
         false
     elseif GC.@preserve(a, _memcmp(pointer(a, astart), b, sizeof(b))) == 0
         thisind(a, astart) == astart # check that end of `b` doesn't match a partial character in `a`
@@ -116,7 +116,7 @@ function endswith(a::DenseUTF8String, b::DenseUTF8String)
 end
 
 # nothrow+foldable: see `startswith` above; `pointer(a, astart)` is in bounds
-# (`1 ≤ astart ≤ ncodeunits(a)+1`), and `thisind(a, astart)` accepts the same range.
+# (`0 ≤ astart ≤ ncodeunits(a)`), and `thisind(a, astart)` accepts the same range.
 @assume_effects :nothrow :foldable function endswith(a::Union{String,SubString{String}}, b::Union{String,SubString{String}})
     @invoke endswith(a::DenseUTF8String, b::DenseUTF8String)
 end
@@ -268,19 +268,19 @@ function chopprefix(s::AbstractString, prefix::AbstractString)
     k = firstindex(s)
     i, j = iterate(s), iterate(prefix)
     while true
-        j === nothing && i === nothing && return SubString(s, 1, 0) # s == prefix: empty result
+        j === nothing && i === nothing && return SubString(s, 0, -1) # s == prefix: empty result
         j === nothing && return @inbounds SubString(s, k) # ran out of prefix: success!
         i === nothing && return SubString(s) # ran out of source: failure
-        i[1] == j[1] || return SubString(s) # mismatch: failure
-        k = i[2]
-        i, j = iterate(s, k), iterate(prefix, j[2])
+        i[0] == j[0] || return SubString(s) # mismatch: failure
+        k = i[1]
+        i, j = iterate(s, k), iterate(prefix, j[1])
     end
 end
 
 function chopprefix(s::Union{String, SubString{String}},
                     prefix::Union{String, SubString{String}})
     if startswith(s, prefix)
-        SubString(s, 1 + ncodeunits(prefix))
+        SubString(s, ncodeunits(prefix))
     else
         SubString(s)
     end
@@ -321,19 +321,19 @@ function chopsuffix(s::AbstractString, suffix::AbstractString)
     k = lastindex(s)
     i, j = iterate(a), iterate(b)
     while true
-        j === nothing && i === nothing && return SubString(s, 1, 0) # s == suffix: empty result
+        j === nothing && i === nothing && return SubString(s, 0, -1) # s == suffix: empty result
         j === nothing && return @inbounds SubString(s, firstindex(s), k) # ran out of suffix: success!
         i === nothing && return SubString(s) # ran out of source: failure
-        i[1] == j[1] || return SubString(s) # mismatch: failure
-        k = i[2]
-        i, j = iterate(a, k), iterate(b, j[2])
+        i[0] == j[0] || return SubString(s) # mismatch: failure
+        k = i[1]
+        i, j = iterate(a, k), iterate(b, j[1])
     end
 end
 
 function chopsuffix(s::Union{String, SubString{String}},
                     suffix::Union{String, SubString{String}})
     if !isempty(suffix) && endswith(s, suffix)
-        astart = ncodeunits(s) - ncodeunits(suffix) + 1
+        astart = ncodeunits(s) - ncodeunits(suffix)
         @inbounds SubString(s, firstindex(s), prevind(s, astart))
     else
         SubString(s)
@@ -369,10 +369,10 @@ julia> chomp("Julia\\r\\n\\n")
 """
 function chomp(s::AbstractString)
     i = lastindex(s)
-    (i < 1 || s[i] != '\n') && (return SubString(s, 1, i))
+    (i < 0 || s[i] != '\n') && (return SubString(s, 0, i))
     j = prevind(s,i)
-    (j < 1 || s[j] != '\r') && (return SubString(s, 1, j))
-    return SubString(s, 1, prevind(s,j))
+    (j < 0 || s[j] != '\r') && (return SubString(s, 0, j))
+    return SubString(s, 0, prevind(s,j))
 end
 
 @assume_effects :removable :foldable function chomp(s::Union{String, SubString{String}})
@@ -381,12 +381,12 @@ end
     len = if iszero(ncu)
         0
     else
-        has_lf = @inbounds(cu[ncu]) == 0x0a
+        has_lf = @inbounds(cu[ncu-1]) == 0x0a
         two_bytes = ncu > 1
-        has_cr = has_lf & two_bytes & (@inbounds(cu[ncu - two_bytes]) == 0x0d)
+        has_cr = has_lf & two_bytes & (@inbounds(cu[ncu - 1 - two_bytes]) == 0x0d)
         ncu - (has_lf + has_cr)
     end
-    @inbounds raw_substring(s, 1, len)
+    @inbounds raw_substring(s, 0, len)
 end
 """
     lstrip([pred=isspace,] str::AbstractString)::SubString
@@ -449,9 +449,9 @@ julia> rstrip(a)
 """
 function rstrip(f, s::AbstractString)
     for (i, c) in Iterators.reverse(pairs(s))
-        f(c::AbstractChar) || return @inbounds SubString(s, 1, i::Int)
+        f(c::AbstractChar) || return @inbounds SubString(s, 0, i::Int)
     end
-    SubString(s, 1, 0)
+    SubString(s, 0, -1)
 end
 rstrip(s::AbstractString) = rstrip(isspace, s)
 rstrip(s::AbstractString, chars::Chars) = rstrip(in(chars), s)
@@ -788,7 +788,7 @@ IteratorSize(::Type{<:SplitIterator}) = SizeUnknown()
 # k: the starting index of the next substring to be extracted
 # n: the number of splits returned so far; always less than iter.limit - 1 (1 for the rest)
 function iterate(iter::SplitIterator, (i, k, n)=(firstindex(iter.str), firstindex(iter.str), 0))
-    i - 1 > ncodeunits(iter.str)::Int && return nothing
+    i > ncodeunits(iter.str)::Int && return nothing
     r = findnext(iter.splitter, iter.str, k)::Union{Nothing,Int,UnitRange{Int}}
     while r !== nothing && n != iter.limit - 1 && first(r) <= ncodeunits(iter.str)
         j, k = first(r), nextind(iter.str, last(r))::Int
@@ -801,8 +801,8 @@ function iterate(iter::SplitIterator, (i, k, n)=(firstindex(iter.str), firstinde
         k = k_
         r = findnext(iter.splitter, iter.str, k)::Union{Nothing,Int,UnitRange{Int}}
     end
-    iter.keepempty || i <= ncodeunits(iter.str) || return nothing
-    @inbounds SubString(iter.str, i), (ncodeunits(iter.str) + 2, k, n + 1)
+    iter.keepempty || i < ncodeunits(iter.str) || return nothing
+    @inbounds SubString(iter.str, i), (ncodeunits(iter.str) + 1, k, n + 1)
 end
 
 # Specialization for partition(s,n) to return a SubString
@@ -811,7 +811,7 @@ eltype(::Type{PartitionIterator{T}}) where {T<:AbstractString} = SubString{T}
 eltype(::Type{PartitionIterator{T}}) where {T<:SubString} = T
 
 function iterate(itr::PartitionIterator{<:AbstractString}, state = firstindex(itr.c))
-    state > ncodeunits(itr.c) && return nothing
+    state >= ncodeunits(itr.c) && return nothing
     r = min(nextind(itr.c, state, itr.n - 1), lastindex(itr.c))
     return SubString(itr.c, state, r), nextind(itr.c, r)
 end
@@ -896,22 +896,22 @@ eachrsplit(str::AbstractString; limit::Integer=0, keepempty=false) =
 
 function Base.iterate(it::RSplitIterator, (to, remaining_splits)=(lastindex(it.str), it.limit-1))
     to < 0 && return nothing
-    from = 1
+    from = 0
     next_to = -1
     while !iszero(remaining_splits)
         pos = findprev(it.splitter, it.str, to)
         # If no matches: It returns the rest of the string, then the iterator stops.
         if pos === nothing
-            from = 1
+            from = 0
             next_to = -1
             break
         else
             from = nextind(it.str, last(pos))
             # pos can be empty if we search for a zero-width delimiter, in which
             # case pos is to:to-1.
-            # In this case, next_to must be to - 1, except if to is 0 or 1, in
+            # In this case, next_to must be to - 1, except if to is 0, in
             # which case, we must stop iteration for some reason.
-            next_to = (isempty(pos) & (to < 2)) ? -1 : prevind(it.str, first(pos))
+            next_to = (isempty(pos) & (to < 1)) ? -1 : prevind(it.str, first(pos))
 
             # If the element we emit is empty, discard it based on keepempty
             if from > to && !(it.keepempty)
@@ -1029,13 +1029,13 @@ _pat_replacer(x::Union{Tuple{Vararg{AbstractChar}},AbstractVector{<:AbstractChar
 # note: leave str untyped here to make it easier for packages like StringViews to hook in
 function _replace_init(str, pat_repl::NTuple{N, Pair}, count::Int) where N
     count < 0 && throw(DomainError(count, "`count` must be non-negative."))
-    e1 = nextind(str, lastindex(str)) # sizeof(str)+1
+    e1 = nextind(str, lastindex(str)) # one-past-the-end codeunit position
     a = firstindex(str)
     patterns = map(p -> _pat_replacer(first(p)), pat_repl)
     replaces = map(last, pat_repl)
     rs = map(patterns) do p
         r = findnext(p, str, a)
-        if r === nothing || first(r) == 0
+        if r === nothing
             return e1+1:0
         end
         r isa Int && (r = r:r) # findnext / performance fix
@@ -1087,7 +1087,7 @@ function _replace_once(io::IO, str, start::Int, e1::Int,
         rs = map(patterns, rs) do p, r
             if first(r) < k
                 r = findnext(p, str, k)
-                if r === nothing || first(r) == 0
+                if r === nothing
                     return e1+1:0
                 end
                 r isa Int && (r = r:r) # findnext / performance fix
@@ -1314,8 +1314,8 @@ function bytes2hex(itr)
     GC.@preserve str begin
         p = pointer(str)
         for (i, x) in enumerate(itr)
-            unsafe_store!(p, @inbounds(hex_chars[1 + x >> 4]), 2i - 1)
-            unsafe_store!(p, @inbounds(hex_chars[1 + x & 0xf]), 2i)
+            unsafe_store!(p, @inbounds(hex_chars[x >> 4]), 2i)
+            unsafe_store!(p, @inbounds(hex_chars[x & 0xf]), 2i + 1)
         end
     end
     return str
@@ -1324,13 +1324,13 @@ end
 function bytes2hex(io::IO, itr)
     eltype(itr) === UInt8 || throw(ArgumentError("eltype of iterator not UInt8"))
     for x in itr
-        print(io, Char(hex_chars[1 + x >> 4]), Char(hex_chars[1 + x & 0xf]))
+        print(io, Char(hex_chars[x >> 4]), Char(hex_chars[x & 0xf]))
     end
 end
 
 # check for pure ASCII-ness
 function ascii(s::String)
-    for i in 1:sizeof(s)
+    for i in 0:sizeof(s)-1
         @inbounds codeunit(s, i) < 0x80 || __throw_invalid_ascii(s, i)
     end
     return s
@@ -1348,7 +1348,7 @@ See also [`isascii`](@ref).
 # Examples
 ```jldoctest
 julia> ascii("abcdeγfgh")
-ERROR: ArgumentError: invalid ASCII at index 6 in "abcdeγfgh"
+ERROR: ArgumentError: invalid ASCII at index 5 in "abcdeγfgh"
 Stacktrace:
 [...]
 
@@ -1358,7 +1358,7 @@ julia> ascii("abcdefgh")
 """
 ascii(x::AbstractString) = ascii(String(x)::String)
 
-Base.rest(s::Union{String,SubString{String}}, i=1) = SubString(s, i)
+Base.rest(s::Union{String,SubString{String}}, i=0) = SubString(s, i)
 function Base.rest(s::AbstractString, st...)
     io = IOBuffer()
     for c in Iterators.rest(s, st...)
