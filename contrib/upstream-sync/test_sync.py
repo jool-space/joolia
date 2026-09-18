@@ -8,6 +8,9 @@ from unittest.mock import patch
 
 import sync
 import publish
+import automerge
+
+GUIDE_ROOT = Path(__file__).resolve().parent
 
 
 class SyncTests(unittest.TestCase):
@@ -226,6 +229,166 @@ index 0000000..9daeafb
             publish.publish(self.folder, 'ready')
         self.assertEqual(mocked.call_args.args, ('workflow', 'run', 'joolia.yml', '--ref', batch['branch']))
         self.assertIn('--draft', mocked.call_args_list[1].args)
+
+    def test_prompt_embeds_all_porting_guides(self):
+        for relative in ('prompt.md', 'contract.md', *(f'guides/{name}' for name in sync.GUIDES)):
+            dest = Path('contrib/upstream-sync', relative)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text((GUIDE_ROOT / relative).read_text())
+        self.commit('add trusted guides')
+        batch = sync.plan(self.tip)
+        sync.prepare(batch, self.folder)
+        prompt = (self.folder / 'prompt.md').read_text()
+        for name in sync.GUIDES:
+            self.assertIn((GUIDE_ROOT / 'guides' / name).read_text(), prompt)
+        self.assertIn(batch['target_sha'], prompt)
+
+    def test_pr_body_does_not_reference_upstream(self):
+        batch = sync.plan(self.tip)
+        batch['commits'][0]['subject'] = 'Merge pull request #123 from author/fix'
+        batch['commits'][1]['subject'] = 'Fix indexing (#456) JuliaLang/julia#789'
+        review = self.review(batch, 'manual')
+        review['summary'] = 'See [upstream PR](https://github.com/JuliaLang/julia/pull/123) and JuliaLang/Pkg.jl#456.'
+        review['unresolved'] = ['https://github.com/JuliaLang/julia/issues/42',
+                                'https://github.com/JuliaLang/julia/commit/' + self.first]
+        body = sync.render_body(batch, review, False)
+        self.assertNotIn('github.com/JuliaLang', body)
+        self.assertNotRegex(body, r'#[0-9]+')
+        self.assertIn('`' + self.first + '`', body)
+        self.assertIn('Merge upstream branch author/fix', body)
+        self.assertIn('JuliaLang/Pkg.jl#456', review['summary'])  # Source report is preserved.
+
+    def candidate(self):
+        batch = sync.plan(self.tip)
+        sync.write_json(self.folder / 'review.json', self.review(batch))
+        (self.folder / 'adaptations.patch').write_text('')
+        sync.assemble(batch, self.folder)
+        return batch, sync.output('rev-parse', 'HEAD')
+
+    def test_automerge_validates_real_candidate(self):
+        batch, head = self.candidate()
+        automerge.validate_candidate(self.base, head, batch['branch'])
+
+    def test_automerge_rejects_changed_automation(self):
+        batch, _ = self.candidate()
+        self.commit('tamper', '.github/workflows/joolia.yml', 'jobs: {}\n')
+        with self.assertRaisesRegex(ValueError, 'protected'):
+            automerge.validate_candidate(self.base, sync.output('rev-parse', 'HEAD'), batch['branch'])
+
+    def test_automerge_rejects_altered_checkpoint_settings(self):
+        batch, _ = self.candidate()
+        self.config(max_commits=1000)
+        with self.assertRaisesRegex(ValueError, 'more than the checkpoint'):
+            automerge.validate_candidate(self.base, sync.output('rev-parse', 'HEAD'), batch['branch'])
+
+    def test_automerge_rejects_incomplete_actual_history(self):
+        batch, _ = self.candidate()
+        path = f'{sync.REPORTS}/{self.tip}.json'
+        record = json.loads(Path(path).read_text())
+        record['plan']['commits'].pop()
+        record['review']['commits'].pop()
+        sync.write_json(path, record)
+        self.commit('incomplete report')
+        with self.assertRaisesRegex(ValueError, 'actual incoming history'):
+            automerge.validate_candidate(self.base, sync.output('rev-parse', 'HEAD'), batch['branch'])
+
+    def test_automerge_rejects_manual_report(self):
+        batch = sync.plan(self.tip)
+        sync.write_json(self.folder / 'review.json', self.review(batch, 'manual'))
+        sync.assemble(batch, self.folder)
+        with self.assertRaisesRegex(ValueError, 'Manual/report-only'):
+            automerge.validate_candidate(self.base, sync.output('rev-parse', 'HEAD'), batch['branch'])
+
+    def test_ci_gate_requires_exact_head_and_both_architectures(self):
+        run = dict(workflow_id=12, event='workflow_dispatch', head_sha=self.tip,
+                   head_branch='sync/julia-test', head_repository={'full_name': 'jool-space/joolia'},
+                   status='completed', conclusion='success')
+        jobs = [dict(name=name, status='completed', conclusion='success') for name in automerge.REQUIRED]
+        def passed(r=run, j=jobs):
+            return automerge.ci_passed(r, j, self.tip, 'sync/julia-test', 12, 'jool-space/joolia')
+        self.assertTrue(passed())
+        for change in ({'head_sha': self.first}, {'workflow_id': 13}, {'event': 'pull_request'},
+                       {'status': 'in_progress'}, {'conclusion': 'failure'},
+                       {'head_repository': {'full_name': 'somebody/fork'}}):
+            with self.subTest(change=change):
+                self.assertFalse(passed(dict(run, **change)))
+        self.assertFalse(passed(j=[j for j in jobs if j['name'] != 'Build and test (ubuntu-24.04-arm)']))
+        for result in ('skipped', 'cancelled', 'failure'):
+            self.assertFalse(passed(j=[dict(j, conclusion=result) for j in jobs]))
+
+    def test_merge_gate_excludes_forks_other_authors_and_holds(self):
+        repo = 'jool-space/joolia'
+        pr = dict(state='open', user={'login': 'github-actions[bot]'}, labels=[],
+                  base={'ref': 'master', 'repo': {'full_name': repo}},
+                  head={'ref': 'sync/julia-' + 'a'*12 + '-' + 'b'*12, 'repo': {'full_name': repo}})
+        self.assertTrue(automerge.eligible(pr, repo))
+        for change in ({'labels': [{'name': 'sync:hold'}]}, {'user': {'login': 'someone'}},
+                       {'head': dict(pr['head'], repo={'full_name': 'somebody/fork'})},
+                       {'state': 'closed'}):
+            self.assertFalse(automerge.eligible(dict(pr, **change), repo))
+
+    def test_master_advance_updates_branch_and_retests_without_merging(self):
+        batch, head = self.candidate()
+        pr = dict(number=1, head={'ref': batch['branch'], 'sha': head})
+        sync.git('switch', '-q', 'master')
+        self.commit('new fork change', 'new.txt', 'new\n')
+        base = sync.output('rev-parse', 'HEAD')
+        original_output, original_git = sync.output, sync.git
+        def output(*args):
+            return base if args == ('rev-parse', 'refs/remotes/origin/master') else original_output(*args)
+        def git(*args, **kwargs):
+            if args[0] == 'fetch':
+                return None
+            return original_git(*args, **kwargs)
+        with patch.object(automerge, 'api', side_effect=[{}, {'head': {'sha': 'a'*40}}]) as calls, \
+                patch.object(sync, 'git', side_effect=git), patch.object(sync, 'output', side_effect=output), \
+                patch.object(automerge, 'gh') as dispatched:
+            automerge.advance(pr, 12, 'jool-space/joolia')
+        self.assertEqual(calls.call_args_list[0].args,
+                         ('pulls/1/update-branch', 'PUT', {'expected_head_sha': head}))
+        self.assertEqual(calls.call_count, 2)
+        self.assertEqual(dispatched.call_args.args, ('workflow', 'run', 'joolia.yml', '--ref', batch['branch']))
+
+    def test_successful_merge_immediately_dispatches_next_batch(self):
+        batch, head = self.candidate()
+        repo = 'jool-space/joolia'
+        pr = dict(number=1, state='open', draft=True, user={'login': 'github-actions[bot]'}, labels=[],
+                  base={'ref': 'master', 'repo': {'full_name': repo}},
+                  head={'ref': batch['branch'], 'sha': head, 'repo': {'full_name': repo}})
+        run = dict(id=7, workflow_id=12, event='workflow_dispatch', head_sha=head,
+                   head_branch=batch['branch'], head_repository={'full_name': repo},
+                   status='completed', conclusion='success')
+        jobs = [dict(name=name, status='completed', conclusion='success') for name in automerge.REQUIRED]
+        def api(path, method='GET', data=None):
+            if path.startswith('actions/workflows/12/runs?'):
+                return {'workflow_runs': [run]}
+            if path == 'pulls/1':
+                return pr
+            if path == 'git/ref/heads/master':
+                return {'object': {'sha': self.base}}
+            if path == 'branches/master':
+                return {'protection': {'required_status_checks': {'strict': True, 'contexts': list(automerge.REQUIRED)}}}
+            if path == 'pulls/1/merge':
+                self.assertEqual(data['sha'], head)
+                self.assertEqual(data['merge_method'], 'merge')
+                return {'merged': True, 'sha': head}
+            if path == 'actions/variables/JOOLIA_UPSTREAM_SYNC_ENABLED':
+                return {'value': 'true'}
+            self.fail(path)
+        original_output, original_git = sync.output, sync.git
+        def output(*args):
+            return self.base if args == ('rev-parse', 'refs/remotes/origin/master') else original_output(*args)
+        def git(*args, **kwargs):
+            if args[0] == 'fetch':
+                return None
+            return original_git(*args, **kwargs)
+        with patch.object(automerge, 'api', side_effect=api), \
+                patch.object(automerge, 'pages', side_effect=[jobs, [], []]), \
+                patch.object(sync, 'git', side_effect=git), patch.object(sync, 'output', side_effect=output), \
+                patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': 'true'}), \
+                patch.object(automerge, 'gh') as calls:
+            automerge.advance(pr, 12, repo)
+        self.assertEqual(calls.call_args.args, ('workflow', 'run', 'upstream-sync.yml', '--ref', 'master', '-f', 'mode=propose'))
 
     def test_other_open_sync_prevents_new_agent_run(self):
         batch = sync.plan(self.tip)
