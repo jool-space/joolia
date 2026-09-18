@@ -180,15 +180,35 @@ def advance(pr, workflow_id, repo):
         print('Dispatched the next batch immediately.')
 
 
+def resume_idle_queue(prs):
+    if os.environ.get('JOOLIA_UPSTREAM_SYNC_ENABLED') != 'true':
+        return
+    # A held or manual-report PR still owns the queue, even if it is ineligible to merge.
+    if any(p['head']['ref'].startswith('sync/julia-') for p in prs):
+        return
+    runs = api('actions/workflows/upstream-sync.yml/runs?branch=master&per_page=1')['workflow_runs']
+    if runs and runs[0]['status'] != 'completed':
+        print('Sync planning/review is already queued or running.')
+        return
+    master = api('git/ref/heads/master')['object']['sha']
+    if runs and runs[0]['head_sha'] == master:
+        print('This master revision was already attempted; daily/manual retries remain available.')
+        return
+    gh('workflow', 'run', 'upstream-sync.yml', '--ref', 'master', '-f', 'mode=propose')
+    print('Master advanced with no pending sync PR; dispatched a fresh batch attempt.')
+
+
 def main():
     repo = os.environ['GH_REPO']
     if os.environ.get('JOOLIA_UPSTREAM_AUTOMERGE_ENABLED') != 'true':
         print('Automatic sync merging is disabled.')
         return
     workflow_id = api('actions/workflows/joolia.yml')['id']
-    for summary in pages('pulls?state=open&base=master'):
+    prs = pages('pulls?state=open&base=master')
+    for summary in prs:
         if eligible(summary, repo):
             advance(api(f'pulls/{summary["number"]}'), workflow_id, repo)
+    resume_idle_queue(prs)
 
 
 if __name__ == '__main__':
