@@ -3,7 +3,7 @@
 `.github/workflows/upstream-sync.yml` uses the official pinned
 [Codex Action](https://learn.chatgpt.com/docs/github-action) with
 `gpt-5.6-luna`, high reasoning effort and Codex CLI 0.155.0. It produces draft
-PRs; it never merges them. The first hosted Joolia build/test gate passed at
+PRs. An optional trusted merge workflow integrates them after dual-architecture CI succeeds. The first hosted Joolia build/test gate passed at
 [ac7b08d4eb](https://github.com/jool-space/joolia/actions/runs/35284862101).
 
 ## Porting handbook
@@ -48,8 +48,8 @@ gh variable set JOOLIA_UPSTREAM_SYNC_ENABLED --body true --repo jool-space/jooli
 ```
 
 Delete that variable or set it to `false` to stop scheduled proposals. Manual
-runs remain available. There is no automatic merge or scheduled API spending
-until this variable is enabled. Each new batch permits one agent invocation,
+runs remain available. This switch controls scheduled proposals and post-merge continuation;
+automatic merging has a separate switch below. Each new batch permits one agent invocation,
 with a 30-minute timeout; this is a runtime bound, not a dollar/token cap.
 
 ## What happens
@@ -84,10 +84,44 @@ Agent credentials exist only in the agent job. Compilation and tests run in the
 separate Joolia CI workflow without those credentials. The publisher uses only
 GitHub's job token. Checkout credentials are not persisted into the agent tree.
 
+## Automatic merging and backlog draining
+
+Set `JOOLIA_UPSTREAM_AUTOMERGE_ENABLED=true` to enable
+`.github/workflows/upstream-merge.yml`. Set it to `false` to stop automatic merges;
+set `JOOLIA_UPSTREAM_SYNC_ENABLED=false` as well to stop automatic new proposals.
+Add the `sync:hold` label to pause a particular PR.
+
+The gate runs when CI or housekeeping workflows complete, with hourly recovery
+and manual dispatch available. It executes only trusted master tooling and reads
+candidate Git objects as data; it never checks out or executes candidate code.
+It accepts only same-repository bot-authored sync PRs with a complete integrated
+report, no unresolved concerns, the expected checkpoint, and no protected-file
+changes beyond the generated report and checkpoint. Manual reports stay open.
+
+If master has advanced, the gate merges master into the candidate and dispatches
+fresh CI. Otherwise the latest explicit Joolia CI run must succeed on the exact
+head SHA, including the tooling, x86-64 and ARM64 jobs. Other pending or failing
+checks block merging too. Master must have strict required checks for
+`Upstream sync tooling` and `Build and test (ubuntu-24.04)`; configure enforcement
+for administrators as well. The gate independently requires ARM64, while ordinary
+PRs retain their existing x86-64 gate. Existing branch rules and required reviews
+are respected; the workflow neither approves its own PR nor bypasses protection.
+
+After validation, the gate marks the draft ready and uses a SHA-guarded merge
+commit. It then explicitly dispatches `upstream-sync.yml` in `propose` mode on
+master. Thus the daily cron starts work when idle; each successful merge starts
+the next batch immediately, until caught up or blocked. GitHub-token merges do
+not automatically trigger ordinary push workflows, so continuation uses an
+explicit workflow dispatch ([GitHub event semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)). A failed dispatch can be retried by the daily/manual
+sync run. This is a serial queue, not a one-PR-per-day quota.
+
+This can spend API credits on several consecutive batches. Each batch retains
+its existing size and agent timeout limits; there is no cumulative dollar cap.
+
 ## Checkpoints, retries and limitations
 
 A proposal updates `state.json` on its branch only. Master's checkpoint advances
-when a human merges the PR **with a merge commit**. Do not squash/rebase sync PRs:
+when the merge gate or a human merges the PR **with a merge commit**. Do not squash/rebase sync PRs:
 that loses the upstream ancestry on which subsequent planning relies. Review
 whether the selected boundary omits a dependent follow-up before merging.
 

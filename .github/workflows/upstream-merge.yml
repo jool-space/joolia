@@ -1,0 +1,50 @@
+name: Merge tested upstream sync
+
+on:
+  workflow_run:
+    workflows: [Joolia CI, Labels, Typos, Whitespace]
+    types: [completed]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: joolia-upstream-merge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      vars.JOOLIA_UPSTREAM_AUTOMERGE_ENABLED == 'true' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.head_repository.full_name == github.repository &&
+        startsWith(github.event.workflow_run.head_branch, 'sync/julia-')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+      checks: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check trusted merge tooling
+        run: python3 -m unittest discover -s contrib/upstream-sync -p 'test_*.py' -v
+        env:
+          PYTHONDONTWRITEBYTECODE: 1
+      - name: Merge eligible tested batches and continue syncing
+        run: python3 contrib/upstream-sync/automerge.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          JOOLIA_UPSTREAM_AUTOMERGE_ENABLED: ${{ vars.JOOLIA_UPSTREAM_AUTOMERGE_ENABLED }}
+          JOOLIA_UPSTREAM_SYNC_ENABLED: ${{ vars.JOOLIA_UPSTREAM_SYNC_ENABLED }}
+          PYTHONDONTWRITEBYTECODE: 1
