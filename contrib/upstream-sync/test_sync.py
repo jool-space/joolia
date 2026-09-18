@@ -230,6 +230,17 @@ index 0000000..9daeafb
         self.assertEqual(mocked.call_args.args, ('workflow', 'run', 'joolia.yml', '--ref', batch['branch']))
         self.assertIn('--draft', mocked.call_args_list[1].args)
 
+    def test_publication_starts_approval_gate_when_enabled(self):
+        batch, _ = self.candidate()
+        sync.write_json(self.folder / 'plan.json', batch)
+        remote = self.root / 'remote.git'
+        sync.git('init', '--bare', '-q', str(remote))
+        sync.git('remote', 'add', 'origin', str(remote))
+        with patch.object(publish, 'gh', side_effect=['[]', 'https://example.invalid/pr/1', '[]', '', '']) as calls, \
+                patch.dict(os.environ, {'JOOLIA_UPSTREAM_AUTOMERGE_ENABLED': 'true'}):
+            publish.publish(self.folder, 'ready')
+        self.assertEqual(calls.call_args.args, ('workflow', 'run', 'upstream-merge.yml', '--ref', 'master'))
+
     def test_prompt_embeds_all_porting_guides(self):
         for relative in ('prompt.md', 'contract.md', *(f'guides/{name}' for name in sync.GUIDES)):
             dest = Path('contrib/upstream-sync', relative)
@@ -383,12 +394,17 @@ index 0000000..9daeafb
                 return None
             return original_git(*args, **kwargs)
         with patch.object(automerge, 'api', side_effect=[{}, {'head': {'sha': 'a'*40}}]) as calls, \
+                patch.object(automerge, 'validate_candidate') as validated, \
+                patch.object(automerge, 'approve_checks') as approvals, \
                 patch.object(sync, 'git', side_effect=git), patch.object(sync, 'output', side_effect=output), \
                 patch.object(automerge, 'gh') as dispatched:
             automerge.advance(pr, 12, 'jool-space/joolia')
         self.assertEqual(calls.call_args_list[0].args,
                          ('pulls/1/update-branch', 'PUT', {'expected_head_sha': head}))
         self.assertEqual(calls.call_count, 2)
+        self.assertEqual(validated.call_count, 2)
+        validated.assert_called_with(base, 'a'*40, batch['branch'])
+        approvals.assert_called_once()
         self.assertEqual(dispatched.call_args.args, ('workflow', 'run', 'joolia.yml', '--ref', batch['branch']))
 
     def test_successful_merge_immediately_dispatches_next_batch(self):

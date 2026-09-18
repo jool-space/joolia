@@ -126,6 +126,9 @@ def advance(pr, workflow_id, repo):
             updated = api(f'pulls/{number}')
             if updated['head']['sha'] != head:
                 print(f'Updated PR {number} with master; old CI cannot authorize merging.')
+                sync.git('fetch', '--no-tags', 'origin', f'refs/heads/{branch}')
+                validate_candidate(base, updated['head']['sha'], branch)
+                approve_checks(updated, repo)
                 dispatch_ci(branch)
                 return
             time.sleep(2)
