@@ -21,7 +21,7 @@ concurrency:
 env:
   GH_REPO: ${{ github.repository }}
   PYTHONDONTWRITEBYTECODE: 1
-  SYNC_DIR: ${{ github.workspace }}/../upstream-sync-data
+  SYNC_DIR: ${{ github.workspace }}-upstream-sync-data
   GIT_AUTHOR_NAME: github-actions[bot]
   GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
   GIT_COMMITTER_NAME: github-actions[bot]
