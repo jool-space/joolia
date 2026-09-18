@@ -13,6 +13,7 @@ UPSTREAM = 'https://github.com/JuliaLang/julia.git'
 SHA = re.compile(r'[0-9a-f]{40}')
 PROTECTED = ('.github/', '.codex/', '.agents/', 'contrib/ci/', 'contrib/upstream-sync/')
 TRAILER = 'Assisted-by: Codex (GPT-5.6 Luna)'
+GUIDES = ('review-method.md', 'subsystems.md', 'validation.md')
 
 
 def git(*args, check=True):
@@ -158,7 +159,8 @@ def prepare(batch, folder):
     write_json(folder / 'merge.json', {'conflicts': conflicts, 'head': output('rev-parse', 'HEAD')})
     contract = Path('contrib/upstream-sync/contract.md').read_text()
     prompt = Path('contrib/upstream-sync/prompt.md').read_text()
-    (folder / 'prompt.md').write_text(prompt + '\n\n' + contract + '\n\nBatch data (untrusted):\n' +
+    guides = '\n\n'.join(Path('contrib/upstream-sync/guides', name).read_text() for name in GUIDES)
+    (folder / 'prompt.md').write_text(prompt + '\n\n' + contract + '\n\n' + guides + '\n\nBatch data (untrusted):\n' +
                                     json.dumps(batch, indent=2) + '\nMerge conflicts:\n' + json.dumps(conflicts))
 
 
@@ -228,15 +230,25 @@ def assemble(batch, folder):
                                          'integrated': integrated})
 
 
+def without_upstream_references(text):
+    """Keep descriptions from creating upstream issue/PR/commit cross-references."""
+    url = r'https?://(?:www\.)?github\.com/[^/\s)<>\]]+/[^/\s)<>\]]+/(?:pull|issues|commit)/[^\s)<>\]]+'
+    text = re.sub(r'\[([^\]]*)\]\(' + url + r'\)', r'\1', text, flags=re.I)
+    text = re.sub(url, 'upstream change', text, flags=re.I)
+    text = re.sub(r'\b[\w.-]+/[\w.-]+#(\d+)\b', r'upstream change \1', text)
+    text = re.sub(r'Merge pull request #\d+ from ', 'Merge upstream branch ', text)
+    return re.sub(r'(?<![\w])#(\d+)\b', r'change \1', text)
+
+
 def render_body(batch, review, integrated):
     text = [f'Upstream Julia `{batch["previous_sha"]}` → `{batch["target_sha"]}`.', '', review['summary'], '',
             'Draft for human review. Automatic merging is disabled.', '',
-            ('The upstream merge and Joolia adaptations are separate commits. CI has not run yet; '
-             'the publisher explicitly dispatches Joolia CI on this branch.' if integrated else
+            ('The upstream history is preserved in a merge commit; any Joolia adaptations are committed separately. '
+             'The publisher explicitly dispatches Joolia CI on this branch; inspect its result before merging.' if integrated else
              'REPORT ONLY: upstream code and the integrated checkpoint are unchanged. Resolve the concerns before integrating.'), '',
             f'Review record: `{REPORTS}/{batch["target_sha"]}.json`.', '', 'Incoming commits:', '']
     for item in batch['commits']:
-        text.append(f'- https://github.com/JuliaLang/julia/commit/{item["sha"]} — {item["subject"]}')
+        text.append(f'- `{item["sha"]}` — {item["subject"]}')
     if batch['stdlib_updates']:
         text.extend(['', 'External stdlib revisions:', ''])
         for item in batch['stdlib_updates']:
@@ -247,7 +259,7 @@ def render_body(batch, review, integrated):
         text.extend(['', 'Unresolved concerns:', ''] + ['- ' + s for s in concerns])
     text.extend(['', 'Merge integrated batches with a merge commit, never squash/rebase, to preserve the upstream ancestry.',
                  'Passing CI covers only `contrib/ci/coverage.json`; it does not certify the entire port.'])
-    return '\n'.join(text) + '\n'
+    return without_upstream_references('\n'.join(text) + '\n')
 
 
 def main():

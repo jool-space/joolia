@@ -6,6 +6,24 @@
 PRs; it never merges them. The first hosted Joolia build/test gate passed at
 [ac7b08d4eb](https://github.com/jool-space/joolia/actions/runs/35284862101).
 
+## Porting handbook
+
+Every agent prompt includes the short contract plus these guides:
+
+- [Review method](guides/review-method.md): three-way semantic review, number
+  classification, derivation of adaptations, source evidence and stop conditions.
+- [Subsystem map](guides/subsystems.md): runtime/bootstrap, tuples/ASTs, arrays,
+  dimensions, ranges, strings/IO, compiler IDs, foreign numerical libraries,
+  REPL/Pkg and vendored stdlibs, with concrete traps from this port.
+- [Validation](guides/validation.md): boundary matrices, independent test oracles,
+  available checks, artifact/cache hygiene, failure triage and honest reporting.
+
+These guide the review; they cannot certify the agent's reasoning. Reports must
+cite source paths and symbols and distinguish reviewed code from executed tests.
+Public PR descriptions use plain commit SHAs and sanitized subjects, with no
+upstream issue/PR links or cross-repository issue references. The full provenance
+remains in the committed report and original Git history.
+
 ## Running it
 
 The manual default is a free, deterministic plan without an agent invocation:
@@ -58,8 +76,8 @@ with a 30-minute timeout; this is a runtime bound, not a dollar/token cap.
 6. Publish one draft PR with the report, commit list, proposed stdlib pulls,
    concerns and proposed checkpoint. Integrated candidates explicitly dispatch
    Joolia CI on the resulting branch; its manual mode tests x86-64 and ARM64.
-   This explicit dispatch is necessary because pushes/PRs created with
-   `GITHUB_TOKEN` do not trigger ordinary workflows. See
+   This explicit dispatch avoids depending on bot-created PR workflows starting
+   automatically; GitHub can hold those PR-event runs for human approval. See
    [GitHub's trigger documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
 Agent credentials exist only in the agent job. Compilation and tests run in the

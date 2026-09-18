@@ -9,6 +9,8 @@ from unittest.mock import patch
 import sync
 import publish
 
+GUIDE_ROOT = Path(__file__).resolve().parent
+
 
 class SyncTests(unittest.TestCase):
     def setUp(self):
@@ -226,6 +228,34 @@ index 0000000..9daeafb
             publish.publish(self.folder, 'ready')
         self.assertEqual(mocked.call_args.args, ('workflow', 'run', 'joolia.yml', '--ref', batch['branch']))
         self.assertIn('--draft', mocked.call_args_list[1].args)
+
+    def test_prompt_embeds_all_porting_guides(self):
+        for relative in ('prompt.md', 'contract.md', *(f'guides/{name}' for name in sync.GUIDES)):
+            dest = Path('contrib/upstream-sync', relative)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text((GUIDE_ROOT / relative).read_text())
+        self.commit('add trusted guides')
+        batch = sync.plan(self.tip)
+        sync.prepare(batch, self.folder)
+        prompt = (self.folder / 'prompt.md').read_text()
+        for name in sync.GUIDES:
+            self.assertIn((GUIDE_ROOT / 'guides' / name).read_text(), prompt)
+        self.assertIn(batch['target_sha'], prompt)
+
+    def test_pr_body_does_not_reference_upstream(self):
+        batch = sync.plan(self.tip)
+        batch['commits'][0]['subject'] = 'Merge pull request #123 from author/fix'
+        batch['commits'][1]['subject'] = 'Fix indexing (#456) JuliaLang/julia#789'
+        review = self.review(batch, 'manual')
+        review['summary'] = 'See [upstream PR](https://github.com/JuliaLang/julia/pull/123) and JuliaLang/Pkg.jl#456.'
+        review['unresolved'] = ['https://github.com/JuliaLang/julia/issues/42',
+                                'https://github.com/JuliaLang/julia/commit/' + self.first]
+        body = sync.render_body(batch, review, False)
+        self.assertNotIn('github.com/JuliaLang', body)
+        self.assertNotRegex(body, r'#[0-9]+')
+        self.assertIn('`' + self.first + '`', body)
+        self.assertIn('Merge upstream branch author/fix', body)
+        self.assertIn('JuliaLang/Pkg.jl#456', review['summary'])  # Source report is preserved.
 
     def test_other_open_sync_prevents_new_agent_run(self):
         batch = sync.plan(self.tip)
