@@ -93,6 +93,7 @@ jobs:
         uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          allow-bot-users: 'github-actions[bot]'
           codex-version: '0.155.0'
           model: gpt-5.6-luna
           effort: high
