@@ -11,6 +11,8 @@ from publish import gh
 
 REQUIRED = {'Upstream sync tooling', 'Build and test (ubuntu-24.04)',
             'Build and test (ubuntu-24.04-arm)'}
+PR_WORKFLOWS = {'.github/workflows/joolia.yml', '.github/workflows/LabelCheck.yml',
+                '.github/workflows/Typos.yml', '.github/workflows/Whitespace.yml'}
 BRANCH = re.compile(r'sync/julia-([0-9a-f]{12})-([0-9a-f]{12})')
 
 
@@ -93,6 +95,26 @@ def dispatch_ci(branch):
     print(f'Dispatched both architectures on {branch}')
 
 
+def approvable(run, pr, repo):
+    return (eligible(pr, repo) and run['event'] == 'pull_request' and
+            run['conclusion'] == 'action_required' and
+            run['head_sha'] == pr['head']['sha'] and
+            run['head_branch'] == pr['head']['ref'] and
+            run['head_repository']['full_name'] == repo and
+            run['path'] in PR_WORKFLOWS and
+            any(p['number'] == pr['number'] and p['head']['sha'] == pr['head']['sha']
+                for p in run['pull_requests']))
+
+
+def approve_checks(pr, repo):
+    # Call only after validating the candidate, including unchanged workflow files.
+    runs = pages(f'actions/runs?head_sha={pr["head"]["sha"]}&event=pull_request', 'workflow_runs')
+    for run in runs:
+        if approvable(run, pr, repo):
+            api(f'actions/runs/{run["id"]}/approve', 'POST')
+            print(f'Approved {run["path"]} on validated sync PR {pr["number"]}.')
+
+
 def advance(pr, workflow_id, repo):
     number, head, branch = pr['number'], pr['head']['sha'], pr['head']['ref']
     sync.git('fetch', '--no-tags', 'origin', 'master', f'refs/heads/{branch}')
@@ -109,6 +131,7 @@ def advance(pr, workflow_id, repo):
             time.sleep(2)
         raise RuntimeError('Branch update pending; retry the merge workflow to resume')
 
+    approve_checks(pr, repo)
     runs = api(f'actions/workflows/{workflow_id}/runs?head_sha={head}&event=workflow_dispatch&per_page=1')['workflow_runs']
     if not runs:
         dispatch_ci(branch)
@@ -119,14 +142,17 @@ def advance(pr, workflow_id, repo):
         print(f'PR {number}: waiting for successful CI on both architectures (run {run["id"]}).')
         return
     # Respect failed/pending PR checks and external status integrations as well.
-    checks = pages(f'commits/{head}/check-runs?filter=latest', 'check_runs')
-    statuses = pages(f'commits/{head}/statuses')
-    latest = {}
-    for status in statuses:
-        latest.setdefault(status['context'], status['state'])
-    if any(c['status'] != 'completed' or c['conclusion'] not in ('success', 'neutral', 'skipped') for c in checks) or any(s != 'success' for s in latest.values()):
-        print(f'PR {number}: another check is pending or unsuccessful.')
-        return
+    for revision in dict.fromkeys([head, pr.get('merge_commit_sha')]):
+        if revision is None:
+            continue
+        checks = pages(f'commits/{revision}/check-runs?filter=latest', 'check_runs')
+        statuses = pages(f'commits/{revision}/statuses')
+        latest = {}
+        for status in statuses:
+            latest.setdefault(status['context'], status['state'])
+        if any(c['status'] != 'completed' or c['conclusion'] not in ('success', 'neutral', 'skipped') for c in checks) or any(s != 'success' for s in latest.values()):
+            print(f'PR {number}: another check is pending or unsuccessful.')
+            return
     current = api(f'pulls/{number}')
     if not eligible(current, repo) or current['head']['sha'] != head:
         raise ValueError('PR changed during validation')
