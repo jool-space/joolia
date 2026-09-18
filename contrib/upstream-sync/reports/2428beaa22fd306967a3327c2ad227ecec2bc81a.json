@@ -1,0 +1,174 @@
+{
+  "plan": {
+    "base_sha": "548a151eb0e17cc29ba6c8513128bf2066199611",
+    "previous_sha": "272aa7e2a0f6786b6c5a0d3cd6e7619386e01222",
+    "fetched_sha": "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+    "target_sha": "2428beaa22fd306967a3327c2ad227ecec2bc81a",
+    "branch": "sync/julia-272aa7e2a0f6-2428beaa22fd",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "8a8738036066c8f4d09b58a820e01dab0d9a36a7",
+        "subject": "gc: move elided write-barrier annotations to precede their stores",
+        "paths": [
+          "src/gc-common.c",
+          "src/rtutils.c"
+        ],
+        "changed_lines": 6,
+        "patch_bytes": 2074,
+        "binary": false
+      },
+      {
+        "sha": "5046c81b8940754494ffd54cb3769768ebd5a011",
+        "subject": "gc: make \"elided\" (special case) GC write-barriers per-backend",
+        "paths": [
+          "Make.inc",
+          "src/builtins.c",
+          "src/cgutils.cpp",
+          "src/codegen.cpp",
+          "src/gc-interface.h",
+          "src/gc-mmtk/gc-wb-mmtk.h",
+          "src/gc-wb-stock.h",
+          "src/gf.c",
+          "src/jltypes.c",
+          "src/llvm-julia-licm.cpp",
+          "src/llvm-late-gc-lowering.cpp",
+          "src/simplevector.c",
+          "src/subtype.c"
+        ],
+        "changed_lines": 132,
+        "patch_bytes": 15664,
+        "binary": false
+      },
+      {
+        "sha": "4c0017f9c52cfd0aae87782fa401735ac7ee2bc9",
+        "subject": "gc: Combine genericmemory span operations with their barriers",
+        "paths": [
+          "src/array.c",
+          "src/gc-interface.h",
+          "src/gc-mmtk/gc-wb-mmtk.h",
+          "src/gc-wb-stock.h",
+          "src/genericmemory.c",
+          "src/julia.h",
+          "src/julia_internal.h"
+        ],
+        "changed_lines": 176,
+        "patch_bytes": 15962,
+        "binary": false
+      },
+      {
+        "sha": "c30eb697107c8821a8af6f924a2c91fcbca63f09",
+        "subject": "cancellation: match GC intrinsics by identity, not by name",
+        "paths": [
+          "src/llvm-cancellation-lowering.cpp"
+        ],
+        "changed_lines": 19,
+        "patch_bytes": 3710,
+        "binary": false
+      },
+      {
+        "sha": "2428beaa22fd306967a3327c2ad227ecec2bc81a",
+        "subject": "Merge pull request #63061 from topolarity/ct/wb-fixes",
+        "paths": [
+          "Make.inc",
+          "src/array.c",
+          "src/builtins.c",
+          "src/cgutils.cpp",
+          "src/codegen.cpp",
+          "src/gc-common.c",
+          "src/gc-interface.h",
+          "src/gc-mmtk/gc-wb-mmtk.h",
+          "src/gc-wb-stock.h",
+          "src/genericmemory.c",
+          "src/gf.c",
+          "src/jltypes.c",
+          "src/julia.h",
+          "src/julia_internal.h",
+          "src/llvm-cancellation-lowering.cpp",
+          "src/llvm-julia-licm.cpp",
+          "src/llvm-late-gc-lowering.cpp",
+          "src/rtutils.c",
+          "src/simplevector.c",
+          "src/subtype.c"
+        ],
+        "changed_lines": 333,
+        "patch_bytes": 36832,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "272aa7e2a0f6786b6c5a0d3cd6e7619386e01222",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "0d7752bee1fe8d007fe5b9d276904487d092f919",
+      "f3c70411bfee76c662f7807202305bc4fd8f059d",
+      "7f5097dfad3c4a67558dd208d3bab175e332940e",
+      "71e0769e019ff9dc3c27118b742acd1248f25c27",
+      "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+      "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+      "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+      "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+      "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3"
+    ]
+  },
+  "review": {
+    "target_sha": "2428beaa22fd306967a3327c2ad227ecec2bc81a",
+    "decision": "propose",
+    "summary": "All five diffs were reviewed against their first parents and corresponding Joolia code. They affect GC barriers, genericmemory copying, and LLVM lowering only; no zero-origin adaptation is needed. The batch is already merged at HEAD and the working tree was left unchanged.",
+    "commits": [
+      {
+        "sha": "8a8738036066c8f4d09b58a820e01dab0d9a36a7",
+        "risk": "medium",
+        "subsystems": "GC task state, exception restoration, finalizer handling (`src/gc-common.c`, `src/rtutils.c`).",
+        "indexing_implications": "None. `bound_cancel_token`, `scope`, and related fields are GC references, not positions, counts, identifiers, or sentinels. The change only moves the barrier before the reference store.",
+        "adaptations": "None. The pre-store placement is valid for both origin conventions and must be retained unchanged.",
+        "tests": "Recommend `test/cancellation.jl`, especially finalizer rebinding and exception/handler restoration, under stock GC and ConcurrentImmix configurations."
+      },
+      {
+        "sha": "5046c81b8940754494ffd54cb3769768ebd5a011",
+        "risk": "high",
+        "subsystems": "GC backend barriers, code generation, LLVM LICM/late GC lowering, SimpleVector construction, method/type caches, MMTk configuration.",
+        "indexing_implications": "No origin conversion is present. `i`, `j`, and `done` are zero-based storage offsets/loop counters; `nargs`, `ncl`, `cl`, `ntp`, and `ntvars` are counts. `j+i` is a backing-vector position. `GC_SNAPSHOT_BARRIER` and collector GC-state values are backend configuration/internal encodings, not collection indices.",
+        "adaptations": "None. Direct `jl_svec_data(...)[i]` stores preserve the existing zero-based native layout while adding the appropriate fresh-object barrier annotation. Existing LLVM identifier and native layout conventions remain untouched.",
+        "tests": "Recommend `test/copy.jl` SimpleVector/deepcopy coverage, compiler/bootstrap foundation checks, GC tests, and static analysis for the modified C/C++ translation units; exercise both stock GC and ConcurrentImmix builds."
+      },
+      {
+        "sha": "4c0017f9c52cfd0aae87782fa401735ac7ee2bc9",
+        "risk": "high",
+        "subsystems": "GenericMemory copy/clear operations, array deletion, stock GC and MMTk barriers, native memory helpers (`src/array.c`, `src/genericmemory.c`, `src/julia.h`).",
+        "indexing_implications": "No origin change is needed. `n` and `done` are element counts, `nbytes` is a byte count, and `elsz` is an element byte size. Pointer arithmetic such as `src_p + n` denotes a one-past-end span boundary; `n - done - 1` is the reverse-copy storage offset. `first_ptr` is datatype layout metadata, not a Julia field position.",
+        "adaptations": "None. The fused helpers preserve the prior copy direction, atomic ordering, overlap handling, old-source shortcut, and clear span. Subtracting one from any count or byte span would be incorrect.",
+        "tests": "Recommend `test/copy.jl`, `test/gc/copyto.jl`, array growth/shrink checks in `test/arrayops.jl`, and stock/MMTk GC configurations covering boxed, inline-reference, overlapping, empty, and deletion-clearing spans."
+      },
+      {
+        "sha": "c30eb697107c8821a8af6f924a2c91fcbca63f09",
+        "risk": "high",
+        "subsystems": "LLVM cancellation lowering and JuliaPassContext runtime-intrinsic resolution.",
+        "indexing_implications": "None. Function-pointer identity, LLVM intrinsic identity, `offsetof`-derived native field displacements, and reset-region metadata are compiler/native representations rather than collection positions. No numeric index or sentinel is translated.",
+        "adaptations": "None. Identity matching is independent of Joolia's collection origin and avoids name collisions without changing SSA, slot, branch, or ABI identifiers.",
+        "tests": "Recommend `test/cancellation.jl` reset-region and allocation/write-barrier cancellation cases, compiler foundation checks, and LLVM IR verification with assertions enabled in the CI build."
+      },
+      {
+        "sha": "2428beaa22fd306967a3327c2ad227ecec2bc81a",
+        "risk": "high",
+        "subsystems": "Merge of the GC barrier, genericmemory, MMTk, codegen, LLVM cancellation, and SimpleVector changes from the preceding four commits.",
+        "indexing_implications": "The merge first-parent diff contains the same four semantic changes and no additional indexing behavior. Loop variables and storage offsets remain zero-based native offsets; sizes, counts, byte spans, collector state encodings, native field displacements, and LLVM identities retain their established meanings.",
+        "adaptations": "None. The merge was clean, is already present as HEAD's second-parent integration, and requires no Joolia-specific source or test edits. Existing zero-origin regression coverage remains applicable.",
+        "tests": "Recommend the combined GC, copy/deepcopy, cancellation, compiler foundation, LLVM verification, and native static-analysis checks listed above. No tests were run because this job is review/adaptation-only."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
