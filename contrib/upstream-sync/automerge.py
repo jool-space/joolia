@@ -198,12 +198,30 @@ def resume_idle_queue(prs):
     print('Master advanced with no pending sync PR; dispatched a fresh batch attempt.')
 
 
+def wait_for_notifying_run(run_id, workflow_id, repo):
+    if not re.fullmatch(r'[1-9][0-9]*', run_id):
+        raise ValueError('CI run ID must be a positive integer')
+    # The notification runs inside CI. Let that final job and its workflow finish
+    # before applying the existing exact-revision success checks.
+    for _ in range(60):
+        run = api(f'actions/runs/{run_id}')
+        if (run['workflow_id'] != workflow_id or run['event'] != 'workflow_dispatch' or
+                run['head_repository']['full_name'] != repo or not BRANCH.fullmatch(run['head_branch'])):
+            raise ValueError('Unexpected notifying workflow')
+        if run['status'] == 'completed':
+            return
+        time.sleep(5)
+    raise TimeoutError(f'CI run {run_id} has not finalized; merge checks were not bypassed')
+
+
 def main():
     repo = os.environ['GH_REPO']
     if os.environ.get('JOOLIA_UPSTREAM_AUTOMERGE_ENABLED') != 'true':
         print('Automatic sync merging is disabled.')
         return
     workflow_id = api('actions/workflows/joolia.yml')['id']
+    if run_id := os.environ.get('SYNC_CI_RUN_ID'):
+        wait_for_notifying_run(run_id, workflow_id, repo)
     prs = pages('pulls?state=open&base=master')
     for summary in prs:
         if eligible(summary, repo):

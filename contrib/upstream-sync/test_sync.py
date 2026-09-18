@@ -494,6 +494,42 @@ index 0000000..9daeafb
             automerge.resume_idle_queue([{'head': {'ref': 'ci/unrelated-fix'}}])
             self.assertEqual(dispatch.call_count, 1)
 
+    def notification_run(self, **changes):
+        run = dict(workflow_id=12, event='workflow_dispatch',
+                   head_repository={'full_name': 'jool-space/joolia'},
+                   head_branch='sync/julia-' + 'a'*12 + '-' + 'b'*12,
+                   status='in_progress')
+        return dict(run, **changes)
+
+    def test_notification_waits_for_final_workflow_status(self):
+        with patch.object(automerge, 'api', side_effect=[self.notification_run(), self.notification_run(status='completed')]) as api, \
+                patch.object(automerge.time, 'sleep') as sleep:
+            automerge.wait_for_notifying_run('123', 12, 'jool-space/joolia')
+        self.assertEqual(api.call_count, 2)
+        api.assert_called_with('actions/runs/123')
+        sleep.assert_called_once_with(5)
+
+    def test_notification_rejects_invalid_run_ids(self):
+        with patch.object(automerge, 'api') as api:
+            for run_id in ('', '0', '-1', '../runs/1', '123?anything'):
+                with self.subTest(run_id=run_id), self.assertRaisesRegex(ValueError, 'positive integer'):
+                    automerge.wait_for_notifying_run(run_id, 12, 'jool-space/joolia')
+            api.assert_not_called()
+
+    def test_notification_rejects_unrelated_workflows(self):
+        for change in ({'workflow_id': 13}, {'event': 'pull_request'}, {'head_branch': 'master'},
+                       {'head_repository': {'full_name': 'someone/fork'}}):
+            with self.subTest(change=change), \
+                    patch.object(automerge, 'api', return_value=self.notification_run(**change)), \
+                    self.assertRaisesRegex(ValueError, 'Unexpected notifying'):
+                automerge.wait_for_notifying_run('123', 12, 'jool-space/joolia')
+
+    def test_notification_timeout_does_not_bypass_ci(self):
+        with patch.object(automerge, 'api', return_value=self.notification_run()) as api, \
+                patch.object(automerge.time, 'sleep'), self.assertRaises(TimeoutError):
+            automerge.wait_for_notifying_run('123', 12, 'jool-space/joolia')
+        self.assertEqual(api.call_count, 60)
+
     def test_other_open_sync_prevents_new_agent_run(self):
         batch = sync.plan(self.tip)
         sync.write_json(self.folder / 'plan.json', batch)

@@ -92,8 +92,13 @@ set `JOOLIA_UPSTREAM_SYNC_ENABLED=false` as well to stop automatic new proposals
 Add the `sync:hold` label to pause a particular PR.
 
 The publisher dispatches the gate as soon as a candidate is published. It also
-runs when CI or housekeeping workflows complete, with hourly recovery
-and manual dispatch available. It executes only trusted master tooling and reads
+runs when CI or housekeeping workflows complete. Successful sync CI explicitly
+dispatches the gate after both architecture jobs and tooling pass, in a separate
+job with no candidate checkout. The gate waits up to five minutes for that final
+notification job and the CI workflow to finalize, then applies all existing
+revision and success checks. This closes the gap where an early completion event
+observed unfinished CI and no later event woke the queue. Hourly recovery
+and manual dispatch remain available. It executes only trusted master tooling and reads
 candidate Git objects as data; it never checks out or executes candidate code.
 It accepts only same-repository bot-authored sync PRs with a complete integrated
 report, no unresolved concerns, the expected checkpoint, and no protected-file
