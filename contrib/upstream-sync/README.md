@@ -119,7 +119,11 @@ master. Thus the daily cron starts work when idle; each successful merge starts
 the next batch immediately, until caught up or blocked. GitHub-token merges do
 not automatically trigger ordinary push workflows, so continuation uses an
 explicit workflow dispatch ([GitHub event semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)). A failed dispatch can be retried by the daily/manual
-sync run. This is a serial queue, not a one-PR-per-day quota.
+sync run. The gate also starts a fresh attempt when there is no pending sync PR,
+no active sync run, and master has advanced since the last attempt. This recovers
+when a fix lands after a pre-publication failure. It does not repeatedly retry
+failures on an unchanged master revision, and held/manual-report PRs still block
+new batches. This is a serial queue, not a one-PR-per-day quota.
 
 This can spend API credits on several consecutive batches. Each batch retains
 its existing size and agent timeout limits; there is no cumulative dollar cap.
