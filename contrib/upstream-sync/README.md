@@ -91,12 +91,18 @@ Set `JOOLIA_UPSTREAM_AUTOMERGE_ENABLED=true` to enable
 set `JOOLIA_UPSTREAM_SYNC_ENABLED=false` as well to stop automatic new proposals.
 Add the `sync:hold` label to pause a particular PR.
 
-The gate runs when CI or housekeeping workflows complete, with hourly recovery
+The publisher dispatches the gate as soon as a candidate is published. It also
+runs when CI or housekeeping workflows complete, with hourly recovery
 and manual dispatch available. It executes only trusted master tooling and reads
 candidate Git objects as data; it never checks out or executes candidate code.
 It accepts only same-repository bot-authored sync PRs with a complete integrated
 report, no unresolved concerns, the expected checkpoint, and no protected-file
 changes beyond the generated report and checkpoint. Manual reports stay open.
+After that validation, it approves pending PR runs only for Joolia CI, Labels,
+Typos and Whitespace, matching the exact head SHA, repository, branch and PR.
+Forks, other authors, stale revisions and other workflows remain subject to
+normal approval. This approves workflow execution, not a pull-request review.
+PR checks on GitHub's synthetic merge commit must finish successfully too.
 
 If master has advanced, the gate merges master into the candidate and dispatches
 fresh CI. Otherwise the latest explicit Joolia CI run must succeed on the exact
