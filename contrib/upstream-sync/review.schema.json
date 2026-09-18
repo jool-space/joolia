@@ -1,0 +1,72 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "target_sha": {
+      "type": "string"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "propose",
+        "manual"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "commits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sha": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "subsystems": {
+            "type": "string"
+          },
+          "indexing_implications": {
+            "type": "string"
+          },
+          "adaptations": {
+            "type": "string"
+          },
+          "tests": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "risk",
+          "subsystems",
+          "indexing_implications",
+          "adaptations",
+          "tests"
+        ]
+      }
+    },
+    "unresolved": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "target_sha",
+    "decision",
+    "summary",
+    "commits",
+    "unresolved"
+  ]
+}

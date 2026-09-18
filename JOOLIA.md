@@ -185,6 +185,10 @@ lifecycle tests and a real package REPL with a local versioned registry. See
 [the CI guide](contrib/ci/README.md) for coverage, logs and diagnostic subsets.
 GitHub Actions runs this gate on PRs/pushes and daily on x86-64 and ARM64.
 
+The [upstream sync workflow](contrib/upstream-sync/README.md) can plan bounded
+Julia batches and ask Luna to prepare draft integration PRs. Its daily agent
+schedule is opt-in; it never merges proposals automatically.
+
 ## Running tests
 
 The September 17 18:12 normal image passes the full build (108 stdlib precompile
