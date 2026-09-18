@@ -162,11 +162,12 @@ def advance(pr, workflow_id, repo):
     if api('git/ref/heads/master')['object']['sha'] != base:
         print('Master advanced during validation; retry with the new base.')
         return
-    # Strict required checks on master also close the base-movement race at merge time.
+    # Strict required checks configured on master close the base-movement race.
+    # The read-only branch API exposes enforcement/contexts, not the strict flag.
     protection = api('branches/master')['protection']
     required = protection['required_status_checks']
-    if not required['strict'] or not {'Upstream sync tooling', 'Build and test (ubuntu-24.04)'}.issubset(set(required['contexts'])):
-        raise ValueError('Strict required checks must be enabled')
+    if not protection['enabled'] or required['enforcement_level'] != 'everyone' or not {'Upstream sync tooling', 'Build and test (ubuntu-24.04)'}.issubset(set(required['contexts'])):
+        raise ValueError('Required checks must be enforced for everyone')
     if current['draft']:
         gh('pr', 'ready', str(number))
     result = api(f'pulls/{number}/merge', 'PUT', {'sha': head, 'merge_method': 'merge',

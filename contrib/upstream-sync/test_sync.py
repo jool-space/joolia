@@ -425,7 +425,8 @@ index 0000000..9daeafb
             if path == 'git/ref/heads/master':
                 return {'object': {'sha': self.base}}
             if path == 'branches/master':
-                return {'protection': {'required_status_checks': {'strict': True, 'contexts': list(automerge.REQUIRED)}}}
+                return {'protection': {'enabled': True, 'required_status_checks': {
+                    'enforcement_level': 'everyone', 'contexts': list(automerge.REQUIRED)}}}
             if path == 'pulls/1/merge':
                 self.assertEqual(data['sha'], head)
                 self.assertEqual(data['merge_method'], 'merge')
