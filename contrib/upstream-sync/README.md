@@ -11,7 +11,7 @@ PRs; it never merges them. The first hosted Joolia build/test gate passed at
 The manual default is a free, deterministic plan without an agent invocation:
 
 ```sh
-gh workflow run upstream-sync.yml --ref master -f mode=plan
+gh workflow run upstream-sync.yml --repo jool-space/joolia --ref master -f mode=plan
 ```
 
 To try Luna on the next batch, configure `OPENAI_API_KEY` as a repository Actions
@@ -20,7 +20,7 @@ settings. Do not put the key in a file or commit it.
 
 ```sh
 gh secret set OPENAI_API_KEY --repo jool-space/joolia
-gh workflow run upstream-sync.yml --ref master -f mode=propose
+gh workflow run upstream-sync.yml --repo jool-space/joolia --ref master -f mode=propose
 ```
 
 After inspecting the first proposal, enable the daily 05:47 UTC schedule:

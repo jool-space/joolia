@@ -19,6 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  GH_REPO: ${{ github.repository }}
   PYTHONDONTWRITEBYTECODE: 1
   SYNC_DIR: ${{ github.workspace }}/../upstream-sync-data
   GIT_AUTHOR_NAME: github-actions[bot]
