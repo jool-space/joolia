@@ -156,6 +156,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PLAN_STATUS: ${{ needs.plan.outputs.status }}
+          JOOLIA_UPSTREAM_AUTOMERGE_ENABLED: ${{ vars.JOOLIA_UPSTREAM_AUTOMERGE_ENABLED }}
         run: |
           if [[ "$PLAN_STATUS" == existing ]]; then
             cp contrib/upstream-sync/sync.py "$RUNNER_TEMP/sync.py"

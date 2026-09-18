@@ -81,6 +81,9 @@ def publish(folder, status):
         if not runs:
             gh('workflow', 'run', 'joolia.yml', '--ref', branch)
             print('Dispatched Joolia CI on the exact candidate branch.')
+        if os.environ.get('JOOLIA_UPSTREAM_AUTOMERGE_ENABLED') == 'true':
+            gh('workflow', 'run', 'upstream-merge.yml', '--ref', 'master')
+            print('Dispatched the trusted merge gate to approve eligible PR checks.')
     if 'GITHUB_STEP_SUMMARY' in os.environ:
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
             summary.write(f'\nDraft sync PR: {url}\n\nCandidate: `{sha}`\n')

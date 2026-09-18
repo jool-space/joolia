@@ -230,6 +230,17 @@ index 0000000..9daeafb
         self.assertEqual(mocked.call_args.args, ('workflow', 'run', 'joolia.yml', '--ref', batch['branch']))
         self.assertIn('--draft', mocked.call_args_list[1].args)
 
+    def test_publication_starts_approval_gate_when_enabled(self):
+        batch, _ = self.candidate()
+        sync.write_json(self.folder / 'plan.json', batch)
+        remote = self.root / 'remote.git'
+        sync.git('init', '--bare', '-q', str(remote))
+        sync.git('remote', 'add', 'origin', str(remote))
+        with patch.object(publish, 'gh', side_effect=['[]', 'https://example.invalid/pr/1', '[]', '', '']) as calls, \
+                patch.dict(os.environ, {'JOOLIA_UPSTREAM_AUTOMERGE_ENABLED': 'true'}):
+            publish.publish(self.folder, 'ready')
+        self.assertEqual(calls.call_args.args, ('workflow', 'run', 'upstream-merge.yml', '--ref', 'master'))
+
     def test_prompt_embeds_all_porting_guides(self):
         for relative in ('prompt.md', 'contract.md', *(f'guides/{name}' for name in sync.GUIDES)):
             dest = Path('contrib/upstream-sync', relative)
@@ -327,6 +338,48 @@ index 0000000..9daeafb
                        {'state': 'closed'}):
             self.assertFalse(automerge.eligible(dict(pr, **change), repo))
 
+    def approval_fixture(self):
+        repo = 'jool-space/joolia'
+        pr = dict(number=1, state='open', user={'login': 'github-actions[bot]'}, labels=[],
+                  base={'ref': 'master', 'repo': {'full_name': repo}},
+                  head={'ref': 'sync/julia-' + 'a'*12 + '-' + 'b'*12,
+                        'sha': self.tip, 'repo': {'full_name': repo}})
+        run = dict(id=7, event='pull_request', conclusion='action_required',
+                   head_sha=self.tip, head_branch=pr['head']['ref'],
+                   head_repository={'full_name': repo}, path='.github/workflows/joolia.yml',
+                   pull_requests=[{'number': 1, 'head': {'sha': self.tip}}])
+        return repo, pr, run
+
+    def test_workflow_approval_is_limited_to_current_trusted_sync(self):
+        repo, pr, run = self.approval_fixture()
+        self.assertTrue(automerge.approvable(run, pr, repo))
+        for change in ({'head_sha': self.first}, {'head_branch': 'other'},
+                       {'head_repository': {'full_name': 'someone/fork'}},
+                       {'path': '.github/workflows/upstream-sync.yml'},
+                       {'event': 'workflow_dispatch'}, {'conclusion': 'failure'},
+                       {'pull_requests': []},
+                       {'pull_requests': [{'number': 2, 'head': {'sha': self.tip}}]}):
+            with self.subTest(change=change):
+                self.assertFalse(automerge.approvable(dict(run, **change), pr, repo))
+        self.assertFalse(automerge.approvable(run, dict(pr, labels=[{'name': 'sync:hold'}]), repo))
+        self.assertFalse(automerge.approvable(run, dict(pr, user={'login': 'someone'}), repo))
+
+    def test_approve_checks_only_approves_eligible_run(self):
+        repo, pr, run = self.approval_fixture()
+        with patch.object(automerge, 'pages', return_value=[run, dict(run, head_sha=self.first)]), \
+                patch.object(automerge, 'api') as calls:
+            automerge.approve_checks(pr, repo)
+        calls.assert_called_once_with('actions/runs/7/approve', 'POST')
+
+    def test_invalid_candidate_is_never_approved(self):
+        repo, pr, _ = self.approval_fixture()
+        with patch.object(sync, 'git'), patch.object(sync, 'output', return_value=self.base), \
+                patch.object(automerge, 'validate_candidate', side_effect=ValueError('invalid candidate')), \
+                patch.object(automerge, 'approve_checks') as approvals:
+            with self.assertRaisesRegex(ValueError, 'invalid candidate'):
+                automerge.advance(pr, 12, repo)
+        approvals.assert_not_called()
+
     def test_master_advance_updates_branch_and_retests_without_merging(self):
         batch, head = self.candidate()
         pr = dict(number=1, head={'ref': batch['branch'], 'sha': head})
@@ -341,12 +394,17 @@ index 0000000..9daeafb
                 return None
             return original_git(*args, **kwargs)
         with patch.object(automerge, 'api', side_effect=[{}, {'head': {'sha': 'a'*40}}]) as calls, \
+                patch.object(automerge, 'validate_candidate') as validated, \
+                patch.object(automerge, 'approve_checks') as approvals, \
                 patch.object(sync, 'git', side_effect=git), patch.object(sync, 'output', side_effect=output), \
                 patch.object(automerge, 'gh') as dispatched:
             automerge.advance(pr, 12, 'jool-space/joolia')
         self.assertEqual(calls.call_args_list[0].args,
                          ('pulls/1/update-branch', 'PUT', {'expected_head_sha': head}))
         self.assertEqual(calls.call_count, 2)
+        self.assertEqual(validated.call_count, 2)
+        validated.assert_called_with(base, 'a'*40, batch['branch'])
+        approvals.assert_called_once()
         self.assertEqual(dispatched.call_args.args, ('workflow', 'run', 'joolia.yml', '--ref', batch['branch']))
 
     def test_successful_merge_immediately_dispatches_next_batch(self):
@@ -367,7 +425,8 @@ index 0000000..9daeafb
             if path == 'git/ref/heads/master':
                 return {'object': {'sha': self.base}}
             if path == 'branches/master':
-                return {'protection': {'required_status_checks': {'strict': True, 'contexts': list(automerge.REQUIRED)}}}
+                return {'protection': {'enabled': True, 'required_status_checks': {
+                    'enforcement_level': 'everyone', 'contexts': list(automerge.REQUIRED)}}}
             if path == 'pulls/1/merge':
                 self.assertEqual(data['sha'], head)
                 self.assertEqual(data['merge_method'], 'merge')
@@ -383,7 +442,7 @@ index 0000000..9daeafb
                 return None
             return original_git(*args, **kwargs)
         with patch.object(automerge, 'api', side_effect=api), \
-                patch.object(automerge, 'pages', side_effect=[jobs, [], []]), \
+                patch.object(automerge, 'pages', side_effect=[[], jobs, [], []]), \
                 patch.object(sync, 'git', side_effect=git), patch.object(sync, 'output', side_effect=output), \
                 patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': 'true'}), \
                 patch.object(automerge, 'gh') as calls:
