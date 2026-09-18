@@ -449,6 +449,51 @@ index 0000000..9daeafb
             automerge.advance(pr, 12, repo)
         self.assertEqual(calls.call_args.args, ('workflow', 'run', 'upstream-sync.yml', '--ref', 'master', '-f', 'mode=propose'))
 
+    def test_idle_queue_recovers_after_master_changes(self):
+        for conclusion in ('failure', 'success', 'cancelled'):
+            with self.subTest(conclusion=conclusion), \
+                    patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': 'true'}), \
+                    patch.object(automerge, 'api', side_effect=[
+                        {'workflow_runs': [{'status': 'completed', 'conclusion': conclusion, 'head_sha': self.first}]},
+                        {'object': {'sha': self.tip}}]), patch.object(automerge, 'gh') as dispatch:
+                automerge.resume_idle_queue([])
+                dispatch.assert_called_once_with('workflow', 'run', 'upstream-sync.yml', '--ref', 'master', '-f', 'mode=propose')
+
+    def test_idle_queue_does_not_repeat_same_revision(self):
+        for conclusion in ('failure', 'success', 'cancelled'):
+            with self.subTest(conclusion=conclusion), \
+                    patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': 'true'}), \
+                    patch.object(automerge, 'api', side_effect=[
+                        {'workflow_runs': [{'status': 'completed', 'conclusion': conclusion, 'head_sha': self.tip}]},
+                        {'object': {'sha': self.tip}}]), patch.object(automerge, 'gh') as dispatch:
+                automerge.resume_idle_queue([])
+                dispatch.assert_not_called()
+
+    def test_idle_queue_does_not_duplicate_active_runs(self):
+        for status in ('queued', 'pending', 'in_progress', 'waiting'):
+            with self.subTest(status=status), \
+                    patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': 'true'}), \
+                    patch.object(automerge, 'api', return_value={'workflow_runs': [{'status': status}]}), \
+                    patch.object(automerge, 'gh') as dispatch:
+                automerge.resume_idle_queue([])
+                dispatch.assert_not_called()
+
+    def test_idle_queue_respects_holds_manual_reports_and_disable_switch(self):
+        for enabled, prs in (('false', []), ('true', [{'head': {'ref': 'sync/julia-pending'}}])):
+            with self.subTest(enabled=enabled, prs=prs), \
+                    patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': enabled}), \
+                    patch.object(automerge, 'api') as api, patch.object(automerge, 'gh') as dispatch:
+                automerge.resume_idle_queue(prs)
+                api.assert_not_called()
+                dispatch.assert_not_called()
+
+    def test_idle_queue_starts_first_run_with_only_unrelated_prs(self):
+        with patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': 'true'}), \
+                patch.object(automerge, 'api', side_effect=[{'workflow_runs': []}, {'object': {'sha': self.tip}}]), \
+                patch.object(automerge, 'gh') as dispatch:
+            automerge.resume_idle_queue([{'head': {'ref': 'ci/unrelated-fix'}}])
+            self.assertEqual(dispatch.call_count, 1)
+
     def test_other_open_sync_prevents_new_agent_run(self):
         batch = sync.plan(self.tip)
         sync.write_json(self.folder / 'plan.json', batch)
