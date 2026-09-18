@@ -65,3 +65,25 @@ jobs:
           path: ci-results/
           if-no-files-found: warn
           retention-days: 14
+
+  notify-sync:
+    name: Notify sync merge gate
+    needs: [sync-tooling, build-test]
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      startsWith(github.ref, 'refs/heads/sync/julia-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch the trusted gate after all required jobs pass
+        run: |
+          if [ "$AUTOMERGE_ENABLED" = true ]; then
+            gh workflow run upstream-merge.yml --ref master -f ci_run_id="$CI_RUN_ID"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CI_RUN_ID: ${{ github.run_id }}
+          AUTOMERGE_ENABLED: ${{ vars.JOOLIA_UPSTREAM_AUTOMERGE_ENABLED }}

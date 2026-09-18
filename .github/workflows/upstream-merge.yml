@@ -7,6 +7,12 @@ on:
     workflows: [Joolia CI, Labels, Typos, Whitespace]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: CI run whose final notification must finish before checking the queue
+        type: string
+        required: false
+        default: ''
   schedule:
     - cron: '17 * * * *'
 
@@ -45,6 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          SYNC_CI_RUN_ID: ${{ inputs.ci_run_id }}
           JOOLIA_UPSTREAM_AUTOMERGE_ENABLED: ${{ vars.JOOLIA_UPSTREAM_AUTOMERGE_ENABLED }}
           JOOLIA_UPSTREAM_SYNC_ENABLED: ${{ vars.JOOLIA_UPSTREAM_SYNC_ENABLED }}
           PYTHONDONTWRITEBYTECODE: 1
