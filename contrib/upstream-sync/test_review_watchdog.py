@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import review_watchdog as watchdog
 
@@ -73,3 +73,29 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(record['state'], 'timed_out')
         self.assertFalse(record['action_seen'])
         self.assertEqual(record['processes'], [])
+
+    def test_containment_tracks_and_kills_only_its_review_group(self):
+        group = Mock()
+        group.snapshot.return_value = {'memory.events': 'oom_kill 0'}
+        status = self.root / 'status.json'
+        watchdog.watch(self.marker, 0, status, self.root / 'stop', grace=0, containment=group)
+        group.attach.assert_called_once_with([])
+        group.kill.assert_called_once_with()
+        self.assertEqual(json.loads(status.read_text())['memory'], {'memory.events': 'oom_kill 0'})
+
+    def test_descendants_include_unmarked_children_but_not_parent_worker(self):
+        proc = self.root / 'proc'
+        proc.mkdir()
+        for pid, parent in ((10, 1), (20, 10), (30, 20), (40, 30), (50, 10)):
+            entry = proc / str(pid)
+            entry.mkdir()
+            (entry / 'stat').write_text(f'{pid} (process) S {parent} 0 0')
+        self.assertEqual(watchdog.process_descendants([{'pid': 20}], proc), {20, 30, 40})
+
+    def test_probe_disarming_does_not_kill_contained_processes(self):
+        group = Mock()
+        group.snapshot.return_value = {}
+        stop = self.root / 'stop'
+        stop.touch()
+        watchdog.watch(self.marker, 0, self.root / 'status.json', stop, containment=group)
+        group.kill.assert_not_called()

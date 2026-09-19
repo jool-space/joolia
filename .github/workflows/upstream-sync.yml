@@ -6,16 +6,20 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Plan, prepare a sync PR, or probe the review action without publishing
+        description: Plan, propose a sync, review without publishing, or probe the action
         type: choice
-        options: [plan, propose, probe]
+        options: [plan, propose, review, probe]
         default: plan
+      review_sha:
+        description: Optional full commit SHA for a review-only diagnostic; never publishes
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: joolia-upstream-sync
+  group: ${{ (inputs.mode == 'probe' || inputs.mode == 'review') && format('joolia-upstream-diagnostic-{0}-{1}', inputs.mode, github.ref) || 'joolia-upstream-sync' }}
   cancel-in-progress: false
 
 env:
@@ -30,7 +34,7 @@ env:
 jobs:
   plan:
     if: >-
-      (github.ref == 'refs/heads/master' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'probe')) &&
+      (github.ref == 'refs/heads/master' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'probe' || inputs.mode == 'review'))) &&
       (github.event_name != 'schedule' || vars.JOOLIA_UPSTREAM_SYNC_ENABLED == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -40,6 +44,7 @@ jobs:
     outputs:
       status: ${{ steps.plan.outputs.status }}
       branch: ${{ steps.plan.outputs.branch }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +61,24 @@ jobs:
           python3 contrib/upstream-sync/sync.py plan --upstream FETCH_HEAD --out "$SYNC_DIR"
           python3 contrib/upstream-sync/publish.py gate --data "$SYNC_DIR"
           cat "$SYNC_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Assign one review job per incoming commit
+        id: matrix
+        env:
+          MODE: ${{ inputs.mode }}
+          REVIEW_SHA: ${{ inputs.review_sha }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          plan = json.loads((Path(os.environ['SYNC_DIR']) / 'plan.json').read_text())
+          shas = [c['sha'] for c in plan['commits']] if os.environ['MODE'] != 'probe' else ['probe']
+          if os.environ['REVIEW_SHA']:
+              if os.environ['MODE'] != 'review' or os.environ['REVIEW_SHA'] not in shas:
+                  raise SystemExit('A diagnostic SHA must belong to this batch and requires mode=review')
+              shas = [os.environ['REVIEW_SHA']]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps({'sha': shas or ['idle']}) + '\n')
+          PYCODE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: upstream-plan
@@ -65,10 +88,15 @@ jobs:
   agent:
     needs: plan
     if: >-
-      (needs.plan.outputs.status == 'ready' && (github.event_name == 'schedule' || inputs.mode == 'propose')) ||
+      (needs.plan.outputs.status == 'ready' && (github.event_name == 'schedule' || inputs.mode == 'propose' || inputs.mode == 'review')) ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'probe')
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    name: Review ${{ matrix.sha }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,11 +116,13 @@ jobs:
           fi
       - name: Prepare the pinned source tree and trusted prompt
         if: inputs.mode != 'probe'
+        env:
+          REVIEW_SHA: ${{ matrix.sha }}
         run: |
           UPSTREAM_SHA=$(python3 -c 'import json,os; print(json.load(open(os.environ["SYNC_DIR"]+"/plan.json"))["fetched_sha"])')
           git fetch --no-tags https://github.com/JuliaLang/julia.git "$UPSTREAM_SHA"
-          cp contrib/upstream-sync/review.schema.json "$SYNC_DIR/review.schema.json"
-          python3 contrib/upstream-sync/sync.py prepare --out "$SYNC_DIR"
+          cp contrib/upstream-sync/sync.py "$SYNC_DIR/trusted-sync.py"
+          python3 contrib/upstream-sync/sync.py prepare --out "$SYNC_DIR" --review-sha "$REVIEW_SHA"
       - name: Prepare a minimal action probe
         if: inputs.mode == 'probe'
         run: |
@@ -103,16 +133,17 @@ jobs:
           challenge = Path('.cache/upstream-sync-probe.txt')
           challenge.parent.mkdir(exist_ok=True)
           challenge.write_text(secrets.token_hex(16))
-          (folder / 'prompt.md').write_text('Use one shell tool to run `cat .cache/upstream-sync-probe.txt`. '
-              'Do not change files or run anything else. Return JSON with status="ok" and proof equal to the file contents. '
-              'If the tool fails, return status="failed" and proof=""; do not retry.')
+          (folder / 'prompt.md').write_text('Read .cache/upstream-sync-probe.txt with a shell tool. '
+              'Then use the apply_patch tool to create .cache/upstream-sync-probe-copy.txt with the same contents. '
+              'Do not edit other files or run other commands. Return JSON with status="ok" and proof equal to the file contents. '
+              'If either tool fails, return status="failed" and proof=""; do not retry or use a different editing tool.')
           schema = {'type': 'object', 'properties': {'status': {'type': 'string', 'enum': ['ok', 'failed']},
                     'proof': {'type': 'string'}}, 'required': ['status', 'proof'], 'additionalProperties': False}
           (folder / 'review.schema.json').write_text(json.dumps(schema))
           PYCODE
       - name: Arm independent review deadline
         env:
-          WATCH_SECONDS: ${{ inputs.mode == 'probe' && '180' || '1500' }}
+          WATCH_SECONDS: ${{ inputs.mode == 'probe' && '180' || '480' }}
         run: |
           WATCH_DIR=$(sudo mktemp -d /tmp/joolia-review-watchdog.XXXXXX)
           sudo chmod 755 "$WATCH_DIR"
@@ -137,11 +168,11 @@ jobs:
           progress.write_text(json.dumps({'target_sha': plan['target_sha'], 'current_sha': None, 'commits': []}))
           print('Independent review deadline armed for', os.environ['WATCH_SECONDS'], 'seconds.')
           PYCODE
-      - name: Review every commit and adapt the batch
+      - name: Review the assigned commit and adapt the merged source
         id: review
         env:
           JOOLIA_REVIEW_MARKER: ${{ github.run_id }}:${{ github.run_attempt }}
-        timeout-minutes: 30
+        timeout-minutes: 10
         uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -154,7 +185,13 @@ jobs:
           prompt-file: ${{ env.SYNC_DIR }}/prompt.md
           output-schema-file: ${{ env.SYNC_DIR }}/review.schema.json
           output-file: ${{ env.SYNC_DIR }}/review.json
-      - name: Verify the probe exercised a shell tool
+      - name: Validate this job's assigned review
+        id: validate
+        if: inputs.mode != 'probe'
+        env:
+          REVIEW_SHA: ${{ matrix.sha }}
+        run: python3 "$SYNC_DIR/trusted-sync.py" validate --out "$SYNC_DIR" --review-sha "$REVIEW_SHA"
+      - name: Verify the probe exercised shell reading and patch editing
         if: inputs.mode == 'probe' && steps.review.outcome == 'success'
         run: |
           python3 - <<'PYCODE'
@@ -162,14 +199,15 @@ jobs:
           from pathlib import Path
           result = json.loads((Path(os.environ['SYNC_DIR']) / 'review.json').read_text())
           expected = Path('.cache/upstream-sync-probe.txt').read_text()
-          if result != {'status': 'ok', 'proof': expected}:
-              raise SystemExit('The model responded, but the sandboxed shell probe failed')
-          print('Model response and sandboxed shell challenge verified.')
+          copied = Path('.cache/upstream-sync-probe-copy.txt')
+          if result != {'status': 'ok', 'proof': expected} or not copied.exists() or copied.read_text().strip() != expected:
+              raise SystemExit('The model responded, but the sandboxed read/edit probe failed')
+          print('Model response, shell read, and apply_patch edit verified.')
           PYCODE
       - name: Retain progress and stop the deadline
         if: always()
         env:
-          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome == 'success' && (inputs.mode == 'probe' || steps.validate.outcome == 'success') && 'success' || 'failure' }}
         run: |
           touch "$SYNC_DIR/watchdog.stop"
           if [ -n "${WATCH_DIR:-}" ] && [ -f "$WATCH_DIR/status.json" ]; then
@@ -187,13 +225,14 @@ jobs:
           outcome = os.environ['REVIEW_OUTCOME']
           (folder / 'action-result.json').write_text(json.dumps({'outcome': outcome}))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-              summary.write('Review action outcome: **' + outcome + '**. Progress and watchdog diagnostics are in upstream-review.\n')
+              summary.write('Validated review outcome: **' + outcome + '**. Progress and watchdog diagnostics are in the artifact for this commit.\n')
           PYCODE
       - name: Retain the review and proposed patch
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: upstream-review
+          name: upstream-review-${{ matrix.sha }}
+          overwrite: true
           path: |
             ${{ env.SYNC_DIR }}/review.json
             ${{ env.SYNC_DIR }}/adaptations.patch
@@ -204,12 +243,45 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  publish:
+  collect:
     needs: [plan, agent]
+    if: needs.plan.outputs.status == 'ready' && inputs.mode != 'probe' && inputs.review_sha == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: upstream-plan
+          path: ${{ env.SYNC_DIR }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: upstream-review-*
+          path: ${{ env.SYNC_DIR }}/reviews
+      - name: Validate complete reviews and combine compatible adaptations
+        run: |
+          UPSTREAM_SHA=$(python3 -c 'import json,os; print(json.load(open(os.environ["SYNC_DIR"]+"/plan.json"))["fetched_sha"])')
+          git fetch --no-tags https://github.com/JuliaLang/julia.git "$UPSTREAM_SHA"
+          python3 contrib/upstream-sync/collect_reviews.py --out "$SYNC_DIR"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: upstream-review
+          overwrite: true
+          path: |
+            ${{ env.SYNC_DIR }}/review.json
+            ${{ env.SYNC_DIR }}/adaptations.patch
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: [plan, collect]
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'schedule' || inputs.mode == 'propose') &&
-      ((needs.plan.outputs.status == 'ready' && needs.agent.result == 'success') ||
+      ((needs.plan.outputs.status == 'ready' && needs.collect.result == 'success') ||
        needs.plan.outputs.status == 'existing')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

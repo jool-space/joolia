@@ -49,18 +49,51 @@ gh variable set JOOLIA_UPSTREAM_SYNC_ENABLED --body true --repo jool-space/jooli
 
 Delete that variable or set it to `false` to stop scheduled proposals. Manual
 runs remain available. This switch controls scheduled proposals and post-merge continuation;
-automatic merging has a separate switch below. Each new batch permits one agent invocation,
-with an independent 25-minute deadline including action setup. A root-owned
-watchdog stops only processes carrying the review action's exact marker, before
-the outer job limit, leaving time to upload diagnostics. This is a runtime bound,
-not a dollar/token cap. The 30-minute step and 40-minute job limits remain backups.
+automatic merging has a separate switch below. Each incoming commit gets its own
+review job against the complete merged batch, with one running at a time to avoid competing for the model token-per-minute
+limit. This changes review concurrency, not the number of commits in a merge
+batch.
+Each job has an independent eight-minute deadline including action setup,
+a ten-minute step limit and a fifteen-minute outer job limit. These are runtime
+bounds, not dollar/token caps. A root-owned watchdog identifies the review action
+by its exact environment marker and puts it and its descendants in a separate
+cgroup with a 4 GiB memory limit and no swap. This prevents a review from using
+all runner memory and lets the deadline kill descendants that clear their marker.
+Memory counters and OOM events are retained with the diagnostics. The Actions
+worker is outside this group. A killed runner can still prevent diagnostics
+from being uploaded; the watchdog is not a guarantee of artifact retention.
 
-A reviewer writes completed per-commit records and its current SHA to an ignored
-progress file. On success or failure, `upstream-review` retains that file, the
-working patch, action outcome and watchdog process counters. These diagnostics
-never substitute for a complete schema-validated review and cannot authorize a
-PR or merge. They contain no process arguments, environment contents or Codex
-authentication files. A killed runner can still prevent artifact retention.
+A reviewer writes its current SHA and completed record to an ignored progress
+file. Each job uploads `upstream-review-<sha>` independently, retaining the review,
+patch, action outcome and available watchdog diagnostics. Successful artifacts
+survive failures in other jobs. Use GitHub's **Re-run failed jobs** to retry the
+failed assignments and collection, retaining successful reviews from the same
+pinned plan. Retried jobs replace only their own artifact. A new workflow run
+pins a new plan and does not reuse reviews from another source revision.
+
+Each job uses a response schema constrained to its exact assigned SHA and batch
+target, then validates the report before succeeding. Invalid reports therefore
+fail their own job and are eligible for a failed-job retry.
+
+Diagnostics never replace a validated final review and cannot authorize a PR.
+No process arguments, environment contents or Codex authentication files are
+uploaded. The collector requires one successful report per planned SHA, validates
+patch restrictions, and combines adaptations in a disposable worktree. Identical
+patches are applied once. Other patches are combined with Git three-way merging,
+so shared identical edits and separate changes to one file can coexist. Conflicts
+require manual reconciliation. One manual review blocks integration of the entire batch.
+
+To exercise the actual next batch without publishing or advancing a checkpoint:
+
+```sh
+gh workflow run upstream-sync.yml --repo jool-space/joolia --ref master -f mode=review
+```
+
+Add `-f review_sha=<full-sha>` to diagnose one commit from the pinned batch.
+That mode skips collection and cannot publish; a complete proposal still requires
+every SHA. Maintainers can also run this mode on a same-repository workflow branch. It makes
+API calls and runs the same review matrix and collector as production. It does
+not build Joolia; publication still requires the separate complete CI gate.
 
 To check the action/model path independently of a large review, manually run:
 
@@ -68,11 +101,13 @@ To check the action/model path independently of a large review, manually run:
 gh workflow run upstream-sync.yml --ref master -f mode=probe --repo jool-space/joolia
 ```
 
-The probe asks for one sandboxed shell read of a random challenge file and a
-tiny JSON response. It verifies the returned challenge, has a three-minute
+The probe asks for a sandboxed shell read of a random challenge file, an
+`apply_patch` edit copying its contents, and a tiny JSON response. It verifies
+both the response and the edited file, has a three-minute
 independent deadline, and never publishes a PR or advances a checkpoint. Maintainers can
 also dispatch it on a same-repository workflow branch to validate a fix before
-merging. It still makes an API call. Failed review batches are not retried in an
+merging. Review-only trials and probes use separate concurrency groups so a stuck batch
+does not block diagnosis; they never publish. It still makes an API call. Failed review batches are not retried in an
 unbounded loop; inspect the artifact before deciding whether to retry.
 
 ## What happens
@@ -90,13 +125,14 @@ unbounded loop; inspect the artifact before deciding whether to retry.
 3. Preserve the complete ordered incoming list, filenames, sizes and stdlib
    provenance in a plan artifact. Oversized first groups stop with a diagnostic;
    they are never skipped. A pending sync PR prevents preparing another batch.
-4. Attempt a clean merge in an ephemeral checkout. Luna reads each incoming
-   commit and surrounding code, returns a schema-constrained report, and can
+4. Each matrix job attempts the full merge in an ephemeral checkout. Luna reads
+   its assigned commit and surrounding code, returns a schema-constrained report, and can
    make source/test adaptations. Conflicts are aborted and reported for manual
    work. Changes to automation/instructions or stdlib recommendations needing
    subtree imports also produce manual reports rather than source integration.
-5. A fresh publisher runner reconstructs the plan, validates exactly one review
-   per incoming SHA, recreates the upstream merge and applies the proposed patch.
+5. A fresh collector reconstructs the plan, validates exactly one review per
+   incoming SHA, and combines compatible patches. The separate publisher recreates
+   the upstream merge and applies that combined patch.
    Adaptations are committed separately. Patches cannot change automation or
    agent instructions, or introduce symlinks/submodules. No candidate code is
    executed by the publisher, which has no OpenAI credential.
@@ -153,8 +189,8 @@ not automatically trigger ordinary push workflows, so continuation uses an
 explicit workflow dispatch ([GitHub event semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)). A failed dispatch can be retried by the daily/manual
 sync run. The gate also starts a fresh attempt when there is no pending sync PR,
 no active sync run, and master has advanced since the last attempt. This recovers
-when a fix lands after a pre-publication failure. It does not repeatedly retry
-failures on an unchanged master revision, and held/manual-report PRs still block
+when a fix lands after a pre-publication failure. It permits only the single failed-review retry described below on an unchanged
+master revision, and held/manual-report PRs still block
 new batches. This is a serial queue, not a one-PR-per-day quota.
 
 This can spend API credits on several consecutive batches. Each batch retains
@@ -168,8 +204,11 @@ that loses the upstream ancestry on which subsequent planning relies. Review
 whether the selected boundary omits a dependent follow-up before merging.
 
 A retry reuses an already published branch, creates a missing draft PR and
-explicitly dispatches missing CI without paying for another agent run. Existing
-runs are not automatically rerun. Closed/rejected batches are not silently
+explicitly dispatches missing CI without paying for another agent run. On an unchanged master revision, a first failed run whose failed jobs are all
+per-commit reviews gets one automatic **Re-run failed jobs** attempt. Successful
+reviews remain saved. Completion events wake this retry immediately. Cancellations,
+collector/publication failures, held PRs and second failures require inspection;
+there is no unbounded retry loop. Closed/rejected batches are not silently
 reopened or overwritten. Resolve them manually before resuming the queue.
 No force-pushes are used. Plans and reviews are retained as artifacts for 30 days;
 the full review is also committed under `reports/<target-sha>.json`.

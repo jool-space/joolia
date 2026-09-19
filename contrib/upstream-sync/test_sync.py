@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import sync
+import collect_reviews
 import publish
 import automerge
 
@@ -61,6 +62,123 @@ class SyncTests(unittest.TestCase):
         state.update(values)
         sync.write_json(sync.STATE, state)
         self.commit('configure limits')
+
+    def review_artifacts(self, batch):
+        for commit in batch['commits']:
+            folder = self.folder / 'reviews' / ('upstream-review-' + commit['sha'])
+            folder.mkdir(parents=True)
+            sync.write_json(folder / 'review.json', self.review(sync.review_assignment(batch, commit['sha'])))
+            sync.write_json(folder / 'action-result.json', {'outcome': 'success'})
+            (folder / 'adaptations.patch').write_text('')
+        return [self.folder / 'reviews' / ('upstream-review-' + c['sha']) for c in batch['commits']]
+
+    def adaptation(self, path, value):
+        # A real Git patch against the complete upstream merge, as produced by a review job.
+        sync.merge(sync.plan(self.tip))
+        Path(path).write_text(value)
+        sync.git('add', '--intent-to-add', '--', path)
+        result = sync.git('diff', '--binary', 'HEAD').stdout
+        sync.git('reset', '--hard', self.base)
+        return result
+
+    def test_independent_reviews_assemble_one_complete_merge(self):
+        batch = sync.plan(self.tip)
+        a, b = self.review_artifacts(batch)
+        (a / 'adaptations.patch').write_text(self.adaptation('base.txt', 'adapted base\n'))
+        (b / 'adaptations.patch').write_text(self.adaptation('second.txt', 'adapted second\n'))
+        collect_reviews.collect(batch, self.folder)
+        self.assertEqual(sync.output('rev-parse', 'HEAD'), self.base)
+        self.assertEqual(sync.output('status', '--porcelain'), '')
+        review = json.loads((self.folder / 'review.json').read_text())
+        self.assertEqual([c['sha'] for c in review['commits']], [self.first, self.tip])
+        sync.assemble(batch, self.folder)
+        self.assertEqual(Path('base.txt').read_text(), 'adapted base\n')
+        self.assertEqual(Path('second.txt').read_text(), 'adapted second\n')
+        self.assertEqual(sync.git('merge-base', '--is-ancestor', self.tip, 'HEAD').returncode, 0)
+
+    def test_missing_or_extra_artifact_rejected(self):
+        batch = sync.plan(self.tip)
+        a, b = self.review_artifacts(batch)
+        b.rename(b.with_name('upstream-review-wrong'))
+        with self.assertRaisesRegex(ValueError, 'exactly one artifact'):
+            collect_reviews.collect(batch, self.folder)
+
+    def test_repeated_review_cannot_stand_in_for_another_sha(self):
+        batch = sync.plan(self.tip)
+        a, b = self.review_artifacts(batch)
+        (b / 'review.json').write_bytes((a / 'review.json').read_bytes())
+        with self.assertRaisesRegex(ValueError, 'exactly one review'):
+            collect_reviews.collect(batch, self.folder)
+
+    def test_failed_action_cannot_authorize_publication(self):
+        batch = sync.plan(self.tip)
+        a, b = self.review_artifacts(batch)
+        sync.write_json(a / 'action-result.json', {'outcome': 'failure'})
+        with self.assertRaisesRegex(ValueError, 'successful review'):
+            collect_reviews.collect(batch, self.folder)
+
+    def test_manual_review_blocks_the_whole_batch(self):
+        batch = sync.plan(self.tip)
+        a, b = self.review_artifacts(batch)
+        sync.write_json(a / 'review.json', self.review(sync.review_assignment(batch, self.first), 'manual'))
+        collect_reviews.collect(batch, self.folder)
+        review = json.loads((self.folder / 'review.json').read_text())
+        self.assertEqual(review['decision'], 'manual')
+        sync.assemble(batch, self.folder)
+        self.assertEqual(json.loads(Path(sync.STATE).read_text())['integrated_sha'], self.initial)
+
+    def test_overlapping_adaptations_require_reconciliation(self):
+        batch = sync.plan(self.tip)
+        a, b = self.review_artifacts(batch)
+        (a / 'adaptations.patch').write_text(self.adaptation('base.txt', 'one interpretation\n'))
+        (b / 'adaptations.patch').write_text(self.adaptation('base.txt', 'another interpretation\n'))
+        collect_reviews.collect(batch, self.folder)
+        review = json.loads((self.folder / 'review.json').read_text())
+        self.assertEqual(review['decision'], 'manual')
+        self.assertIn('base.txt', review['unresolved'][0])
+        self.assertEqual((self.folder / 'adaptations.patch').read_text(), '')
+        self.assertEqual(sync.output('rev-parse', 'HEAD'), self.base)
+
+    def test_overlapping_subset_and_separate_edits_combine_cleanly(self):
+        sync.git('switch', '-q', 'upstream')
+        baseline = 'first\n' + 'unchanged\n' * 20 + 'last\n'
+        self.commit('larger shared file', 'base.txt', baseline)
+        self.tip = sync.output('rev-parse', 'HEAD')
+        sync.git('switch', '-q', 'master')
+        batch = sync.plan(self.tip)
+        a, b, c = self.review_artifacts(batch)
+        full = baseline.replace('first', 'adapted first').replace('last', 'adapted last')
+        subset = baseline.replace('last', 'adapted last')
+        (a / 'adaptations.patch').write_text(self.adaptation('base.txt', full))
+        (b / 'adaptations.patch').write_text(self.adaptation('base.txt', subset))
+        (c / 'adaptations.patch').write_text(self.adaptation('second.txt', 'separate file\n'))
+        collect_reviews.collect(batch, self.folder)
+        sync.assemble(batch, self.folder)
+        self.assertEqual(Path('base.txt').read_text(), full)
+        self.assertEqual(Path('second.txt').read_text(), 'separate file\n')
+
+    def test_identical_adaptations_are_applied_once(self):
+        batch = sync.plan(self.tip)
+        a, b = self.review_artifacts(batch)
+        patch_text = self.adaptation('base.txt', 'same adaptation\n')
+        for folder in (a, b):
+            (folder / 'adaptations.patch').write_text(patch_text)
+        collect_reviews.collect(batch, self.folder)
+        sync.assemble(batch, self.folder)
+        self.assertEqual(Path('base.txt').read_text(), 'same adaptation\n')
+
+    def test_collector_rejects_protected_patch_and_leaves_checkout_clean(self):
+        batch = sync.plan(self.tip)
+        a, b = self.review_artifacts(batch)
+        (a / 'adaptations.patch').write_text(self.adaptation('AGENTS.md', 'untrusted instructions\n'))
+        with self.assertRaisesRegex(ValueError, 'automation or agent instructions'):
+            collect_reviews.collect(batch, self.folder)
+        self.assertEqual(sync.output('rev-parse', 'HEAD'), self.base)
+        self.assertEqual(sync.output('status', '--porcelain'), '')
+
+    def test_assignment_cannot_request_a_commit_outside_batch(self):
+        with self.assertRaisesRegex(ValueError, 'not in the pinned batch'):
+            sync.review_assignment(sync.plan(self.tip), self.initial)
 
     def test_empty_batch(self):
         self.assertEqual(sync.plan(self.initial)['status'], 'empty')
@@ -273,17 +391,24 @@ index 0000000..9daeafb
         self.assertEqual(calls.call_args.args, ('workflow', 'run', 'upstream-merge.yml', '--ref', 'master'))
 
     def test_prompt_embeds_all_porting_guides(self):
-        for relative in ('prompt.md', 'contract.md', *(f'guides/{name}' for name in sync.GUIDES)):
+        for relative in ('prompt.md', 'contract.md', 'review.schema.json', *(f'guides/{name}' for name in sync.GUIDES)):
             dest = Path('contrib/upstream-sync', relative)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text((GUIDE_ROOT / relative).read_text())
         self.commit('add trusted guides')
         batch = sync.plan(self.tip)
-        sync.prepare(batch, self.folder)
+        sync.prepare(batch, self.folder, self.first)
+        schema = json.loads((self.folder / 'review.schema.json').read_text())
+        self.assertEqual(schema['properties']['target_sha']['enum'], [self.tip])
+        self.assertEqual(schema['properties']['commits']['minItems'], 1)
+        self.assertEqual(schema['properties']['commits']['maxItems'], 1)
+        self.assertEqual(schema['properties']['commits']['items']['properties']['sha']['enum'], [self.first])
         prompt = (self.folder / 'prompt.md').read_text()
         for name in sync.GUIDES:
             self.assertIn((GUIDE_ROOT / 'guides' / name).read_text(), prompt)
         self.assertIn(batch['target_sha'], prompt)
+        assignment = prompt.split('Assigned commits (review ONLY these SHAs):\n')[1].split('\nMerge conflicts:')[0]
+        self.assertEqual([c['sha'] for c in json.loads(assignment)], [self.first])
 
     def test_pr_body_does_not_reference_upstream(self):
         batch = sync.plan(self.tip)
@@ -498,6 +623,33 @@ index 0000000..9daeafb
                         {'workflow_runs': [{'status': 'completed', 'conclusion': conclusion, 'head_sha': self.tip}]},
                         {'object': {'sha': self.tip}}]), patch.object(automerge, 'gh') as dispatch:
                 automerge.resume_idle_queue([])
+                dispatch.assert_not_called()
+
+    def test_idle_queue_retries_failed_reviews_only_once(self):
+        run = dict(id=42, status='completed', conclusion='failure', head_sha=self.tip, run_attempt=1)
+        jobs = [dict(name='plan', conclusion='success'),
+                dict(name='Review ' + self.first, conclusion='success'),
+                dict(name='Review ' + self.tip, conclusion='failure'),
+                dict(name='collect', conclusion='skipped')]
+        with patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': 'true'}), \
+                patch.object(automerge, 'api', side_effect=[{'workflow_runs': [run]}, {'object': {'sha': self.tip}}]), \
+                patch.object(automerge, 'pages', return_value=jobs), patch.object(automerge, 'gh') as dispatch:
+            automerge.resume_idle_queue([])
+            dispatch.assert_called_once_with('run', 'rerun', '42', '--failed')
+        for change in ({'run_attempt': 2}, {'conclusion': 'cancelled'}, {'conclusion': 'success'}):
+            with self.subTest(change=change), patch.object(automerge, 'pages') as pages, \
+                    patch.object(automerge, 'gh') as dispatch:
+                self.assertFalse(automerge.retry_failed_reviews_once(dict(run, **change)))
+                pages.assert_not_called()
+                dispatch.assert_not_called()
+
+    def test_automatic_retry_rejects_collector_publish_and_probe_failures(self):
+        run = dict(id=42, conclusion='failure', run_attempt=1)
+        for name in ('collect', 'publish', 'plan', 'Review probe', 'Review not-a-sha'):
+            jobs = [dict(name='plan', conclusion='success'), dict(name=name, conclusion='failure')]
+            with self.subTest(name=name), patch.object(automerge, 'pages', return_value=jobs), \
+                    patch.object(automerge, 'gh') as dispatch:
+                self.assertFalse(automerge.retry_failed_reviews_once(run))
                 dispatch.assert_not_called()
 
     def test_idle_queue_does_not_duplicate_active_runs(self):
