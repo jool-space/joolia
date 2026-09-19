@@ -180,6 +180,20 @@ def advance(pr, workflow_id, repo):
         print('Dispatched the next batch immediately.')
 
 
+def retry_failed_reviews_once(run):
+    # Do not retry cancellations, collector/publication failures, or second attempts.
+    if run.get('conclusion') != 'failure' or run.get('run_attempt') != 1:
+        return False
+    jobs = pages(f'actions/runs/{run["id"]}/jobs?filter=latest', 'jobs')
+    failed = [job for job in jobs if job['conclusion'] == 'failure']
+    if (not any(j['name'] == 'plan' and j['conclusion'] == 'success' for j in jobs) or
+            not failed or any(not re.fullmatch(r'Review [0-9a-f]{40}', j['name']) for j in failed)):
+        return False
+    gh('run', 'rerun', str(run['id']), '--failed')
+    print('Retried failed review jobs once; successful reviews remain saved.')
+    return True
+
+
 def resume_idle_queue(prs):
     if os.environ.get('JOOLIA_UPSTREAM_SYNC_ENABLED') != 'true':
         return
@@ -192,6 +206,8 @@ def resume_idle_queue(prs):
         return
     master = api('git/ref/heads/master')['object']['sha']
     if runs and runs[0]['head_sha'] == master:
+        if retry_failed_reviews_once(runs[0]):
+            return
         print('This master revision was already attempted; daily/manual retries remain available.')
         return
     gh('workflow', 'run', 'upstream-sync.yml', '--ref', 'master', '-f', 'mode=propose')

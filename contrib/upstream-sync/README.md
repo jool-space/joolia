@@ -189,8 +189,8 @@ not automatically trigger ordinary push workflows, so continuation uses an
 explicit workflow dispatch ([GitHub event semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)). A failed dispatch can be retried by the daily/manual
 sync run. The gate also starts a fresh attempt when there is no pending sync PR,
 no active sync run, and master has advanced since the last attempt. This recovers
-when a fix lands after a pre-publication failure. It does not repeatedly retry
-failures on an unchanged master revision, and held/manual-report PRs still block
+when a fix lands after a pre-publication failure. It permits only the single failed-review retry described below on an unchanged
+master revision, and held/manual-report PRs still block
 new batches. This is a serial queue, not a one-PR-per-day quota.
 
 This can spend API credits on several consecutive batches. Each batch retains
@@ -204,8 +204,11 @@ that loses the upstream ancestry on which subsequent planning relies. Review
 whether the selected boundary omits a dependent follow-up before merging.
 
 A retry reuses an already published branch, creates a missing draft PR and
-explicitly dispatches missing CI without paying for another agent run. Existing
-runs are not automatically rerun. Closed/rejected batches are not silently
+explicitly dispatches missing CI without paying for another agent run. On an unchanged master revision, a first failed run whose failed jobs are all
+per-commit reviews gets one automatic **Re-run failed jobs** attempt. Successful
+reviews remain saved. Completion events wake this retry immediately. Cancellations,
+collector/publication failures, held PRs and second failures require inspection;
+there is no unbounded retry loop. Closed/rejected batches are not silently
 reopened or overwritten. Resolve them manually before resuming the queue.
 No force-pushes are used. Plans and reviews are retained as artifacts for 30 days;
 the full review is also committed under `reports/<target-sha>.json`.

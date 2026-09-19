@@ -625,6 +625,33 @@ index 0000000..9daeafb
                 automerge.resume_idle_queue([])
                 dispatch.assert_not_called()
 
+    def test_idle_queue_retries_failed_reviews_only_once(self):
+        run = dict(id=42, status='completed', conclusion='failure', head_sha=self.tip, run_attempt=1)
+        jobs = [dict(name='plan', conclusion='success'),
+                dict(name='Review ' + self.first, conclusion='success'),
+                dict(name='Review ' + self.tip, conclusion='failure'),
+                dict(name='collect', conclusion='skipped')]
+        with patch.dict(os.environ, {'JOOLIA_UPSTREAM_SYNC_ENABLED': 'true'}), \
+                patch.object(automerge, 'api', side_effect=[{'workflow_runs': [run]}, {'object': {'sha': self.tip}}]), \
+                patch.object(automerge, 'pages', return_value=jobs), patch.object(automerge, 'gh') as dispatch:
+            automerge.resume_idle_queue([])
+            dispatch.assert_called_once_with('run', 'rerun', '42', '--failed')
+        for change in ({'run_attempt': 2}, {'conclusion': 'cancelled'}, {'conclusion': 'success'}):
+            with self.subTest(change=change), patch.object(automerge, 'pages') as pages, \
+                    patch.object(automerge, 'gh') as dispatch:
+                self.assertFalse(automerge.retry_failed_reviews_once(dict(run, **change)))
+                pages.assert_not_called()
+                dispatch.assert_not_called()
+
+    def test_automatic_retry_rejects_collector_publish_and_probe_failures(self):
+        run = dict(id=42, conclusion='failure', run_attempt=1)
+        for name in ('collect', 'publish', 'plan', 'Review probe', 'Review not-a-sha'):
+            jobs = [dict(name='plan', conclusion='success'), dict(name=name, conclusion='failure')]
+            with self.subTest(name=name), patch.object(automerge, 'pages', return_value=jobs), \
+                    patch.object(automerge, 'gh') as dispatch:
+                self.assertFalse(automerge.retry_failed_reviews_once(run))
+                dispatch.assert_not_called()
+
     def test_idle_queue_does_not_duplicate_active_runs(self):
         for status in ('queued', 'pending', 'in_progress', 'waiting'):
             with self.subTest(status=status), \
