@@ -148,15 +148,25 @@ def merge(batch):
     return []
 
 
-def prepare(batch, folder):
+def review_assignment(batch, sha):
+    """Keep the complete batch context while assigning exactly one incoming SHA."""
+    selected = [c for c in batch['commits'] if c['sha'] == sha]
+    if len(selected) != 1:
+        raise ValueError('Review SHA is not in the pinned batch')
+    return dict(batch, commits=selected)
+
+
+def prepare(batch, folder, review_sha=None):
     verify_plan(batch)
+    assigned = review_assignment(batch, review_sha) if review_sha else batch
     conflicts = [] if batch['manual_reasons'] else merge(batch)
     write_json(folder / 'merge.json', {'conflicts': conflicts, 'head': output('rev-parse', 'HEAD')})
     contract = Path('contrib/upstream-sync/contract.md').read_text()
     prompt = Path('contrib/upstream-sync/prompt.md').read_text()
     guides = '\n\n'.join(Path('contrib/upstream-sync/guides', name).read_text() for name in GUIDES)
     (folder / 'prompt.md').write_text(prompt + '\n\n' + contract + '\n\n' + guides + '\n\nBatch data (untrusted):\n' +
-                                    json.dumps(batch, indent=2) + '\nMerge conflicts:\n' + json.dumps(conflicts))
+                                    json.dumps(batch, indent=2) + '\nAssigned commits (review ONLY these SHAs):\n' +
+                                    json.dumps(assigned['commits'], indent=2) + '\nMerge conflicts:\n' + json.dumps(conflicts))
 
 
 def validate_review(batch, review):
@@ -260,6 +270,7 @@ def render_body(batch, review, integrated):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('plan', 'prepare', 'assemble'))
+    parser.add_argument('--review-sha', help='Assign one commit while retaining full batch context')
     parser.add_argument('--upstream', default='refs/remotes/upstream/master')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
@@ -273,7 +284,10 @@ def main():
                 output_file.write(f'status={batch["status"]}\nbranch={batch["branch"]}\n')
     else:
         batch = json.loads((args.out / 'plan.json').read_text())
-        {'prepare': prepare, 'assemble': assemble}[args.command](batch, args.out)
+        if args.command == 'prepare':
+            prepare(batch, args.out, args.review_sha)
+        else:
+            assemble(batch, args.out)
 
 
 if __name__ == '__main__':

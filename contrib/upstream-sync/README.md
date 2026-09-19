@@ -49,18 +49,38 @@ gh variable set JOOLIA_UPSTREAM_SYNC_ENABLED --body true --repo jool-space/jooli
 
 Delete that variable or set it to `false` to stop scheduled proposals. Manual
 runs remain available. This switch controls scheduled proposals and post-merge continuation;
-automatic merging has a separate switch below. Each new batch permits one agent invocation,
-with an independent 25-minute deadline including action setup. A root-owned
-watchdog stops only processes carrying the review action's exact marker, before
-the outer job limit, leaving time to upload diagnostics. This is a runtime bound,
-not a dollar/token cap. The 30-minute step and 40-minute job limits remain backups.
+automatic merging has a separate switch below. Each incoming commit gets its own
+review job against the complete merged batch, with at most two running at once.
+Each job has an independent eight-minute deadline including action setup,
+a ten-minute step limit and a fifteen-minute outer job limit. These are runtime
+bounds, not dollar/token caps. A root-owned watchdog stops only processes carrying
+the review action's exact marker. A killed runner can still prevent diagnostics
+from being uploaded; the watchdog is not a guarantee of artifact retention.
 
-A reviewer writes completed per-commit records and its current SHA to an ignored
-progress file. On success or failure, `upstream-review` retains that file, the
-working patch, action outcome and watchdog process counters. These diagnostics
-never substitute for a complete schema-validated review and cannot authorize a
-PR or merge. They contain no process arguments, environment contents or Codex
-authentication files. A killed runner can still prevent artifact retention.
+A reviewer writes its current SHA and completed record to an ignored progress
+file. Each job uploads `upstream-review-<sha>` independently, retaining the review,
+patch, action outcome and available watchdog diagnostics. Successful artifacts
+survive failures in other jobs. Use GitHub's **Re-run failed jobs** to retry the
+failed assignments and collection, retaining successful reviews from the same
+pinned plan. Retried jobs replace only their own artifact. A new workflow run
+pins a new plan and does not reuse reviews from another source revision.
+
+Diagnostics never replace a validated final review and cannot authorize a PR.
+No process arguments, environment contents or Codex authentication files are
+uploaded. The collector requires one successful report per planned SHA, validates
+patch restrictions, and combines adaptations in a disposable worktree. Identical
+patches are applied once; differing patches touching the same file require manual
+reconciliation. One manual review blocks integration of the entire batch.
+
+To exercise the actual next batch without publishing or advancing a checkpoint:
+
+```sh
+gh workflow run upstream-sync.yml --repo jool-space/joolia --ref master -f mode=review
+```
+
+Maintainers can also run this mode on a same-repository workflow branch. It makes
+API calls and runs the same review matrix and collector as production. It does
+not build Joolia; publication still requires the separate complete CI gate.
 
 To check the action/model path independently of a large review, manually run:
 
@@ -90,13 +110,14 @@ unbounded loop; inspect the artifact before deciding whether to retry.
 3. Preserve the complete ordered incoming list, filenames, sizes and stdlib
    provenance in a plan artifact. Oversized first groups stop with a diagnostic;
    they are never skipped. A pending sync PR prevents preparing another batch.
-4. Attempt a clean merge in an ephemeral checkout. Luna reads each incoming
-   commit and surrounding code, returns a schema-constrained report, and can
+4. Each matrix job attempts the full merge in an ephemeral checkout. Luna reads
+   its assigned commit and surrounding code, returns a schema-constrained report, and can
    make source/test adaptations. Conflicts are aborted and reported for manual
    work. Changes to automation/instructions or stdlib recommendations needing
    subtree imports also produce manual reports rather than source integration.
-5. A fresh publisher runner reconstructs the plan, validates exactly one review
-   per incoming SHA, recreates the upstream merge and applies the proposed patch.
+5. A fresh collector reconstructs the plan, validates exactly one review per
+   incoming SHA, and combines compatible patches. The separate publisher recreates
+   the upstream merge and applies that combined patch.
    Adaptations are committed separately. Patches cannot change automation or
    agent instructions, or introduce symlinks/submodules. No candidate code is
    executed by the publisher, which has no OpenAI credential.

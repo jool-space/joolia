@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Plan, prepare a sync PR, or probe the review action without publishing
+        description: Plan, propose a sync, review without publishing, or probe the action
         type: choice
-        options: [plan, propose, probe]
+        options: [plan, propose, review, probe]
         default: plan
 
 permissions:
@@ -30,7 +30,7 @@ env:
 jobs:
   plan:
     if: >-
-      (github.ref == 'refs/heads/master' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'probe')) &&
+      (github.ref == 'refs/heads/master' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'probe' || inputs.mode == 'review'))) &&
       (github.event_name != 'schedule' || vars.JOOLIA_UPSTREAM_SYNC_ENABLED == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -40,6 +40,7 @@ jobs:
     outputs:
       status: ${{ steps.plan.outputs.status }}
       branch: ${{ steps.plan.outputs.branch }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +57,19 @@ jobs:
           python3 contrib/upstream-sync/sync.py plan --upstream FETCH_HEAD --out "$SYNC_DIR"
           python3 contrib/upstream-sync/publish.py gate --data "$SYNC_DIR"
           cat "$SYNC_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Assign one review job per incoming commit
+        id: matrix
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          plan = json.loads((Path(os.environ['SYNC_DIR']) / 'plan.json').read_text())
+          shas = [c['sha'] for c in plan['commits']] if os.environ['MODE'] != 'probe' else ['probe']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps({'sha': shas or ['idle']}) + '\n')
+          PYCODE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: upstream-plan
@@ -65,10 +79,15 @@ jobs:
   agent:
     needs: plan
     if: >-
-      (needs.plan.outputs.status == 'ready' && (github.event_name == 'schedule' || inputs.mode == 'propose')) ||
+      (needs.plan.outputs.status == 'ready' && (github.event_name == 'schedule' || inputs.mode == 'propose' || inputs.mode == 'review')) ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'probe')
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    name: Review ${{ matrix.sha }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,11 +107,13 @@ jobs:
           fi
       - name: Prepare the pinned source tree and trusted prompt
         if: inputs.mode != 'probe'
+        env:
+          REVIEW_SHA: ${{ matrix.sha }}
         run: |
           UPSTREAM_SHA=$(python3 -c 'import json,os; print(json.load(open(os.environ["SYNC_DIR"]+"/plan.json"))["fetched_sha"])')
           git fetch --no-tags https://github.com/JuliaLang/julia.git "$UPSTREAM_SHA"
           cp contrib/upstream-sync/review.schema.json "$SYNC_DIR/review.schema.json"
-          python3 contrib/upstream-sync/sync.py prepare --out "$SYNC_DIR"
+          python3 contrib/upstream-sync/sync.py prepare --out "$SYNC_DIR" --review-sha "$REVIEW_SHA"
       - name: Prepare a minimal action probe
         if: inputs.mode == 'probe'
         run: |
@@ -112,7 +133,7 @@ jobs:
           PYCODE
       - name: Arm independent review deadline
         env:
-          WATCH_SECONDS: ${{ inputs.mode == 'probe' && '180' || '1500' }}
+          WATCH_SECONDS: ${{ inputs.mode == 'probe' && '180' || '480' }}
         run: |
           WATCH_DIR=$(sudo mktemp -d /tmp/joolia-review-watchdog.XXXXXX)
           sudo chmod 755 "$WATCH_DIR"
@@ -137,11 +158,11 @@ jobs:
           progress.write_text(json.dumps({'target_sha': plan['target_sha'], 'current_sha': None, 'commits': []}))
           print('Independent review deadline armed for', os.environ['WATCH_SECONDS'], 'seconds.')
           PYCODE
-      - name: Review every commit and adapt the batch
+      - name: Review the assigned commit and adapt the merged source
         id: review
         env:
           JOOLIA_REVIEW_MARKER: ${{ github.run_id }}:${{ github.run_attempt }}
-        timeout-minutes: 30
+        timeout-minutes: 10
         uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -187,13 +208,14 @@ jobs:
           outcome = os.environ['REVIEW_OUTCOME']
           (folder / 'action-result.json').write_text(json.dumps({'outcome': outcome}))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-              summary.write('Review action outcome: **' + outcome + '**. Progress and watchdog diagnostics are in upstream-review.\n')
+              summary.write('Review action outcome: **' + outcome + '**. Progress and watchdog diagnostics are in the artifact for this commit.\n')
           PYCODE
       - name: Retain the review and proposed patch
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: upstream-review
+          name: upstream-review-${{ matrix.sha }}
+          overwrite: true
           path: |
             ${{ env.SYNC_DIR }}/review.json
             ${{ env.SYNC_DIR }}/adaptations.patch
@@ -204,12 +226,45 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  publish:
+  collect:
     needs: [plan, agent]
+    if: needs.plan.outputs.status == 'ready' && inputs.mode != 'probe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: upstream-plan
+          path: ${{ env.SYNC_DIR }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: upstream-review-*
+          path: ${{ env.SYNC_DIR }}/reviews
+      - name: Validate complete reviews and combine compatible adaptations
+        run: |
+          UPSTREAM_SHA=$(python3 -c 'import json,os; print(json.load(open(os.environ["SYNC_DIR"]+"/plan.json"))["fetched_sha"])')
+          git fetch --no-tags https://github.com/JuliaLang/julia.git "$UPSTREAM_SHA"
+          python3 contrib/upstream-sync/collect_reviews.py --out "$SYNC_DIR"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: upstream-review
+          overwrite: true
+          path: |
+            ${{ env.SYNC_DIR }}/review.json
+            ${{ env.SYNC_DIR }}/adaptations.patch
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: [plan, collect]
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'schedule' || inputs.mode == 'propose') &&
-      ((needs.plan.outputs.status == 'ready' && needs.agent.result == 'success') ||
+      ((needs.plan.outputs.status == 'ready' && needs.collect.result == 'success') ||
        needs.plan.outputs.status == 'existing')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
