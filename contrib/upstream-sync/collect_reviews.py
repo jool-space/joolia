@@ -48,7 +48,7 @@ def collect(batch, folder):
 
 
 def combine_patches(batch, patches):
-    """Validate each patch against the same merge; overlapping files need a human."""
+    """Validate against one baseline, then three-way merge compatible adaptations."""
     original = Path.cwd()
     with tempfile.TemporaryDirectory(prefix='joolia-review-') as temporary:
         checkout = Path(temporary) / 'tree'
@@ -58,7 +58,7 @@ def combine_patches(batch, patches):
             if sync.merge(batch):
                 return '', ['The complete batch has unresolved merge conflicts.']
             merged = sync.output('rev-parse', 'HEAD')
-            owners, unique, seen = {}, [], set()
+            unique, seen = [], set()
             for sha, patch in patches:
                 # Identical adaptations proposed independently only need applying once.
                 data = patch.read_bytes()
@@ -67,18 +67,16 @@ def combine_patches(batch, patches):
                 seen.add(data)
                 sync.git('reset', '--hard', merged)
                 sync.git('apply', '--index', str(patch))
-                paths = sync.clean_patch_paths(merged)
+                sync.clean_patch_paths(merged)
                 sync.git('diff', '--cached', '--check')
-                overlaps = sorted(set(paths) & owners.keys())
-                if overlaps:
-                    return '', ['Independent adaptations touch the same files and need reconciliation: ' +
-                                ', '.join(overlaps) + '. Review ' + sha + ' alongside ' +
-                                ', '.join(sorted({owners[p] for p in overlaps})) + '.']
-                owners.update(dict.fromkeys(paths, sha))
-                unique.append(patch)
+                unique.append((sha, patch))
             sync.git('reset', '--hard', merged)
-            for patch in unique:
-                sync.git('apply', '--index', str(patch))
+            for sha, patch in unique:
+                result = sync.git('apply', '--3way', '--index', str(patch), check=False)
+                if result.returncode:
+                    conflicts = sync.output('diff', '--name-only', '--diff-filter=U').splitlines()
+                    return '', ['Independent adaptations need reconciliation while applying ' + sha +
+                                (': ' + ', '.join(conflicts) if conflicts else '. The patch could not be combined cleanly.')]
             sync.clean_patch_paths(merged)
             sync.git('diff', '--cached', '--check')
             combined = sync.git('diff', '--binary', merged).stdout

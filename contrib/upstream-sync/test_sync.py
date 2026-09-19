@@ -139,6 +139,24 @@ class SyncTests(unittest.TestCase):
         self.assertEqual((self.folder / 'adaptations.patch').read_text(), '')
         self.assertEqual(sync.output('rev-parse', 'HEAD'), self.base)
 
+    def test_overlapping_subset_and_separate_edits_combine_cleanly(self):
+        sync.git('switch', '-q', 'upstream')
+        baseline = 'first\n' + 'unchanged\n' * 20 + 'last\n'
+        self.commit('larger shared file', 'base.txt', baseline)
+        self.tip = sync.output('rev-parse', 'HEAD')
+        sync.git('switch', '-q', 'master')
+        batch = sync.plan(self.tip)
+        a, b, c = self.review_artifacts(batch)
+        full = baseline.replace('first', 'adapted first').replace('last', 'adapted last')
+        subset = baseline.replace('last', 'adapted last')
+        (a / 'adaptations.patch').write_text(self.adaptation('base.txt', full))
+        (b / 'adaptations.patch').write_text(self.adaptation('base.txt', subset))
+        (c / 'adaptations.patch').write_text(self.adaptation('second.txt', 'separate file\n'))
+        collect_reviews.collect(batch, self.folder)
+        sync.assemble(batch, self.folder)
+        self.assertEqual(Path('base.txt').read_text(), full)
+        self.assertEqual(Path('second.txt').read_text(), 'separate file\n')
+
     def test_identical_adaptations_are_applied_once(self):
         batch = sync.plan(self.tip)
         a, b = self.review_artifacts(batch)
@@ -373,13 +391,18 @@ index 0000000..9daeafb
         self.assertEqual(calls.call_args.args, ('workflow', 'run', 'upstream-merge.yml', '--ref', 'master'))
 
     def test_prompt_embeds_all_porting_guides(self):
-        for relative in ('prompt.md', 'contract.md', *(f'guides/{name}' for name in sync.GUIDES)):
+        for relative in ('prompt.md', 'contract.md', 'review.schema.json', *(f'guides/{name}' for name in sync.GUIDES)):
             dest = Path('contrib/upstream-sync', relative)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text((GUIDE_ROOT / relative).read_text())
         self.commit('add trusted guides')
         batch = sync.plan(self.tip)
         sync.prepare(batch, self.folder, self.first)
+        schema = json.loads((self.folder / 'review.schema.json').read_text())
+        self.assertEqual(schema['properties']['target_sha']['enum'], [self.tip])
+        self.assertEqual(schema['properties']['commits']['minItems'], 1)
+        self.assertEqual(schema['properties']['commits']['maxItems'], 1)
+        self.assertEqual(schema['properties']['commits']['items']['properties']['sha']['enum'], [self.first])
         prompt = (self.folder / 'prompt.md').read_text()
         for name in sync.GUIDES:
             self.assertIn((GUIDE_ROOT / 'guides' / name).read_text(), prompt)

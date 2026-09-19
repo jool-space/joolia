@@ -71,12 +71,17 @@ failed assignments and collection, retaining successful reviews from the same
 pinned plan. Retried jobs replace only their own artifact. A new workflow run
 pins a new plan and does not reuse reviews from another source revision.
 
+Each job uses a response schema constrained to its exact assigned SHA and batch
+target, then validates the report before succeeding. Invalid reports therefore
+fail their own job and are eligible for a failed-job retry.
+
 Diagnostics never replace a validated final review and cannot authorize a PR.
 No process arguments, environment contents or Codex authentication files are
 uploaded. The collector requires one successful report per planned SHA, validates
 patch restrictions, and combines adaptations in a disposable worktree. Identical
-patches are applied once; differing patches touching the same file require manual
-reconciliation. One manual review blocks integration of the entire batch.
+patches are applied once. Other patches are combined with Git three-way merging,
+so shared identical edits and separate changes to one file can coexist. Conflicts
+require manual reconciliation. One manual review blocks integration of the entire batch.
 
 To exercise the actual next batch without publishing or advancing a checkpoint:
 
@@ -84,7 +89,9 @@ To exercise the actual next batch without publishing or advancing a checkpoint:
 gh workflow run upstream-sync.yml --repo jool-space/joolia --ref master -f mode=review
 ```
 
-Maintainers can also run this mode on a same-repository workflow branch. It makes
+Add `-f review_sha=<full-sha>` to diagnose one commit from the pinned batch.
+That mode skips collection and cannot publish; a complete proposal still requires
+every SHA. Maintainers can also run this mode on a same-repository workflow branch. It makes
 API calls and runs the same review matrix and collector as production. It does
 not build Joolia; publication still requires the separate complete CI gate.
 

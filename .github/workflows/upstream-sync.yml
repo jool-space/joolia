@@ -10,6 +10,10 @@ on:
         type: choice
         options: [plan, propose, review, probe]
         default: plan
+      review_sha:
+        description: Optional full commit SHA for a review-only diagnostic; never publishes
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -61,12 +65,17 @@ jobs:
         id: matrix
         env:
           MODE: ${{ inputs.mode }}
+          REVIEW_SHA: ${{ inputs.review_sha }}
         run: |
           python3 - <<'PYCODE'
           import json, os
           from pathlib import Path
           plan = json.loads((Path(os.environ['SYNC_DIR']) / 'plan.json').read_text())
           shas = [c['sha'] for c in plan['commits']] if os.environ['MODE'] != 'probe' else ['probe']
+          if os.environ['REVIEW_SHA']:
+              if os.environ['MODE'] != 'review' or os.environ['REVIEW_SHA'] not in shas:
+                  raise SystemExit('A diagnostic SHA must belong to this batch and requires mode=review')
+              shas = [os.environ['REVIEW_SHA']]
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('matrix=' + json.dumps({'sha': shas or ['idle']}) + '\n')
           PYCODE
@@ -112,7 +121,7 @@ jobs:
         run: |
           UPSTREAM_SHA=$(python3 -c 'import json,os; print(json.load(open(os.environ["SYNC_DIR"]+"/plan.json"))["fetched_sha"])')
           git fetch --no-tags https://github.com/JuliaLang/julia.git "$UPSTREAM_SHA"
-          cp contrib/upstream-sync/review.schema.json "$SYNC_DIR/review.schema.json"
+          cp contrib/upstream-sync/sync.py "$SYNC_DIR/trusted-sync.py"
           python3 contrib/upstream-sync/sync.py prepare --out "$SYNC_DIR" --review-sha "$REVIEW_SHA"
       - name: Prepare a minimal action probe
         if: inputs.mode == 'probe'
@@ -176,6 +185,12 @@ jobs:
           prompt-file: ${{ env.SYNC_DIR }}/prompt.md
           output-schema-file: ${{ env.SYNC_DIR }}/review.schema.json
           output-file: ${{ env.SYNC_DIR }}/review.json
+      - name: Validate this job's assigned review
+        id: validate
+        if: inputs.mode != 'probe'
+        env:
+          REVIEW_SHA: ${{ matrix.sha }}
+        run: python3 "$SYNC_DIR/trusted-sync.py" validate --out "$SYNC_DIR" --review-sha "$REVIEW_SHA"
       - name: Verify the probe exercised shell reading and patch editing
         if: inputs.mode == 'probe' && steps.review.outcome == 'success'
         run: |
@@ -192,7 +207,7 @@ jobs:
       - name: Retain progress and stop the deadline
         if: always()
         env:
-          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome == 'success' && (inputs.mode == 'probe' || steps.validate.outcome == 'success') && 'success' || 'failure' }}
         run: |
           touch "$SYNC_DIR/watchdog.stop"
           if [ -n "${WATCH_DIR:-}" ] && [ -f "$WATCH_DIR/status.json" ]; then
@@ -210,7 +225,7 @@ jobs:
           outcome = os.environ['REVIEW_OUTCOME']
           (folder / 'action-result.json').write_text(json.dumps({'outcome': outcome}))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-              summary.write('Review action outcome: **' + outcome + '**. Progress and watchdog diagnostics are in the artifact for this commit.\n')
+              summary.write('Validated review outcome: **' + outcome + '**. Progress and watchdog diagnostics are in the artifact for this commit.\n')
           PYCODE
       - name: Retain the review and proposed patch
         if: always()
@@ -230,7 +245,7 @@ jobs:
 
   collect:
     needs: [plan, agent]
-    if: needs.plan.outputs.status == 'ready' && inputs.mode != 'probe'
+    if: needs.plan.outputs.status == 'ready' && inputs.mode != 'probe' && inputs.review_sha == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

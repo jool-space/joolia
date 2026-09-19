@@ -159,6 +159,12 @@ def review_assignment(batch, sha):
 def prepare(batch, folder, review_sha=None):
     verify_plan(batch)
     assigned = review_assignment(batch, review_sha) if review_sha else batch
+    schema = json.loads(Path('contrib/upstream-sync/review.schema.json').read_text())
+    schema['properties']['target_sha']['enum'] = [batch['target_sha']]
+    commits_schema = schema['properties']['commits']
+    commits_schema['minItems'] = commits_schema['maxItems'] = len(assigned['commits'])
+    commits_schema['items']['properties']['sha']['enum'] = [c['sha'] for c in assigned['commits']]
+    write_json(folder / 'review.schema.json', schema)
     conflicts = [] if batch['manual_reasons'] else merge(batch)
     write_json(folder / 'merge.json', {'conflicts': conflicts, 'head': output('rev-parse', 'HEAD')})
     contract = Path('contrib/upstream-sync/contract.md').read_text()
@@ -269,7 +275,7 @@ def render_body(batch, review, integrated):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('plan', 'prepare', 'assemble'))
+    parser.add_argument('command', choices=('plan', 'prepare', 'validate', 'assemble'))
     parser.add_argument('--review-sha', help='Assign one commit while retaining full batch context')
     parser.add_argument('--upstream', default='refs/remotes/upstream/master')
     parser.add_argument('--out', type=Path, required=True)
@@ -284,7 +290,10 @@ def main():
                 output_file.write(f'status={batch["status"]}\nbranch={batch["branch"]}\n')
     else:
         batch = json.loads((args.out / 'plan.json').read_text())
-        if args.command == 'prepare':
+        if args.command == 'validate':
+            assigned = review_assignment(batch, args.review_sha) if args.review_sha else batch
+            validate_review(assigned, json.loads((args.out / 'review.json').read_text()))
+        elif args.command == 'prepare':
             prepare(batch, args.out, args.review_sha)
         else:
             assemble(batch, args.out)
