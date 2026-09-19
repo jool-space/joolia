@@ -1,0 +1,67 @@
+{
+  "plan": {
+    "base_sha": "9a0a1aad4558f59272ec7f306fa4814a973bfba0",
+    "previous_sha": "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+    "fetched_sha": "e177e01f81c8571b2e21e84964446704b7645942",
+    "target_sha": "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+    "branch": "sync/julia-5d2fcf16939a-71d29e95457c",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+        "subject": "codegen: convert the `setglobalonce!` internal result to a `Bool` (#63247)",
+        "paths": [
+          "src/codegen.cpp",
+          "test/atomics.jl"
+        ],
+        "changed_lines": 24,
+        "patch_bytes": 2150,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+      "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+      "e177e01f81c8571b2e21e84964446704b7645942"
+    ]
+  },
+  "review": {
+    "target_sha": "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+    "decision": "propose",
+    "summary": "Reviewed the first-parent diff, existing Joolia port, and merged result. The upstream fix is safe as merged and needs no zero-origin adaptation. No tests were executed in this review job.",
+    "commits": [
+      {
+        "sha": "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+        "risk": "high",
+        "subsystems": "LLVM/native code generation in `src/codegen.cpp::emit_globalop` and `emit_f_opglobal`; Core global-binding atomics through `src/module.c::jl_checked_assignonce` and `src/builtins.c::setglobalonce_value`; compiler return-type modeling in `Compiler/src/abstractinterpretation.jl::abstract_eval_setglobalonce!` and `Compiler/src/tfuncs.jl`; regression coverage in `test/atomics.jl`.",
+        "indexing_implications": "The changed `old` value is a NULL sentinel protocol, not a collection position: `src/module.c:2216-2222` initializes the previous binding value to NULL, performs the compare-and-swap, and returns NULL only when the store succeeds; `src/builtins.c:1552-1556` independently maps that protocol to `jl_true`/`jl_false`. `src/codegen.cpp:3916-3921` now performs the same conversion with `CreateIsNull`, producing an unboxed Julia `Bool`. The `argv[1]` accesses in `emit_f_opglobal` are established call-argument slots (`argv[0]` is the callee), while `nargs` is a count; neither is a public collection position and neither changed. Test values `1`, `2`, and `3` are payloads, not indices. Existing Joolia zero-origin field accesses elsewhere in `src/codegen.cpp` were inspected and do not overlap this hunk.",
+        "adaptations": "None. The merged hunk exactly preserves upstream intent: it converts the fallback codegen result from the runtime's previous-value pointer to `true` on a successful first store and `false` when the binding was already defined. The typed path in `src/cgutils.cpp:3185-3187` already returns the compare-exchange success `Bool`, and the generic runtime path in `src/builtins.c:1552-1556` agrees. Joolia's compiler models both `setglobalonce!` forms as returning `Bool` in `Compiler/src/abstractinterpretation.jl:2902-2914` and `Compiler/src/tfuncs.jl:3697-3710`, so no origin conversion or additional source/test edit is required.",
+        "tests": "Recommended, not executed: rebuild the candidate with LLVM assertions enabled; run `make -C src analyze-codegen -j8 --output-sync` after analysis dependencies are available; run the focused compiled regression with `JULIA_TEST_FAILFAST=1 ./usr/bin/joolia --startup-file=no --check-bounds=yes test/runtests.jl atomics`, checking the untyped global's first `setonce` returns `true`, the second returns `false`, and subsequent modify/swap/replace results remain unchanged; run `make -C test compiler-foundation` for compiler/codegen bootstrap coverage; then run the required `python3 contrib/ci/run.py --jobs 4` gate. No test result is claimed here."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
