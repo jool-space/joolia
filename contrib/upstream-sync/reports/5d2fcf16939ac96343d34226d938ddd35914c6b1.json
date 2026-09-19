@@ -1,0 +1,67 @@
+{
+  "plan": {
+    "base_sha": "33285810f9e12fdeb6b5bd2c51dce38043bcfa48",
+    "previous_sha": "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+    "fetched_sha": "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+    "target_sha": "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+    "branch": "sync/julia-0ee345ddfd83-5d2fcf16939a",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+        "subject": "loading: fall back to source when a pinned dependency's cache is gone (#63190)",
+        "paths": [
+          "base/loading.jl",
+          "test/precompile.jl"
+        ],
+        "changed_lines": 189,
+        "patch_bytes": 10099,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+      "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+      "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a"
+    ]
+  },
+  "review": {
+    "target_sha": "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+    "decision": "propose",
+    "summary": "Reviewed the upstream loader change, Joolia\u2019s existing loading port, and the merged result. Applied one narrow zero-origin test adaptation; no builds or Julia tests were run.",
+    "commits": [
+      {
+        "sha": "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+        "risk": "high",
+        "subsystems": "Base package loading and precompilation in base/loading.jl (`__require_prelocked`, `stale_cachefile`, `_require_search_from_serialized`); module identity, extensions, cache eviction, and regression coverage in test/precompile.jl.",
+        "indexing_implications": "The upstream source diff changes control flow, not collection origins: the strict compiled-module check now follows `_concrete_dependencies`, and concrete build IDs remain identifiers. In the merged Joolia tree, `__require_prelocked` already uses `specenv[0]`; `stale_cachefile` uses `required_modules` positions `0:ndeps-1` with `ndeps` preserved as a count and `includes[0]`. `UInt64(0)` in `get(modules, req_key, UInt64(0))` is an absent-module sentinel, not a position; `UInt128(0)` is the no-requested-build-ID sentinel. `base/initdefs.jl:init_depot_path` makes the custom depot the first collection entry, while `base/loading.jl:compilecache_dir` and `compilecache_path` use `DEPOT_PATH[0]`. The newly imported test used `DEPOT_PATH[1]` when deleting compiled caches, which selected the second depot and could leave the actual cache intact.",
+        "adaptations": "Changed test/precompile.jl:4172 from `DEPOT_PATH[1]` to `DEPOT_PATH[0]`. This makes the eviction test delete the `.ji` files from the same first depot where `compilecache_dir` stores them. No further base-source adaptation was needed: the merged source already carries Joolia\u2019s zero-origin translations around the upstream control-flow change. The producer/consumer path is preserved: loaded modules populate `_concrete_dependencies` with PkgId/build-ID pairs; cache headers produce module/build-ID data; `stale_cachefile` rejects mismatched concrete dependencies even for trusted fresh files; `__require_prelocked` then falls through to source loading rather than strict-mode failure.",
+        "tests": "Recommended, not run in this review: `make test-revise-precompile` as required by the test-changes procedure; a fresh executable run of `./usr/bin/joolia --startup-file=no --check-bounds=yes test/runtests.jl precompile`; and the required full gate `python3 contrib/ci/run.py --jobs 4`. The focused precompile test should verify both dependent-package and extension loading after deleting `.ji` files from `DEPOT_PATH[0]/compiled`, with no strict-cache error, module replacement, or extension-loading failure. Only repository diff inspection and `git diff --check` were performed."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
