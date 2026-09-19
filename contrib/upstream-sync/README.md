@@ -50,7 +50,9 @@ gh variable set JOOLIA_UPSTREAM_SYNC_ENABLED --body true --repo jool-space/jooli
 Delete that variable or set it to `false` to stop scheduled proposals. Manual
 runs remain available. This switch controls scheduled proposals and post-merge continuation;
 automatic merging has a separate switch below. Each incoming commit gets its own
-review job against the complete merged batch, with at most two running at once.
+review job against the complete merged batch, with one running at a time to avoid competing for the model token-per-minute
+limit. This changes review concurrency, not the number of commits in a merge
+batch.
 Each job has an independent eight-minute deadline including action setup,
 a ten-minute step limit and a fifteen-minute outer job limit. These are runtime
 bounds, not dollar/token caps. A root-owned watchdog identifies the review action
