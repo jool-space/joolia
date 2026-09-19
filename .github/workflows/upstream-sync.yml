@@ -97,12 +97,17 @@ jobs:
         if: inputs.mode == 'probe'
         run: |
           python3 - <<'PYCODE'
-          import json, os
+          import json, os, secrets
           from pathlib import Path
           folder = Path(os.environ['SYNC_DIR'])
-          (folder / 'prompt.md').write_text('Do not run tools or inspect files. Return exactly {"status":"ok"}.')
-          schema = {'type': 'object', 'properties': {'status': {'type': 'string', 'enum': ['ok']}},
-                    'required': ['status'], 'additionalProperties': False}
+          challenge = Path('.cache/upstream-sync-probe.txt')
+          challenge.parent.mkdir(exist_ok=True)
+          challenge.write_text(secrets.token_hex(16))
+          (folder / 'prompt.md').write_text('Use one shell tool to run `cat .cache/upstream-sync-probe.txt`. '
+              'Do not change files or run anything else. Return JSON with status="ok" and proof equal to the file contents. '
+              'If the tool fails, return status="failed" and proof=""; do not retry.')
+          schema = {'type': 'object', 'properties': {'status': {'type': 'string', 'enum': ['ok', 'failed']},
+                    'proof': {'type': 'string'}}, 'required': ['status', 'proof'], 'additionalProperties': False}
           (folder / 'review.schema.json').write_text(json.dumps(schema))
           PYCODE
       - name: Arm independent review deadline
@@ -149,6 +154,18 @@ jobs:
           prompt-file: ${{ env.SYNC_DIR }}/prompt.md
           output-schema-file: ${{ env.SYNC_DIR }}/review.schema.json
           output-file: ${{ env.SYNC_DIR }}/review.json
+      - name: Verify the probe exercised a shell tool
+        if: inputs.mode == 'probe' && steps.review.outcome == 'success'
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          result = json.loads((Path(os.environ['SYNC_DIR']) / 'review.json').read_text())
+          expected = Path('.cache/upstream-sync-probe.txt').read_text()
+          if result != {'status': 'ok', 'proof': expected}:
+              raise SystemExit('The model responded, but the sandboxed shell probe failed')
+          print('Model response and sandboxed shell challenge verified.')
+          PYCODE
       - name: Retain progress and stop the deadline
         if: always()
         env:
