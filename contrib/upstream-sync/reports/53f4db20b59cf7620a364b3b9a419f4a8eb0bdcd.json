@@ -1,0 +1,67 @@
+{
+  "plan": {
+    "base_sha": "409b6d13b17dafb9824beb86d8516860f398c2fc",
+    "previous_sha": "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+    "fetched_sha": "e9d1f89e1c79a44c4870fdfe6684ebe617c6e24b",
+    "target_sha": "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+    "branch": "sync/julia-12fbf6b9b315-53f4db20b59c",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+        "subject": "toplevel: restructure `jl_declare_global` as straight-line code [NFCI] (#63252)",
+        "paths": [
+          "src/toplevel.c"
+        ],
+        "changed_lines": 73,
+        "patch_bytes": 4008,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+      "e177e01f81c8571b2e21e84964446704b7645942",
+      "58e8bb8cb772cbcb030a9affb061e0e7cf0265f9",
+      "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+      "decc791652f4becc636683071b94ddce617b8163",
+      "a6714ba33042a5aefca3c71c018c901ab46cda19",
+      "d96818f42f442fd51d506dc900cb2054004df78c",
+      "e9d1f89e1c79a44c4870fdfe6684ebe617c6e24b"
+    ]
+  },
+  "review": {
+    "target_sha": "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+    "decision": "propose",
+    "summary": "Reviewed the upstream diff, Joolia base-to-previous port, merged result, binding-partition helpers, declaration callers, and existing rebinding/inference coverage. The refactor preserves behavior and introduces no zero-origin conversion requirement; no source or test adaptations were made.",
+    "commits": [
+      {
+        "sha": "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+        "risk": "high",
+        "subsystems": "Native top-level evaluation and module binding partitions: `src/toplevel.c:293-363` (`jl_declare_global`), `src/builtins.c:1885-1897` (`jl_f_declare_global`), `src/module.c:1932-2008` (`jl_replace_binding_locked`), and partition classification helpers in `src/julia.h` and `src/julia_internal.h`. Related producers and consumers in `src/julia-syntax.scm`, `Compiler/src`, `test/rebinding.jl`, `test/syntax.jl`, and `Compiler/test/inference.jl` were inspected.",
+        "indexing_implications": "No collection-position arithmetic is changed. `new_world` and `min_world` in `src/toplevel.c:308,327` are world-age/version identifiers and partition boundaries, not indices; `new_world-1` in `src/module.c:2000` closes a world interval and must remain unchanged. `PARTITION_KIND_*` values in `src/julia.h:815-855` are internal enum tags, while `replaced`, `update_partition`, and `update_in_place` are booleans. The resulting code still queries one partition at `new_world`, preserves zero-origin collection behavior elsewhere, and keeps compiler/global binding identifiers in their established representations.",
+        "adaptations": "None. Comparing `12fbf6b9b315b71aaa96b7a766c5c23c89f36d90` to Joolia base `409b6d13b17dafb9824beb86d8516860f398c2fc` showed no local adaptation in `src/toplevel.c`. The straight-line code preserves the old cases: same weak declaration is a no-op; typed weak declarations are rejected before partition inspection; implicit/guard-to-global transitions either mutate the current-world partition or install a new partition; constants/imports retain their errors; existing typed globals still require `jl_types_equal`; the world counter advances only after replacement. No origin conversion, sentinel change, ABI change, or test weakening is justified.",
+        "tests": "Recommended, not run in this review job: rebuild the runtime with `make -j8`; run `make -C src analyze-toplevel -j8 --output-sync` after analysis dependencies are available; run `make -C test core-bootstrap base-foundation compiler-foundation`; run `./usr/bin/joolia --startup-file=no --check-bounds=yes test/runtests.jl rebinding syntax`; then run the required `python3 contrib/ci/run.py --jobs 4`. Existing `test/rebinding.jl` partition-kind, typed-global, import, deletion, and precompile cases exercise the relevant transitions; `test/syntax.jl` and `Compiler/test/inference.jl` cover declaration lowering and typed-global inference. Only read-only inspection and `git diff --check` were executed here."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
