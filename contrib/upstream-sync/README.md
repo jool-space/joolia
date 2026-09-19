@@ -152,8 +152,15 @@ No force-pushes are used. Plans and reviews are retained as artifacts for 30 day
 the full review is also committed under `reports/<target-sha>.json`.
 
 A report-only PR does not import upstream code or advance the checkpoint. It
-needs manual integration, or closing and manual resolution of the batch. A CI
-failure likewise remains on the draft for inspection. This initial version has
+needs manual integration; marking the draft ready or merging its report does
+not resolve the missing source changes. Merge the recorded target SHA, supply
+the missing adaptations, preserve the initial review alongside the resolution,
+and update the checkpoint only on that integration branch. Run CI on the
+resulting tree. A replacement PR can close the report-only PR when it merges,
+allowing the queue to resume from the new checkpoint. Closing the report alone
+will not make the publisher retry that same batch.
+
+A CI failure likewise remains on the draft for inspection. This initial version has
 no automatic repair/bisection loop, no autonomous subtree import, and no measured
 Luna recall/cost benchmark yet. These should follow observed trial results.
 
