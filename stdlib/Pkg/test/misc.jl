@@ -379,3 +379,71 @@ end
         end
     end
 end
+
+# Exercise the CLI/API bridge and dependency skipping against real temporary package caches.
+@testset "precompile skip and force controls" begin
+    commands = Pkg.REPLMode.prepare_cmd("precompile --noskip --force Conditional")
+    command = only(commands)
+    @test command.options[:skip_dependents] === false
+    @test command.options[:force] === true
+
+    mktempdir() do root
+        project = joinpath(root, "project")
+        depot = joinpath(root, "depot")
+        mkpath(project)
+        ids = Dict("Broken" => "cf2d1b80-5555-4000-9000-000000000001",
+                   "Conditional" => "cf2d1b80-5555-4000-9000-000000000002",
+                   "Trigger" => "cf2d1b80-5555-4000-9000-000000000003")
+        manifest = Dict{String,Any}()
+        for (name, uuid) in ids
+            path = joinpath(root, name)
+            mkpath(joinpath(path, "src"))
+            metadata = Dict{String,Any}("name" => name, "uuid" => uuid, "version" => "0.1.0")
+            entry = Dict{String,Any}("uuid" => uuid, "version" => "0.1.0", "path" => path)
+            if name == "Conditional"
+                metadata["deps"] = Dict("Broken" => ids["Broken"])
+                entry["deps"] = ["Broken"]
+            elseif name == "Broken"
+                metadata["weakdeps"] = Dict("Trigger" => ids["Trigger"])
+                metadata["extensions"] = Dict("BrokenExt" => "Trigger")
+                entry["weakdeps"] = metadata["weakdeps"]
+                entry["extensions"] = metadata["extensions"]
+                mkpath(joinpath(path, "ext"))
+                write(joinpath(path, "ext", "BrokenExt.jl"),
+                      "module BrokenExt\nwrite($(repr(joinpath(root, "extension-ran"))), \"ran\")\nend\n")
+            end
+            open(io -> Pkg.TOML.print(io, metadata), joinpath(path, "Project.toml"), "w")
+            marker = repr(joinpath(root, name * ".runs"))
+            failure = name == "Broken" ? "error(\"expected dependency failure\")\n" : ""
+            write(joinpath(path, "src", name * ".jl"),
+                  "module $name\nopen(io -> print(io, 'x'), $marker, \"a\")\n$(failure)end\n")
+            manifest[name] = [entry]
+        end
+        open(io -> Pkg.TOML.print(io, Dict("deps" => Dict("Conditional" => ids["Conditional"], "Trigger" => ids["Trigger"]))),
+             joinpath(project, "Project.toml"), "w")
+        open(io -> Pkg.TOML.print(io, Dict("manifest_format" => "2.0", "julia_version" => string(VERSION), "deps" => manifest)),
+             joinpath(project, "Manifest.toml"), "w")
+        original_depot = copy(DEPOT_PATH)
+        original_project = Base.active_project()
+        try
+            push!(empty!(DEPOT_PATH), depot)
+            withenv("JULIA_DEPOT_PATH" => depot, "JULIA_PKG_PRECOMPILE_AUTO" => "0") do
+                Pkg.activate(project; io=devnull)
+                @test_throws Base.Precompilation.PkgPrecompileError Pkg.precompile(; already_instantiated=true, io=devnull)
+                marker = joinpath(root, "Conditional.runs")
+                @test !isfile(marker)
+                @test !isfile(joinpath(root, "extension-ran"))
+                Pkg.precompile(; skip_dependents=false, already_instantiated=true, io=devnull)
+                @test read(marker, String) == "x"
+                @test !isfile(joinpath(root, "extension-ran"))
+                Pkg.precompile("Conditional"; skip_dependents=false, already_instantiated=true, io=devnull)
+                @test read(marker, String) == "x"
+                Pkg.precompile("Conditional"; skip_dependents=false, force=true, already_instantiated=true, io=devnull)
+                @test read(marker, String) == "xx"
+            end
+        finally
+            append!(empty!(DEPOT_PATH), original_depot)
+            Base.set_active_project(original_project)
+        end
+    end
+end
