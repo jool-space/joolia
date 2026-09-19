@@ -1,0 +1,68 @@
+{
+  "plan": {
+    "base_sha": "57af480f4f1b85e7513b1b487c9fa7120c20c6f9",
+    "previous_sha": "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+    "fetched_sha": "decc791652f4becc636683071b94ddce617b8163",
+    "target_sha": "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+    "branch": "sync/julia-71d29e95457c-9bc48db402ee",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+        "subject": "codegen: factor out `emit_globalop_runtime_call` [NFC] (#63248)",
+        "paths": [
+          "src/codegen.cpp"
+        ],
+        "changed_lines": 90,
+        "patch_bytes": 6245,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+      "e177e01f81c8571b2e21e84964446704b7645942",
+      "58e8bb8cb772cbcb030a9affb061e0e7cf0265f9",
+      "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+      "decc791652f4becc636683071b94ddce617b8163"
+    ]
+  },
+  "review": {
+    "target_sha": "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+    "decision": "propose",
+    "summary": "The commit is safe to propose without adaptation. It only extracts existing global-store codegen logic; no indexing, dimension, sentinel, compiler-ID, or ABI contract changes are involved. No source or test edits were needed.",
+    "commits": [
+      {
+        "sha": "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+        "risk": "medium",
+        "subsystems": "LLVM/native code generation in `src/codegen.cpp`: `emit_globalop_runtime_call`, `emit_globalop`, `emit_f_opglobal`, global binding partition stores, and `jl_checked_*` runtime calls. The inline `typed_store` path is unchanged.",
+        "indexing_implications": "No indexing expression or numeric boundary changes. `StoreKind` in `src/cgutils.cpp:41` is an operation enum, not a position. `bpart`, `mod`, and `sym` are binding handles. The `SetOnce` NULL result remains converted to an i1 in `src/codegen.cpp:3875-3879`; `Unset` remains an invalid-operation sentinel. Joolia's existing zero-origin field and SimpleVector adaptations in `src/codegen.cpp` remain separate and intact. Runtime result contracts were checked in `src/module.c:2179-2224` and `src/julia.h:2293-2297`.",
+        "adaptations": "None. The helper preserves the prior calls, arguments, result typing, NULL sentinel conversion, and invalid-operation handling. Moving `store_kind_name(op, \"global\")` does not alter its value or any indexing contract.",
+        "tests": "Recommended, not executed: rebuild and run `make -C test core-bootstrap base-foundation compiler-foundation`; run global-operation coverage in `test/atomics.jl` for set, swap, replace, modify, and set-once operations, including ordering and result cases; run partition/import/guard coverage in `test/rebinding.jl` and global checks in `test/core.jl` near lines 8847-8854. Also run `make -C src analyze-codegen -j8 --output-sync` and the full `python3 contrib/ci/run.py --jobs 4` gate."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
