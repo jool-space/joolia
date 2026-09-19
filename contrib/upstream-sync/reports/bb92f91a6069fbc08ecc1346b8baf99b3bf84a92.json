@@ -1,0 +1,69 @@
+{
+  "plan": {
+    "base_sha": "ee414e9adbed109e9b08c284cc446ee327bad656",
+    "previous_sha": "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+    "fetched_sha": "d96818f42f442fd51d506dc900cb2054004df78c",
+    "target_sha": "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+    "branch": "sync/julia-9bc48db402ee-bb92f91a6069",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+        "subject": "module: factor out `jl_binding_not_writable_error` [NFC] (#63249)",
+        "paths": [
+          "src/module.c"
+        ],
+        "changed_lines": 50,
+        "patch_bytes": 3810,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+      "e177e01f81c8571b2e21e84964446704b7645942",
+      "58e8bb8cb772cbcb030a9affb061e0e7cf0265f9",
+      "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+      "decc791652f4becc636683071b94ddce617b8163",
+      "a6714ba33042a5aefca3c71c018c901ab46cda19",
+      "d96818f42f442fd51d506dc900cb2054004df78c"
+    ]
+  },
+  "review": {
+    "target_sha": "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+    "decision": "propose",
+    "summary": "Reviewed the first-parent diff, Joolia\u2019s pre-batch code, and the resulting merged tree. This is a behavior-preserving refactor of binding-write diagnostics; no zero-origin adaptation or test edit is needed.",
+    "commits": [
+      {
+        "sha": "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+        "risk": "medium",
+        "subsystems": "Native module/binding-partition runtime in src/module.c:910-946; callers in src/builtins.c:1522-1557, src/interpreter.c:750-757, and src/codegen.cpp:3845-3858. The refactor also relies on the shared partition-kind definitions in src/julia.h, src/julia_internal.h, and base/runtime_internals.jl.",
+        "indexing_implications": "No collection position, dimension, count, byte offset, or zero-origin conversion is involved. The numeric PARTITION_KIND_* values are internal enum/tag encodings read by jl_binding_kind and classified by jl_bkind_is_some_global, jl_bkind_is_some_guard, and jl_bkind_is_some_constant; they are identifiers/state tags, not indexes or sentinels, so their values must remain unchanged. The Joolia definitions preserve the upstream global predicate exactly: only PARTITION_KIND_GLOBAL and PARTITION_KIND_DECLARED are writable. Existing guard, constant, and import consumers were inspected, including the C-side distinction where UNDEF_CONST is handled by the constant branch.",
+        "adaptations": "None. Upstream moves the existing guard/constant/import diagnostics from jl_check_binding_currently_writable into jl_binding_not_writable_error, adds an assertion that the helper receives neither writable kind, and replaces !jl_bkind_is_some_global(kind) with the equivalent explicit comparison. Joolia\u2019s predicate and enum contracts are unchanged, and the resulting helper preserves the same error text, module lookup through jl_binding_dbgmodule, noreturn annotation, and safepoint annotation. No origin conversion is justified.",
+        "tests": "Recommended, not executed: rebuild the runtime, run make -C src analyze-module -j8, and run the affected rebinding coverage in test/rebinding.jl, especially PartitionImportTarget stores at lines 699-712, StaleStoreTarget guard failures at lines 773-783, and the compiled imported-store path in Compiler/test/inference.jl:7951. Then run the required gate python3 contrib/ci/run.py --jobs 4. These checks should confirm writable GLOBAL/DECLARED partitions remain writable and GUARD, CONSTANT, and imported partitions retain their existing diagnostics."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
