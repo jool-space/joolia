@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ inputs.mode == 'probe' && format('joolia-upstream-probe-{0}', github.ref) || 'joolia-upstream-sync' }}
+  group: ${{ (inputs.mode == 'probe' || inputs.mode == 'review') && format('joolia-upstream-diagnostic-{0}-{1}', inputs.mode, github.ref) || 'joolia-upstream-sync' }}
   cancel-in-progress: false
 
 env:

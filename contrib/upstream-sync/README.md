@@ -53,8 +53,12 @@ automatic merging has a separate switch below. Each incoming commit gets its own
 review job against the complete merged batch, with at most two running at once.
 Each job has an independent eight-minute deadline including action setup,
 a ten-minute step limit and a fifteen-minute outer job limit. These are runtime
-bounds, not dollar/token caps. A root-owned watchdog stops only processes carrying
-the review action's exact marker. A killed runner can still prevent diagnostics
+bounds, not dollar/token caps. A root-owned watchdog identifies the review action
+by its exact environment marker and puts it and its descendants in a separate
+cgroup with a 4 GiB memory limit and no swap. This prevents a review from using
+all runner memory and lets the deadline kill descendants that clear their marker.
+Memory counters and OOM events are retained with the diagnostics. The Actions
+worker is outside this group. A killed runner can still prevent diagnostics
 from being uploaded; the watchdog is not a guarantee of artifact retention.
 
 A reviewer writes its current SHA and completed record to an ignored progress
@@ -93,8 +97,8 @@ The probe asks for a sandboxed shell read of a random challenge file, an
 both the response and the edited file, has a three-minute
 independent deadline, and never publishes a PR or advances a checkpoint. Maintainers can
 also dispatch it on a same-repository workflow branch to validate a fix before
-merging. Probes use a separate concurrency group so a stuck batch does not
-block diagnosis; they never publish. It still makes an API call. Failed review batches are not retried in an
+merging. Review-only trials and probes use separate concurrency groups so a stuck batch
+does not block diagnosis; they never publish. It still makes an API call. Failed review batches are not retried in an
 unbounded loop; inspect the artifact before deciding whether to retry.
 
 ## What happens
