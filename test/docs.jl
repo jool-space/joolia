@@ -13,6 +13,21 @@ end
 using Markdown
 using REPL
 
+# The generated Unicode/emoji documentation tables are built by doc/make.jl.
+# Keep the two origin-sensitive operations here covered independently of the
+# Documenter build: UnicodeData fields are selected from a zero-origin split,
+# and enumerate's zero-origin counter separates subsequent completions.
+let fields = vcat(["0041", "LATIN CAPITAL LETTER A"], fill("", 8), ["A"])
+    @test fields[[0, 1, 10]] == ["0041", "LATIN CAPITAL LETTER A", "A"]
+end
+let rendered = Any[]
+    for (i, input) in enumerate(["\\alpha", "\\Alpha"])
+        i > 0 && push!(rendered, ", ")
+        push!(rendered, Markdown.Code("", input))
+    end
+    @test [x isa Markdown.Code ? x.code : x for x in rendered] == ["\\alpha", ", ", "\\Alpha"]
+end
+
 using REPL: @repl, repl_latex, _repl, accessible
 using InteractiveUtils: apropos
 

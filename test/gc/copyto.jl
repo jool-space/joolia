@@ -26,7 +26,7 @@ end
 
 @noinline function copy_young_refs!(dest, make_element, n)
     src = [make_element(i) for i in 1:n]
-    copyto!(dest, 3, src, 1, n)
+    copyto!(dest, 2, src, 0, n)
     return nothing
 end
 
@@ -45,9 +45,9 @@ for (make_element, read_element) in (
         GC.gc(false)
         GC.gc(false)
         for i in 1:n
-            @assert read_element(dest[i + 2]) == read_element(make_element(i))
+            @assert read_element(dest[i + 1]) == read_element(make_element(i))
         end
-        @assert read_element(dest[1]) == read_element(make_element(0))
+        @assert read_element(dest[0]) == read_element(make_element(0))
         @assert read_element(dest[end]) == read_element(make_element(0))
     end
 end
@@ -86,7 +86,7 @@ end
 
 # A concurrent store into an old source must not let a copied young reference escape the barrier.
 @noinline copy_race_ready(flag) = flag[]
-@noinline copy_race_started(dest) = dest[1] === :src
+@noinline copy_race_started(dest) = dest[0] === :src
 @noinline copy_race_holds(dest, weak) = dest[end] === weak.value
 
 @noinline function copy_race_writer!(src, dest, ready)

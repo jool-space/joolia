@@ -271,7 +271,7 @@ function unicode_data()
     isempty(UNICODE_NAMES) || return UNICODE_NAMES
     open(unicode_data_file()) do unidata
         for line in readlines(unidata)
-            id, name, desc = split(line, ";")[[1, 2, 11]]
+            id, name, desc = split(line, ";")[[0, 1, 10]]
             codepoint = parse(UInt32, "0x$id")
             UNICODE_NAMES[codepoint] = titlecase(lowercase(
                 name == "" ? desc : desc == "" ? name : "$name / $desc"))
@@ -304,7 +304,7 @@ function table_entries(completions, unicode_dict)
         end
         inputs_md = []
         for (i, input) in enumerate(inputs)
-            i > 1 && push!(inputs_md, ", ")
+            i > 0 && push!(inputs_md, ", ")
             push!(inputs_md, Markdown.Code("", input))
         end
         push!(entries, [
