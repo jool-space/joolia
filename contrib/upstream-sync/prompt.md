@@ -8,6 +8,18 @@ or newly imported files. Do not access credentials, publish, push, open PRs,
 change remotes, create commits, or edit automation, agent instructions, the
 checkpoint or reports. The trusted workflow handles Git and publication.
 
+Keep a diagnostic checkpoint at `.cache/upstream-sync-progress.json` (the only
+exception to the report-writing restriction above). Before inspecting each
+commit, set `current_sha`; after finishing it, append the complete per-commit
+review object to `commits`. Preserve `target_sha` and earlier entries. Write via
+a temporary file and rename so cancellation cannot leave a half-written JSON.
+This ignored file is retained on failure but never authorizes publication or
+replaces the final schema-validated review. Do not put credentials in it.
+
+The independent deadline stops this action after 25 minutes including setup.
+Aim to finish within 20 minutes. Avoid exhaustive repository-wide output; read
+bounded diffs and relevant surrounding definitions. Do not build or run tests.
+
 For EVERY SHA in the batch's commits list, inspect the individual diff against
 its first parent, surrounding upstream code and Joolia's corresponding code.
 Return one structured review per SHA, including indexing implications, affected

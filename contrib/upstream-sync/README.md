@@ -50,7 +50,29 @@ gh variable set JOOLIA_UPSTREAM_SYNC_ENABLED --body true --repo jool-space/jooli
 Delete that variable or set it to `false` to stop scheduled proposals. Manual
 runs remain available. This switch controls scheduled proposals and post-merge continuation;
 automatic merging has a separate switch below. Each new batch permits one agent invocation,
-with a 30-minute timeout; this is a runtime bound, not a dollar/token cap.
+with an independent 25-minute deadline including action setup. A root-owned
+watchdog stops only processes carrying the review action's exact marker, before
+the outer job limit, leaving time to upload diagnostics. This is a runtime bound,
+not a dollar/token cap. The 30-minute step and 40-minute job limits remain backups.
+
+A reviewer writes completed per-commit records and its current SHA to an ignored
+progress file. On success or failure, `upstream-review` retains that file, the
+working patch, action outcome and watchdog process counters. These diagnostics
+never substitute for a complete schema-validated review and cannot authorize a
+PR or merge. They contain no process arguments, environment contents or Codex
+authentication files. A killed runner can still prevent artifact retention.
+
+To check the action/model path independently of a large review, manually run:
+
+```sh
+gh workflow run upstream-sync.yml --ref master -f mode=probe --repo jool-space/joolia
+```
+
+The probe asks only for a tiny JSON response, has a three-minute independent
+deadline, and never publishes a PR or advances a checkpoint. Maintainers can
+also dispatch it on a same-repository workflow branch to validate a fix before
+merging. It still makes an API call. Failed review batches are not retried in an
+unbounded loop; inspect the artifact before deciding whether to retry.
 
 ## What happens
 

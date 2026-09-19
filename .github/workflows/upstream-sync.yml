@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Plan only, or ask Luna to prepare a draft sync PR
+        description: Plan, prepare a sync PR, or probe the review action without publishing
         type: choice
-        options: [plan, propose]
+        options: [plan, propose, probe]
         default: plan
 
 permissions:
@@ -29,7 +29,9 @@ env:
 
 jobs:
   plan:
-    if: github.ref == 'refs/heads/master' && (github.event_name != 'schedule' || vars.JOOLIA_UPSTREAM_SYNC_ENABLED == 'true')
+    if: >-
+      (github.ref == 'refs/heads/master' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'probe')) &&
+      (github.event_name != 'schedule' || vars.JOOLIA_UPSTREAM_SYNC_ENABLED == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -62,7 +64,9 @@ jobs:
 
   agent:
     needs: plan
-    if: needs.plan.outputs.status == 'ready' && (github.event_name == 'schedule' || inputs.mode == 'propose')
+    if: >-
+      (needs.plan.outputs.status == 'ready' && (github.event_name == 'schedule' || inputs.mode == 'propose')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'probe')
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -83,12 +87,55 @@ jobs:
             exit 1
           fi
       - name: Prepare the pinned source tree and trusted prompt
+        if: inputs.mode != 'probe'
         run: |
           UPSTREAM_SHA=$(python3 -c 'import json,os; print(json.load(open(os.environ["SYNC_DIR"]+"/plan.json"))["fetched_sha"])')
           git fetch --no-tags https://github.com/JuliaLang/julia.git "$UPSTREAM_SHA"
           cp contrib/upstream-sync/review.schema.json "$SYNC_DIR/review.schema.json"
           python3 contrib/upstream-sync/sync.py prepare --out "$SYNC_DIR"
+      - name: Prepare a minimal action probe
+        if: inputs.mode == 'probe'
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          folder = Path(os.environ['SYNC_DIR'])
+          (folder / 'prompt.md').write_text('Do not run tools or inspect files. Return exactly {"status":"ok"}.')
+          schema = {'type': 'object', 'properties': {'status': {'type': 'string', 'enum': ['ok']}},
+                    'required': ['status'], 'additionalProperties': False}
+          (folder / 'review.schema.json').write_text(json.dumps(schema))
+          PYCODE
+      - name: Arm independent review deadline
+        env:
+          WATCH_SECONDS: ${{ inputs.mode == 'probe' && '180' || '1500' }}
+        run: |
+          WATCH_DIR=$(sudo mktemp -d /tmp/joolia-review-watchdog.XXXXXX)
+          sudo chmod 755 "$WATCH_DIR"
+          sudo install -m 555 contrib/upstream-sync/review_watchdog.py "$WATCH_DIR/watchdog.py"
+          echo "WATCH_DIR=$WATCH_DIR" >> "$GITHUB_ENV"
+          sudo -n setsid python3 "$WATCH_DIR/watchdog.py" \
+            --marker "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" --seconds "$WATCH_SECONDS" \
+            --status "$WATCH_DIR/status.json" --stop "$SYNC_DIR/watchdog.stop" \
+            </dev/null >/dev/null 2>&1 &
+          WATCH_DIR="$WATCH_DIR" python3 - <<'PYCODE'
+          import json, os, time
+          from pathlib import Path
+          status = Path(os.environ['WATCH_DIR']) / 'status.json'
+          deadline = time.monotonic() + 10
+          while not status.exists():
+              if time.monotonic() > deadline:
+                  raise SystemExit('Review watchdog did not start')
+              time.sleep(0.1)
+          plan = json.loads((Path(os.environ['SYNC_DIR']) / 'plan.json').read_text())
+          progress = Path('.cache/upstream-sync-progress.json')
+          progress.parent.mkdir(exist_ok=True)
+          progress.write_text(json.dumps({'target_sha': plan['target_sha'], 'current_sha': None, 'commits': []}))
+          print('Independent review deadline armed for', os.environ['WATCH_SECONDS'], 'seconds.')
+          PYCODE
       - name: Review every commit and adapt the batch
+        id: review
+        env:
+          JOOLIA_REVIEW_MARKER: ${{ github.run_id }}:${{ github.run_attempt }}
         timeout-minutes: 30
         uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
         with:
@@ -102,10 +149,29 @@ jobs:
           prompt-file: ${{ env.SYNC_DIR }}/prompt.md
           output-schema-file: ${{ env.SYNC_DIR }}/review.schema.json
           output-file: ${{ env.SYNC_DIR }}/review.json
-      - name: Export adaptations without executing them
+      - name: Retain progress and stop the deadline
+        if: always()
+        env:
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
         run: |
+          touch "$SYNC_DIR/watchdog.stop"
+          if [ -n "${WATCH_DIR:-}" ] && [ -f "$WATCH_DIR/status.json" ]; then
+            cp "$WATCH_DIR/status.json" "$SYNC_DIR/watchdog.json"
+          fi
+          if [ -f .cache/upstream-sync-progress.json ]; then
+            cp .cache/upstream-sync-progress.json "$SYNC_DIR/progress.json"
+          fi
           git add --intent-to-add -- .
           git diff --binary HEAD > "$SYNC_DIR/adaptations.patch"
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          folder = Path(os.environ['SYNC_DIR'])
+          outcome = os.environ['REVIEW_OUTCOME']
+          (folder / 'action-result.json').write_text(json.dumps({'outcome': outcome}))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Review action outcome: **' + outcome + '**. Progress and watchdog diagnostics are in upstream-review.\n')
+          PYCODE
       - name: Retain the review and proposed patch
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -115,6 +181,9 @@ jobs:
             ${{ env.SYNC_DIR }}/review.json
             ${{ env.SYNC_DIR }}/adaptations.patch
             ${{ env.SYNC_DIR }}/merge.json
+            ${{ env.SYNC_DIR }}/progress.json
+            ${{ env.SYNC_DIR }}/watchdog.json
+            ${{ env.SYNC_DIR }}/action-result.json
           if-no-files-found: warn
           retention-days: 30
 
