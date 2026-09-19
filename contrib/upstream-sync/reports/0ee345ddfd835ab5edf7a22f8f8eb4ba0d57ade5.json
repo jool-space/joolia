@@ -1,0 +1,69 @@
+{
+  "plan": {
+    "base_sha": "193197c34c1402442c0b210eace6ec61a9a5d6a7",
+    "previous_sha": "71e0769e019ff9dc3c27118b742acd1248f25c27",
+    "fetched_sha": "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+    "target_sha": "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+    "branch": "sync/julia-71e0769e019f-0ee345ddfd83",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+        "subject": "base: Remove scoped value trim comments (#63259)",
+        "paths": [
+          "Compiler/test/verifytrim.jl",
+          "base/dict.jl",
+          "base/hamt.jl"
+        ],
+        "changed_lines": 10,
+        "patch_bytes": 2298,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "71e0769e019ff9dc3c27118b742acd1248f25c27",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+      "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+      "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+      "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a"
+    ]
+  },
+  "review": {
+    "target_sha": "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+    "decision": "propose",
+    "summary": "Reviewed the single comment-only commit and its merged Joolia tree. No zero-origin adaptation is needed; existing HAMT and PersistentDict storage conversions remain intact.",
+    "commits": [
+      {
+        "sha": "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+        "risk": "low",
+        "subsystems": "Base ScopedValues/PersistentDict/HAMT (`base/scope.jl:Scope`, `base/dict.jl:PersistentDict`, `base/hamt.jl:HashState`, `path`, `entry_index`, `iterate`); Compiler trim verification (`Compiler/test/verifytrim.jl:scoped_trim_read`).",
+        "indexing_implications": "The first-parent diff only deletes explanatory comments in `Compiler/test/verifytrim.jl`, `base/dict.jl:_keyvalueset`, and `base/hamt.jl:HashState`; it changes no expressions or behavior. The surrounding Joolia port was inspected: HAMT storage positions `i` are zero-origin (`init_hamt` writes `data[0]`, `entry_index` returns the zero-based count of preceding bitmap bits, and DFS starts at `i=0` and stops when `i >= length(data)`); `length` remains a count. `HashState.depth` and `shift` are traversal state, not collection positions. `ScopeStorage` is `PersistentDict{AbstractScopedValue,Any}`, so the trim test's values `1` and `2` are payload data, not indices. PersistentDict callers in `base/scope.jl`, `base/scopedvalues.jl`, `test/scopedvalues.jl`, `test/dict.jl`, and Compiler scoped-value tests were inspected.",
+        "adaptations": "None. The upstream change removes only comments documenting the static-trim specialization fix; the required Joolia behavior (`@nospecialize(val)`, pinned `HashState{K}` reconstruction, and zero-origin HAMT storage) remains present in the resulting tree. No source or regression-test edit is justified.",
+        "tests": "Recommended, not executed: run `make -C test dict-foundation` in both configured compile modes; run the Compiler `verifytrim` test through the normal test runner and check `scoped_trim_read() == 2` with no trim-verification errors; run the existing `test/dict.jl` PersistentDict/HAMT tests and `test/scopedvalues.jl` zero-origin scoped-binding cases, including the singleton HAMT and empty HAMT checks; then run `python3 contrib/ci/run.py --jobs 4` for the required gate. This review job intentionally ran no build or tests."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
