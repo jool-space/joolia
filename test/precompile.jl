@@ -4169,7 +4169,7 @@ end
         preamble = """
             using EvictParent
             const parent = EvictParent
-            for (root, _, files) in walkdir(joinpath(DEPOT_PATH[1], "compiled")), file in files
+            for (root, _, files) in walkdir(joinpath(DEPOT_PATH[0], "compiled")), file in files
                 endswith(file, ".ji") && rm(joinpath(root, file))
             end
             """
