@@ -1,0 +1,69 @@
+{
+  "plan": {
+    "base_sha": "b168f1971de6fbb958d96ec27d878fef515c0874",
+    "previous_sha": "0d7752bee1fe8d007fe5b9d276904487d092f919",
+    "fetched_sha": "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+    "target_sha": "f3c70411bfee76c662f7807202305bc4fd8f059d",
+    "branch": "sync/julia-0d7752bee1fe-f3c70411bfee",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "f3c70411bfee76c662f7807202305bc4fd8f059d",
+        "subject": "libsupport: force `LC_COLLATE` to `\"C\"` (#63123)",
+        "paths": [
+          "src/support/libsupportinit.c"
+        ],
+        "changed_lines": 2,
+        "patch_bytes": 609,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "0d7752bee1fe8d007fe5b9d276904487d092f919",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "7f5097dfad3c4a67558dd208d3bab175e332940e",
+      "71e0769e019ff9dc3c27118b742acd1248f25c27",
+      "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+      "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+      "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+      "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+      "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef"
+    ]
+  },
+  "review": {
+    "target_sha": "f3c70411bfee76c662f7807202305bc4fd8f059d",
+    "decision": "propose",
+    "summary": "The merged batch contains one safe native-runtime locale fix. No zero-origin adaptation or source changes are needed.",
+    "commits": [
+      {
+        "sha": "f3c70411bfee76c662f7807202305bc4fd8f059d",
+        "risk": "medium",
+        "subsystems": "Native runtime bootstrap and platform locale initialization in src/support/libsupportinit.c; callers inspected include jl_init_, jl_repl_entrypoint, jl_resolve_sysimg_location, and flisp lisp_init.",
+        "indexing_implications": "LC_COLLATE in libsupport_init is a C locale-category enum, not a collection position, dimension, sentinel, or Joolia index; it must remain unchanged. The nearby codeset value is a byte offset into the locale string and is unrelated to collection indexing. The added setlocale(LC_COLLATE, \"C\") preserves zero-origin behavior and does not affect C/LLVM/foreign ABI indices.",
+        "adaptations": "None. The existing Joolia port has no change to this file between 0d7752bee1fe8d007fe5b9d276904487d092f919 and b168f1971de6fbb958d96ec27d878fef515c0874. The resulting merged code places collation normalization after user-locale adoption and numeric-locale normalization, before CTYPE handling, preserving upstream intent while avoiding locale-dependent C++ collation failures.",
+        "tests": "Recommended, not executed: rebuild the runtime and run the affected Windows configuration under a non-C collation locale; verify a fresh process reports LC_COLLATE as C and successfully exercises a C++ std::regex bracket matcher linked to the bundled runtime. Run the native static-analysis targets for src/support/libsupportinit.c, then the required python3 contrib/ci/run.py --jobs 4 gate. Existing test/misc.jl locale coverage and test/regex.jl should be included as regression smoke checks; no Julia regression file needed because no Joolia semantic adaptation was made."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
