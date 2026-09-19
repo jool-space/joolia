@@ -1,0 +1,68 @@
+{
+  "plan": {
+    "base_sha": "b4d75caf2b89a28051e62d82ab76c6e79c9aeb5a",
+    "previous_sha": "53efe7eca879b513b199718847e6f30e7c86ff70",
+    "fetched_sha": "e9d1f89e1c79a44c4870fdfe6684ebe617c6e24b",
+    "target_sha": "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+    "branch": "sync/julia-53efe7eca879-12fbf6b9b315",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+        "subject": "module: perform `jl_disable_binding` under `world_counter_lock` [NFCI] (#63251)",
+        "paths": [
+          "src/module.c"
+        ],
+        "changed_lines": 20,
+        "patch_bytes": 1219,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+      "e177e01f81c8571b2e21e84964446704b7645942",
+      "58e8bb8cb772cbcb030a9affb061e0e7cf0265f9",
+      "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+      "decc791652f4becc636683071b94ddce617b8163",
+      "a6714ba33042a5aefca3c71c018c901ab46cda19",
+      "d96818f42f442fd51d506dc900cb2054004df78c",
+      "e9d1f89e1c79a44c4870fdfe6684ebe617c6e24b"
+    ]
+  },
+  "review": {
+    "target_sha": "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+    "decision": "propose",
+    "summary": "Reviewed the merged upstream change and Joolia context. It only changes synchronization for binding invalidation in src/module.c; no zero-origin adaptation is required. No source or test files were changed, and no builds or tests were run.",
+    "commits": [
+      {
+        "sha": "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+        "risk": "high",
+        "subsystems": "Native module binding partitions and world-age synchronization in src/module.c (`jl_disable_binding`, `jl_replace_binding_locked`, `jl_get_binding_partition`), with downstream invalidation through base/runtime_internals.jl (`delete_binding`) and Compiler/src/bindinginvalidations.jl.",
+        "indexing_implications": "The changed `new_world` in src/module.c:2059 is a monotonic world-age/version identifier, not a collection position, dimension selector, or storage index; preserving `jl_atomic_load_relaxed(&jl_world_counter) + 1` is correct. The `new_world - 1` operations in `jl_replace_binding_locked2` are inclusive previous-world bounds for binding partitions and invalidation, not origin conversions. `bpart` is a binding-partition pointer. Surrounding callers in src/toplevel.c, src/module.c (`jl_deprecate_binding`, `jl_module_import`, and `jl_module_using`) use the same lock/new-world protocol. The existing `jl_binding_backedges_getindex` C boundary and Compiler loop remain unchanged; their one-based API argument is an external interface convention and is not affected by this commit.",
+        "adaptations": "None. The upstream retrying path inspected the binding partition at the current world, then called `jl_replace_binding`; the resulting code instead holds `world_counter_lock`, computes the next world, resolves `bpart` at that new world, replaces it with `jl_replace_binding_locked`, publishes the world, and unlocks. This preserves the binding-partition interval semantics and removes the check/replace race. Joolia's existing zero-origin changes in Compiler/src/bindinginvalidations.jl do not overlap this path, and translating any of these world identifiers would be incorrect.",
+        "tests": "Recommended, not executed: rebuild the runtime with `make -j`; run `make -C src analyze-module -j8 --output-sync` after analysis dependencies are available; run the existing rebinding and world-age coverage with `./usr/bin/joolia --startup-file=no --check-bounds=yes test/runtests.jl rebinding worlds`; inspect `test/rebinding.jl` cases for `Base.delete_binding`, outdated world ages, guard partitions, and invalidation, plus `test/worlds.jl` monotonic world-counter checks. Then run the required `python3 contrib/ci/run.py --jobs 4` gate, with particular attention to concurrent binding invalidation behavior."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
