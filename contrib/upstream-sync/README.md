@@ -88,11 +88,13 @@ To check the action/model path independently of a large review, manually run:
 gh workflow run upstream-sync.yml --ref master -f mode=probe --repo jool-space/joolia
 ```
 
-The probe asks for one sandboxed shell read of a random challenge file and a
-tiny JSON response. It verifies the returned challenge, has a three-minute
+The probe asks for a sandboxed shell read of a random challenge file, an
+`apply_patch` edit copying its contents, and a tiny JSON response. It verifies
+both the response and the edited file, has a three-minute
 independent deadline, and never publishes a PR or advances a checkpoint. Maintainers can
 also dispatch it on a same-repository workflow branch to validate a fix before
-merging. It still makes an API call. Failed review batches are not retried in an
+merging. Probes use a separate concurrency group so a stuck batch does not
+block diagnosis; they never publish. It still makes an API call. Failed review batches are not retried in an
 unbounded loop; inspect the artifact before deciding whether to retry.
 
 ## What happens

@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: joolia-upstream-sync
+  group: ${{ inputs.mode == 'probe' && format('joolia-upstream-probe-{0}', github.ref) || 'joolia-upstream-sync' }}
   cancel-in-progress: false
 
 env:
@@ -124,9 +124,10 @@ jobs:
           challenge = Path('.cache/upstream-sync-probe.txt')
           challenge.parent.mkdir(exist_ok=True)
           challenge.write_text(secrets.token_hex(16))
-          (folder / 'prompt.md').write_text('Use one shell tool to run `cat .cache/upstream-sync-probe.txt`. '
-              'Do not change files or run anything else. Return JSON with status="ok" and proof equal to the file contents. '
-              'If the tool fails, return status="failed" and proof=""; do not retry.')
+          (folder / 'prompt.md').write_text('Read .cache/upstream-sync-probe.txt with a shell tool. '
+              'Then use the apply_patch tool to create .cache/upstream-sync-probe-copy.txt with the same contents. '
+              'Do not edit other files or run other commands. Return JSON with status="ok" and proof equal to the file contents. '
+              'If either tool fails, return status="failed" and proof=""; do not retry or use a different editing tool.')
           schema = {'type': 'object', 'properties': {'status': {'type': 'string', 'enum': ['ok', 'failed']},
                     'proof': {'type': 'string'}}, 'required': ['status', 'proof'], 'additionalProperties': False}
           (folder / 'review.schema.json').write_text(json.dumps(schema))
@@ -175,7 +176,7 @@ jobs:
           prompt-file: ${{ env.SYNC_DIR }}/prompt.md
           output-schema-file: ${{ env.SYNC_DIR }}/review.schema.json
           output-file: ${{ env.SYNC_DIR }}/review.json
-      - name: Verify the probe exercised a shell tool
+      - name: Verify the probe exercised shell reading and patch editing
         if: inputs.mode == 'probe' && steps.review.outcome == 'success'
         run: |
           python3 - <<'PYCODE'
@@ -183,9 +184,10 @@ jobs:
           from pathlib import Path
           result = json.loads((Path(os.environ['SYNC_DIR']) / 'review.json').read_text())
           expected = Path('.cache/upstream-sync-probe.txt').read_text()
-          if result != {'status': 'ok', 'proof': expected}:
-              raise SystemExit('The model responded, but the sandboxed shell probe failed')
-          print('Model response and sandboxed shell challenge verified.')
+          copied = Path('.cache/upstream-sync-probe-copy.txt')
+          if result != {'status': 'ok', 'proof': expected} or not copied.exists() or copied.read_text().strip() != expected:
+              raise SystemExit('The model responded, but the sandboxed read/edit probe failed')
+          print('Model response, shell read, and apply_patch edit verified.')
           PYCODE
       - name: Retain progress and stop the deadline
         if: always()
