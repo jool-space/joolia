@@ -241,14 +241,19 @@ See also [`PackageSpec`](@ref), [`Pkg.develop`](@ref).
 const add = API.add
 
 """
-    Pkg.precompile(; strict::Bool=false, timing::Bool=false)
-    Pkg.precompile(pkg; strict::Bool=false, timing::Bool=false)
-    Pkg.precompile(pkgs; strict::Bool=false, timing::Bool=false)
+    Pkg.precompile(; strict::Bool=false, timing::Bool=false, skip_dependents::Bool=true, force::Bool=false)
+    Pkg.precompile(pkg; strict::Bool=false, timing::Bool=false, skip_dependents::Bool=true, force::Bool=false)
+    Pkg.precompile(pkgs; strict::Bool=false, timing::Bool=false, skip_dependents::Bool=true, force::Bool=false)
     Pkg.precompile(f, args...; kwargs...)
 
 Precompile all or specific dependencies of the project in parallel.
 
 Set `timing=true` to show the duration of the precompilation of each dependency.
+
+When a dependency fails to precompile, its dependents are skipped. Set `skip_dependents=false`
+(`pkg> precompile --noskip`) to attempt them anyway, for example when the dependency is
+only loaded on some platforms. Set `force=true` (`pkg> precompile --force`) to recompile
+packages with fresh caches; standard libraries are left alone. Both options require Julia 1.14.
 
 To delay autoprecompilation of multiple Pkg actions until the end use.
 This may be most efficient while manipulating the environment in various ways.

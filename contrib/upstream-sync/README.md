@@ -59,7 +59,11 @@ with a 30-minute timeout; this is a runtime bound, not a dollar/token cap.
 2. Select a first-parent prefix, including every commit reachable through its
    merged branches. Limits are 20 commits, 2,500 changed lines and 250,000 patch
    bytes, counting individual diffs (including merge diffs). Never split an
-   upstream merge group. Isolate groups touching `src/` or `Compiler/`.
+   upstream merge group. Runtime and compiler changes share these budgets with
+   other changes; touching `src/` or `Compiler/` does not force a separate build.
+   Luna still reviews every commit individually and flags unsafe changes for
+   manual integration. A successful merge immediately starts the next batch;
+   the daily schedule is a kickoff, not a one-batch-per-day limit.
 3. Preserve the complete ordered incoming list, filenames, sizes and stdlib
    provenance in a plan artifact. Oversized first groups stop with a diagnostic;
    they are never skipped. A pending sync PR prevents preparing another batch.
@@ -148,8 +152,15 @@ No force-pushes are used. Plans and reviews are retained as artifacts for 30 day
 the full review is also committed under `reports/<target-sha>.json`.
 
 A report-only PR does not import upstream code or advance the checkpoint. It
-needs manual integration, or closing and manual resolution of the batch. A CI
-failure likewise remains on the draft for inspection. This initial version has
+needs manual integration; marking the draft ready or merging its report does
+not resolve the missing source changes. Merge the recorded target SHA, supply
+the missing adaptations, preserve the initial review alongside the resolution,
+and update the checkpoint only on that integration branch. Run CI on the
+resulting tree. A replacement PR can close the report-only PR when it merges,
+allowing the queue to resume from the new checkpoint. Closing the report alone
+will not make the publisher retry that same batch.
+
+A CI failure likewise remains on the draft for inspection. This initial version has
 no automatic repair/bisection loop, no autonomous subtree import, and no measured
 Luna recall/cost benchmark yet. These should follow observed trial results.
 

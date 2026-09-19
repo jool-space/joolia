@@ -1,7 +1,7 @@
 {
   "upstream": "https://github.com/JuliaLang/julia.git",
   "branch": "master",
-  "integrated_sha": "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+  "integrated_sha": "81093121d4e6cf469154d977e2ecd6b7488ea0de",
   "max_commits": 20,
   "max_changed_lines": 2500,
   "max_patch_bytes": 250000
