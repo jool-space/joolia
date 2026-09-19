@@ -1,0 +1,72 @@
+{
+  "plan": {
+    "base_sha": "e03fe07b7b9feab5c8264ee2eedd44618c6ef659",
+    "previous_sha": "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+    "fetched_sha": "e9d1f89e1c79a44c4870fdfe6684ebe617c6e24b",
+    "target_sha": "53efe7eca879b513b199718847e6f30e7c86ff70",
+    "branch": "sync/julia-bb92f91a6069-53efe7eca879",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "53efe7eca879b513b199718847e6f30e7c86ff70",
+        "subject": "module: give the global RMW store helpers their own loops [NFC] (#63250)",
+        "paths": [
+          "src/datatype.c",
+          "src/genericmemory.c",
+          "src/julia_internal.h",
+          "src/module.c"
+        ],
+        "changed_lines": 80,
+        "patch_bytes": 9926,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+      "e177e01f81c8571b2e21e84964446704b7645942",
+      "58e8bb8cb772cbcb030a9affb061e0e7cf0265f9",
+      "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+      "decc791652f4becc636683071b94ddce617b8163",
+      "a6714ba33042a5aefca3c71c018c901ab46cda19",
+      "d96818f42f442fd51d506dc900cb2054004df78c",
+      "e9d1f89e1c79a44c4870fdfe6684ebe617c6e24b"
+    ]
+  },
+  "review": {
+    "target_sha": "53efe7eca879b513b199718847e6f30e7c86ff70",
+    "decision": "propose",
+    "summary": "Reviewed 53efe7eca879b513b199718847e6f30e7c86ff70 against its first parent, the existing Joolia port, and the merged tree. It is a runtime-only refactor of global atomic RMW loops with no zero-origin semantic change. No source or test adaptation is needed; suitable for a draft PR and CI after required native validation.",
+    "commits": [
+      {
+        "sha": "53efe7eca879b513b199718847e6f30e7c86ff70",
+        "risk": "medium",
+        "subsystems": "Native runtime global bindings in src/module.c (`jl_checked_modify`, `jl_checked_replace`); atomic field and Memory helpers in src/datatype.c and src/genericmemory.c (`modify_value`, `replace_value`, `modify_nth_field`, `jl_memoryrefmodify`, `jl_memoryrefreplace`); declarations in src/julia_internal.h. Callers in src/builtins.c, src/interpreter.c, src/codegen.cpp, and Compiler inference paths were inspected.",
+        "indexing_implications": "No Julia collection position, dimension selector, sentinel, ABI value, or compiler ID is changed. `args[0]` and `args[1]` in src/datatype.c and src/module.c are zero-based C GC-root/argument slots; `2` is their count, not a Julia position. `jl_new_struct(rettyp, args[0], args[1])` preserves semantic result ordering (old/new or old/success), not numeric indexing. Existing `jl_field_offset(rettyp, 0)` and `jl_field_offset(rettyp, 1)` in `replace_bits` are native zero-based first/second-field positions and are untouched. Existing Joolia conversions in `jl_process_field_attrs`, `jl_get_nth_field`, `jl_field_isdefined_checked`, and `jl_get_field_offset` remain intact. In src/genericmemory.c, the existing `size_t i` derived from `m.ptr_or_offset` is a zero-origin memory element position; this commit only changes helper arguments. The global path was traced from `modifyglobal_value`/`replaceglobal_value` through the binding CAS storage and error handling.",
+        "adaptations": "None. The upstream intent is preserved exactly: global helpers now own their CAS loops, retain `UndefVarError` for unset bindings, validate every candidate against the fixed binding partition, and preserve result types. Field and Memory helpers retain `UndefRefError` and ordinary type validation. Adding or removing an origin conversion would misclassify C root slots or existing zero-origin field/memory positions.",
+        "tests": "Recommended, not executed: rebuild with `make -j`; run `make -C test atomics` covering `test/atomics.jl` global, field, and Memory RMW cases, including successful compare/modify results and unset-binding errors around `gen_test_global_operators` and `gen_test_global_undef`; run the relevant compiler inference suite covering `Compiler/test/inference.jl` global RMW modeling and result types; run Clang analysis for changed translation units with `make -C src analyze-datatype analyze-genericmemory analyze-module -j8 --output-sync` after analysis dependencies are provisioned; then run `python3 contrib/ci/run.py --jobs 4`. The existing tests already exercise the refactored behavior, so no redundant regression test was added."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
