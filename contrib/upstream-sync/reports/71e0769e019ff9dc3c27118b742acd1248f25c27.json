@@ -1,0 +1,87 @@
+{
+  "plan": {
+    "base_sha": "befa7e40ff73c90b05192f385be4d5932d47a48f",
+    "previous_sha": "f3c70411bfee76c662f7807202305bc4fd8f059d",
+    "fetched_sha": "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+    "target_sha": "71e0769e019ff9dc3c27118b742acd1248f25c27",
+    "branch": "sync/julia-f3c70411bfee-71e0769e019f",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "7f5097dfad3c4a67558dd208d3bab175e332940e",
+        "subject": "gmp: Import `exponent` so the `BigInt` method is reachable (#63257)",
+        "paths": [
+          "base/gmp.jl",
+          "test/intfuncs.jl"
+        ],
+        "changed_lines": 7,
+        "patch_bytes": 1303,
+        "binary": false
+      },
+      {
+        "sha": "71e0769e019ff9dc3c27118b742acd1248f25c27",
+        "subject": "math: Add an `exponent` method for `Bool` (#63245)",
+        "paths": [
+          "base/math.jl",
+          "test/intfuncs.jl"
+        ],
+        "changed_lines": 14,
+        "patch_bytes": 1305,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "f3c70411bfee76c662f7807202305bc4fd8f059d",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+      "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+      "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+      "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+      "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef"
+    ]
+  },
+  "review": {
+    "target_sha": "71e0769e019ff9dc3c27118b742acd1248f25c27",
+    "decision": "propose",
+    "summary": "Reviewed both commits, their first-parent diffs, Joolia\u2019s existing zero-origin adaptations, and the merged result at HEAD. No additional source or test adaptation is needed: the changed values are dispatch, mathematical exponents, counts, or already-correct zero-origin limb positions.",
+    "commits": [
+      {
+        "sha": "7f5097dfad3c4a67558dd208d3bab175e332940e",
+        "risk": "medium",
+        "subsystems": "Base.GMP BigInt dispatch in base/gmp.jl (`GMP.exponent`, `_bit_magnitude`, `top_set_bit`); Base.Math `exponent` fallback in base/math.jl; test/intfuncs.jl allocation and BigInt exponent coverage. Base.jl loading order was inspected: Math is included before GMP.",
+        "indexing_implications": "The changed import at base/gmp.jl:13 makes `GMP.exponent(::BigInt)` extend `Base.exponent`, so BigInt calls reach the limb-based implementation instead of the generic Integer fallback. In base/gmp.jl:629-635, `x.size` is a signed limb count, while `x.size - 1` passed to `unsafe_load` is the zero-origin final limb position; this existing Joolia adaptation is correct and must not be changed. The returned `_bit_magnitude(x) - 1` is a mathematical binary exponent, not a collection position. `@allocated` in test/intfuncs.jl measures an allocation byte count, not an index. Callers including `top_set_bit` and base/intfuncs.jl:841 were inspected.",
+        "adaptations": "None. The only commit source change is the missing Base generic-function import. Joolia\u2019s existing zero-origin limb accesses and BigInt storage contract are already present in the resulting tree; changing the import or exponent arithmetic would either leave the dispatch bug or alter a mathematical result.",
+        "tests": "Recommended, not executed: run the existing test/intfuncs.jl and test/gmp.jl targets in fresh Joolia processes, checking `exponent(big(2)^100 \u00b1 1) == 99/100`, negative and zero DomainError behavior, and the existing zero-allocation assertion after compilation. Also run `make -C test base-foundation` and the required `python3 contrib/ci/run.py --jobs 4` gate. No runtime tests were run because this review has no built Joolia."
+      },
+      {
+        "sha": "71e0769e019ff9dc3c27118b742acd1248f25c27",
+        "risk": "low",
+        "subsystems": "Base.Math numeric dispatch and documentation in base/math.jl (`exponent(::Integer)`, `exponent(::Base.BitInteger)`, `exponent(::Bool)`); Core/Base Bool and Integer hierarchy in base/boot.jl and base/int.jl; test/intfuncs.jl.",
+        "indexing_implications": "The new `exponent(::Bool)` method at base/math.jl:992-998 returns the mathematical exponent of `true` (0) and rejects `false` because it represents numeric zero. The returned 0 is a mathematical value, not a zero-origin position or sentinel. Bool is an Integer according to base/boot.jl, but is not included in the `Base.BitInteger` union defined in base/int.jl, so the exact Bool method is needed to avoid the generic `_ilog2_step` path. Existing `exponent(::Integer)` values, including its initial shift/count arguments, were classified as mathematical logarithm state and counts rather than collection indices.",
+        "adaptations": "None. The resulting method preserves upstream intent and is already compatible with Joolia\u2019s zero-origin contract; no array, tuple, dimension, range, memory, compiler-ID, or foreign-ABI index is introduced. The compat documentation is version metadata, not an index.",
+        "tests": "Recommended, not executed: run test/intfuncs.jl in normal and minimal compilation modes and verify `@inferred(exponent(true)) === 0` plus `@test_throws DomainError exponent(false)`, alongside existing integer boundary cases. Run `make -C test base-foundation` and the required `python3 contrib/ci/run.py --jobs 4` gate. No runtime tests were run because this review has no built Joolia."
+      }
+    ],
+    "unresolved": []
+  },
+  "integrated": true
+}
