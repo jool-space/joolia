@@ -1,0 +1,90 @@
+{
+  "plan": {
+    "base_sha": "5952d7196b5f279e616fe7ff8cb39ff2fafbee70",
+    "previous_sha": "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+    "fetched_sha": "6a1694d848366c4e75da889c2a060ebe58ea5cef",
+    "target_sha": "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+    "branch": "sync/julia-53f4db20b59c-81093121d4e6",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+        "subject": "precompilation: skip dependents of failed packages, add force options (#63122)",
+        "paths": [
+          "NEWS.md",
+          "base/precompilation.jl",
+          "test/precompile.jl"
+        ],
+        "changed_lines": 274,
+        "patch_bytes": 31288,
+        "binary": false
+      },
+      {
+        "sha": "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+        "subject": "doc: cover the TTFX jobs and artifact downloads in the buildkite-logs skill (#63243)",
+        "paths": [
+          "doc/src/devdocs/agents/skills/buildkite-logs/SKILL.md"
+        ],
+        "changed_lines": 25,
+        "patch_bytes": 2544,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+      "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+      "22e4766fdef43e6b52949531596ea8d924b1b328",
+      "377e4c1869f827140ad5491d123dfda878c50de6",
+      "a0c011e53a598d22360a1859ee69471ed719acc4",
+      "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+      "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+      "e177e01f81c8571b2e21e84964446704b7645942",
+      "58e8bb8cb772cbcb030a9affb061e0e7cf0265f9",
+      "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+      "decc791652f4becc636683071b94ddce617b8163",
+      "a6714ba33042a5aefca3c71c018c901ab46cda19",
+      "d96818f42f442fd51d506dc900cb2054004df78c",
+      "e9d1f89e1c79a44c4870fdfe6684ebe617c6e24b",
+      "6a1694d848366c4e75da889c2a060ebe58ea5cef"
+    ]
+  },
+  "review": {
+    "target_sha": "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+    "decision": "manual",
+    "summary": "The batch is already merged at HEAD. The precompilation change is origin-compatible, but the batch also changes a protected agent-instruction file and leaves a user-facing Pkg option mismatch requiring human review.",
+    "commits": [
+      {
+        "sha": "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+        "risk": "high",
+        "subsystems": "Base precompilation scheduler/cache handling in base/precompilation.jl; regression coverage in test/precompile.jl; NEWS.md.",
+        "indexing_implications": "JOB_DEP_FAILED is an appended enum state, not a collection position. PkgId/config keys, dependency vectors, package names, and extension maps are graph identifiers or relationships. n_failed, n_dep_failed, ndeps, n_already_precomp, and length(...) are counts. pid and had_pid are process metadata. In failed_dependency and report_precompile_results!, tuple destructuring and first(k) preserve package/config data; config[0] is consistent with Joolia's existing zero-origin adaptation. Existing local conversions in base/precompilation.jl, including displaysize tuple accesses, match captures, split fields, config access, and only(configs)[0], remain intact. The producer-to-consumer path is dependency graph -> PrecompileJob status/error root -> report output; no new public position conversion is needed.",
+        "adaptations": "None. The changed integers are enum tags, graph identifiers, sentinels, process metadata, booleans, or counts rather than collection positions. The merged base/precompilation.jl preserves Joolia's existing origin conversions. No files were changed because another SHA triggers the protected-file stop condition.",
+        "tests": "Recommended, not executed: with a rebuilt Joolia and isolated temporary depot, run test/precompile.jl covering default skip_dependents behavior, skip_dependents=false, extension suppression, fresh-cache reuse, force=true recompilation, and exact failure summaries. Then run the affected precompilation target and python3 contrib/ci/run.py --jobs 4."
+      },
+      {
+        "sha": "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+        "risk": "medium",
+        "subsystems": "Tracked agent documentation at doc/src/devdocs/agents/skills/buildkite-logs/SKILL.md; Buildkite artifact and TTFX documentation.",
+        "indexing_implications": "The change contains no Joolia collection positions or dimensions. file_size is a byte count; job UUIDs, artifact URLs, and JSON records are external identifiers/data, not indices. No zero-origin adaptation applies.",
+        "adaptations": "None permitted. This SHA edits a protected agent-instruction file explicitly excluded by the task, so human handling is required.",
+        "tests": "Recommended, not executed: if retained, validate the Markdown/front matter and documented artifact examples through the separate authorized documentation workflow. No Joolia runtime tests are relevant."
+      }
+    ],
+    "unresolved": [
+      "81093121d4e6cf469154d977e2ecd6b7488ea0de modifies doc/src/devdocs/agents/skills/buildkite-logs/SKILL.md, a protected agent-instruction path. This requires manual handling and prevents a proposal.",
+      "base/precompilation.jl advertises pkg> precompile --noskip, but stdlib/Pkg/src/REPLMode/command_declarations.jl does not declare that option and stdlib/Pkg/src/API.jl does not forward the new controls to Base. The missing Pkg CLI/API follow-up is outside the pinned commit list and must be resolved by a human.",
+      "No builds or runtime tests were run; this job has no built Joolia and is not the verification job."
+    ]
+  },
+  "integrated": false
+}
