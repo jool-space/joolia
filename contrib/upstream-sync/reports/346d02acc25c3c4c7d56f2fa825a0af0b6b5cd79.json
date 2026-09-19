@@ -1,0 +1,263 @@
+{
+  "plan": {
+    "base_sha": "57d27b961063dae2323809b7ac71d10d5b7154de",
+    "previous_sha": "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+    "fetched_sha": "74fb2bea8d751b14e3413a01c12979de46c250b2",
+    "target_sha": "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+    "branch": "sync/julia-81093121d4e6-346d02acc25c",
+    "status": "ready",
+    "manual_reasons": [],
+    "commits": [
+      {
+        "sha": "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+        "subject": "codegen: redesign aliasinfo again (#62904)",
+        "paths": [
+          "Compiler/test/codegen.jl",
+          "src/cgutils.cpp",
+          "src/clangsa/GCCheckerReporting.cpp",
+          "src/codegen.cpp",
+          "src/intrinsics.cpp",
+          "src/llvm-codegen-shared.h",
+          "src/llvm-late-gc-lowering.cpp",
+          "test/llvmpasses/gcroots.ll",
+          "test/llvmpasses/refinements.ll"
+        ],
+        "changed_lines": 682,
+        "patch_bytes": 68927,
+        "binary": false
+      },
+      {
+        "sha": "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+        "subject": "Declare _reinterpret up front to avoid a ton of invalidations (#62871)",
+        "paths": [
+          "base/essentials.jl"
+        ],
+        "changed_lines": 5,
+        "patch_bytes": 654,
+        "binary": false
+      },
+      {
+        "sha": "22e4766fdef43e6b52949531596ea8d924b1b328",
+        "subject": "deps: pass `CMAKE_POLICY_VERSION_MINIMUM` when configuring ittapi (#63265)",
+        "paths": [
+          "deps/ittapi.mk"
+        ],
+        "changed_lines": 2,
+        "patch_bytes": 712,
+        "binary": false
+      },
+      {
+        "sha": "377e4c1869f827140ad5491d123dfda878c50de6",
+        "subject": "deps: do not build a dependency in order to uninstall it (#63264)",
+        "paths": [
+          "deps/tools/common.mk",
+          "deps/tools/uninstallers.mk"
+        ],
+        "changed_lines": 10,
+        "patch_bytes": 1545,
+        "binary": false
+      },
+      {
+        "sha": "a0c011e53a598d22360a1859ee69471ed719acc4",
+        "subject": "fixup big rational hashing (#63266)",
+        "paths": [
+          "base/rational.jl",
+          "test/gmp.jl"
+        ],
+        "changed_lines": 13,
+        "patch_bytes": 1420,
+        "binary": false
+      },
+      {
+        "sha": "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+        "subject": "gc: never skip weak-processing pages in the quick sweep (#63234)",
+        "paths": [
+          "src/gc-stock.c",
+          "test/cancellation.jl"
+        ],
+        "changed_lines": 30,
+        "patch_bytes": 2933,
+        "binary": false
+      },
+      {
+        "sha": "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+        "subject": "gc: Make stock-GC memory copies safe under concurrent mutation (#63244)",
+        "paths": [
+          "src/gc-wb-stock.h",
+          "src/julia.h",
+          "test/gc/copyto.jl"
+        ],
+        "changed_lines": 214,
+        "patch_bytes": 10530,
+        "binary": false
+      },
+      {
+        "sha": "035f7c9c2348982153d39d3a552dfe0d5c7b1aae",
+        "subject": "doc: split latex symbols from emojis",
+        "paths": [
+          "doc/make.jl",
+          "doc/src/manual/emoji-input.md",
+          "doc/src/manual/unicode-input.md",
+          "stdlib/REPL/docs/src/index.md"
+        ],
+        "changed_lines": 198,
+        "patch_bytes": 9179,
+        "binary": false
+      },
+      {
+        "sha": "e177e01f81c8571b2e21e84964446704b7645942",
+        "subject": "Merge pull request #63273 from JuliaLang/rk/split-latex-emoji-docs",
+        "paths": [
+          "doc/make.jl",
+          "doc/src/manual/emoji-input.md",
+          "doc/src/manual/unicode-input.md",
+          "stdlib/REPL/docs/src/index.md"
+        ],
+        "changed_lines": 198,
+        "patch_bytes": 9179,
+        "binary": false
+      },
+      {
+        "sha": "58e8bb8cb772cbcb030a9affb061e0e7cf0265f9",
+        "subject": "Hide kwcall frames in stacktraces again (#63192)",
+        "paths": [
+          "base/errorshow.jl",
+          "test/errorshow.jl"
+        ],
+        "changed_lines": 54,
+        "patch_bytes": 4019,
+        "binary": false
+      },
+      {
+        "sha": "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+        "subject": "reflection: Add `world` keyword argument to `Base.bodyfunction` (#63239)",
+        "paths": [
+          "base/reflection.jl",
+          "test/reflection.jl"
+        ],
+        "changed_lines": 31,
+        "patch_bytes": 3132,
+        "binary": false
+      }
+    ],
+    "stdlib_updates": [],
+    "limits": {
+      "upstream": "https://github.com/JuliaLang/julia.git",
+      "branch": "master",
+      "integrated_sha": "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "max_commits": 20,
+      "max_changed_lines": 2500,
+      "max_patch_bytes": 250000
+    },
+    "remaining_first_parent_commits": [
+      "decc791652f4becc636683071b94ddce617b8163",
+      "a6714ba33042a5aefca3c71c018c901ab46cda19",
+      "d96818f42f442fd51d506dc900cb2054004df78c",
+      "e9d1f89e1c79a44c4870fdfe6684ebe617c6e24b",
+      "6a1694d848366c4e75da889c2a060ebe58ea5cef",
+      "d024567ba68b457d767953002b34fe3dcc30f844",
+      "bbb0b4bb07506fa210a2aeae9e5042e1df6d90a2",
+      "3d9f720a065f30df545b0de30ce65b18115b0cba",
+      "286cd1c7abff3b55be76a6f6eaad89fb2d573235",
+      "26d28a1e242ed7947b2c920e328c4e0a0be6fb30",
+      "74fb2bea8d751b14e3413a01c12979de46c250b2"
+    ]
+  },
+  "review": {
+    "target_sha": "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+    "decision": "propose",
+    "summary": "Every incoming commit was reviewed in a separate job against the full merged batch.",
+    "unresolved": [],
+    "commits": [
+      {
+        "sha": "a414ee183a31f255b75f82f0dd110ac64e74ab9c",
+        "risk": "high",
+        "subsystems": "LLVM code generation and alias analysis in src/codegen.cpp; late-GC metadata recognition in src/llvm-codegen-shared.h and src/llvm-late-gc-lowering.cpp; memory lowering in src/cgutils.cpp; intrinsic lowering in src/intrinsics.cpp; Clang analyzer diagnostics in src/clangsa/GCCheckerReporting.cpp; tests in Compiler/test/codegen.jl and test/llvmpasses/gcroots.ll/refinements.ll.",
+        "indexing_implications": "Region values (0 and bit flags) are memory-region enum values, not collection positions. LLVM metadata operands (getOperand(0), getOperand(3)), TBAA offset 0, vector capacities, and pointer/field counts retain their native meanings. Late-GC Number(S,V) values are internal SSA identifiers. Existing zero-origin paths in cgutils.cpp (emit_memoryref_direct, emit_memoryref, emit_memoryref_offset), codegen.cpp field lowering, and intrinsics.cpp pointerref/pointerset were inspected and are not changed by this commit.",
+        "adaptations": "None. The merged code changes alias metadata and GC-rooting classification only. memorybuf_aliasinfo, memoryselbyte, ai_is_private, and best_field_aliasinfo classify storage regions rather than translating positions. No Julia storage-boundary +1/-1 conversion or compiler-ID renumbering is introduced or lost.",
+        "tests": "Recommended, not executed: make -C test/llvmpasses refinements.ll; make -C test/llvmpasses gcroots.ll; run the foo54166 codegen test in Compiler/test/codegen.jl; run make -C test compiler-foundation in both supported compilation modes; rebuild before execution. Run the c-static-analysis procedure for codegen, late-GC, and Clang-analyzer units. Include checks that memoryref position 0 reaches the first element and that rooted immutable/const regions remain distinct from mutable memorybuf regions. No builds or tests were run."
+      },
+      {
+        "sha": "7485f7ad53e7a52bc834bbcbd2bfbcfcd8ea2810",
+        "risk": "low",
+        "subsystems": "Base bootstrap and scalar/array reinterpretation in `base/essentials.jl`, `base/Base.jl`, and `base/reinterpretarray.jl`.",
+        "indexing_implications": "No indexing or dimension values change. `_reinterpret` is a function binding, not a position, count, sentinel, or external API value. `reinterpret` calls it for non-primitive values, and `reinterpretarray.jl` later supplies the implementation; existing zero-origin axes and storage offsets remain intact.",
+        "adaptations": "None. The declaration is compatible with Joolia's staged include order and does not require origin conversion.",
+        "tests": "Recommended, not executed: rebuild and run `make -C test base-foundation` plus the relevant `reinterpretarray` target. Cover scalar fallback, zero-origin first/last array positions, zero-length arrays, and multichannel reinterpretation."
+      },
+      {
+        "sha": "22e4766fdef43e6b52949531596ea8d924b1b328",
+        "risk": "low",
+        "subsystems": "deps/ittapi CMake configuration and external dependency source builds",
+        "indexing_implications": "Inspected deps/ittapi.mk, deps/tools/common.mk, deps/ittapi.version, deps/Makefile, and deps/llvm.mk. The new 3.5 literal is a CMake policy-version value, not a position, dimension, count, identifier, or sentinel. Build paths and Make targets are dependency-graph names.",
+        "adaptations": "None. The merged code matches upstream intent; zero-origin translation would incorrectly alter CMake behavior. No Julia indexing contract is involved.",
+        "tests": "Recommended, not executed: make -C deps USE_BINARYBUILDER=0 configure-ittapi; make -C deps USE_BINARYBUILDER=0 compile-ittapi. No Julia regression test is meaningful for this build-only change."
+      },
+      {
+        "sha": "377e4c1869f827140ad5491d123dfda878c50de6",
+        "risk": "low",
+        "subsystems": "Dependency build and uninstall infrastructure in deps/tools/common.mk and deps/tools/uninstallers.mk.",
+        "indexing_implications": "No Julia indexing is involved. Make `word 2`, `wordlist 3,99`, and `firstword` are one-based Make field operations, not Julia positions. Filesystem checks are boolean presence states; absent manifests must not trigger staging or compilation.",
+        "adaptations": "None. The merged files match the upstream change and correctly avoid building an uninstalled dependency while preserving reconstruction of staging data for an installed dependency whose tar is missing.",
+        "tests": "Not executed per restrictions. Recommend isolated-prefix checks for uninstall with no manifest, uninstall with a manifest but missing staging tar, `make -C deps USE_BINARYBUILDER=0 compile-zlib`, cleanup/uninstall, and the full CI gate."
+      },
+      {
+        "sha": "a0c011e53a598d22360a1859ee69471ed719acc4",
+        "risk": "low",
+        "subsystems": "Base rational hashing in base/rational.jl (`hash(::Rational{<:BitInteger64})`); GMP/BigInt hashing coverage in test/gmp.jl; generic real hashing in base/hashing.jl and zero-origin `UnsafeLimbView` handling in base/gmp.jl.",
+        "indexing_implications": "`pow % 8` selects a bit shift within a byte; `pow` is a binary exponent and 8 is a byte width, not a position or dimension. Test variables `i`, `shift`, and `sgn` are exponent/sign/value generators; zero adds an exponent case. `T` iterates types and `h` iterates hash seeds, so neither is an index. The producer/consumer path from rational normalization through BigInt byte hashing was inspected. Joolia's `UnsafeLimbView` already uses zero-origin indexing and limb offsets. No sentinel, axis, tuple position, dimension argument, or foreign index changes.",
+        "adaptations": "None. The merged `base/rational.jl` correction preserves upstream intent by using the low three exponent bits for the byte-aligned hash payload shift, matching the generic rational path in base/hashing.jl. The added test/gmp.jl cases compare equivalent `Rational{T}` and `Rational{BigInt}` hashes across supported integer widths and seeds. Existing Joolia BigInt storage adaptations in base/gmp.jl are compatible, so changing these expressions or test values would be incorrect.",
+        "tests": "Recommended on a built Joolia artifact: `JULIA_TEST_FAILFAST=1 ./usr/bin/joolia --startup-file=no --check-bounds=yes test/runtests.jl gmp`, covering zero, positive and negative numerators, byte-boundary shifts, supported `BitInteger` widths, and all three hash seeds. Then run `python3 contrib/ci/run.py --jobs 4`. No tests were executed in this review job."
+      },
+      {
+        "sha": "4d76908384bc853a4faeab2172d669c4ba8ec4ef",
+        "risk": "high",
+        "subsystems": "Stock GC page sweeping and cancellation-token weak child-list cleanup.",
+        "indexing_implications": "`has_weak_processing` and `has_young` are boolean flags; `nold`, `prev_nold`, `nfree`, `nparents`, and loop variables are counts or traversal counters, not collection positions. The existing zero-based `weak_processing_objs` traversal is unchanged. The guards in `gc_sweep_page` and `gc_sweep_prescan` preserve scanning whenever weak-processing work exists.",
+        "adaptations": "None. Joolia's existing wholesale-dead-page guard already preserves flagged pages, and the merged upstream change correctly extends that protection to both quick-sweep paths. The test ranges `1:n` and `1:20` represent repetition counts, not positions, so they must remain unchanged.",
+        "tests": "Recommended, not executed: rebuild and run `make -C src analyze-gc-stock -j8 --output-sync`; run the focused cancellation test with `JULIA_TEST_FAILFAST=1` (for example `make test-revise-cancellation` where available); then run `python3 contrib/ci/run.py --jobs 4`. Exercise repeated minor collections with 200 promoted linked children and verify cancellation completes without dangling walk-lock access; confirm the MMTk skip remains intentional."
+      },
+      {
+        "sha": "a261da0be47a8b359c42fe0edfe2d1703c87964a",
+        "risk": "high",
+        "subsystems": "Stock GC write barriers and concurrent generic-memory copying in src/gc-wb-stock.h; runtime declarations in src/julia.h; GC regression coverage in test/gc/copyto.jl.",
+        "indexing_implications": "In src/gc-wb-stock.h, n is an element count, stride is a pointer-slot count, and j is a zero-based pointer-layout ordinal passed to src/julia.h:jl_ptr_offset. The test\u2019s explicit copyto! starts and direct reads are collection positions: destination 3/source 1 become 2/0, reads i+2/1 become i+1, and first sentinel 1 becomes 0. Loop bounds and worker labels remain counts or values. end remains the last valid position.",
+        "adaptations": "Changed test/gc/copyto.jl to use copyto!(dest, 2, src, 0, n), read copied elements at dest[i + 1], read the first sentinel at dest[0], and detect the concurrent copy start at dest[0]. No runtime change was needed because native pointer metadata is already zero-based and counts/ABI behavior are preserved.",
+        "tests": "Recommended, not run: rebuild the runtime, run the corresponding GC copyto test with one and multiple threads, and exercise n = 1, 2, 3, 4, 5, 65; inline and wide pointer-bearing structs; partial initialization; and the concurrent Memory{Any} race. Verify position 0, copied span 2:(n+1), untouched endpoints, and child liveness after source clearing. Run applicable Clang static analysis and the full CI gate on a built Joolia artifact."
+      },
+      {
+        "sha": "035f7c9c2348982153d39d3a552dfe0d5c7b1aae",
+        "risk": "low",
+        "subsystems": "Documentation generator, Unicode/emoji manuals, and REPL documentation.",
+        "indexing_implications": "In doc/make.jl, split-field positions changed from [1, 2, 11] to [0, 1, 10]. The enumerate separator guard changed from i > 1 to i > 0 because enumerate is zero-origin. Code points and formatting metadata remain values, not indices.",
+        "adaptations": "Applied both narrow origin adaptations in doc/make.jl; upstream\u2019s page split and documentation links are unchanged.",
+        "tests": "Recommended, not executed: build documentation and inspect both generated Unicode and emoji tables, including multiple aliases and combining characters. git diff --check and checkpoint JSON validation were executed."
+      },
+      {
+        "sha": "e177e01f81c8571b2e21e84964446704b7645942",
+        "risk": "low",
+        "subsystems": "Documentation generation (doc/make.jl, UnicodeTables); manual Unicode/emoji pages; REPL documentation; docs tests.",
+        "indexing_implications": "split(line, \";\") yields an ordinary zero-origin collection, so UnicodeData fields formerly selected at 1, 2, and 11 are positions 0, 1, and 10. enumerate(inputs) yields a zero-origin counter; i is used only to determine whether a separator precedes an alias, so later aliases satisfy i > 0. Code points, Unicode category codes, alignment symbols, paths, and list contents are values or metadata, not positions.",
+        "adaptations": "Changed doc/make.jl UnicodeData selection from [[1, 2, 11]] to [[0, 1, 10]], and completion separator logic from i > 1 to i > 0. Added test/docs.jl checks for field extraction and rendering multiple aliases. No adaptation was needed in the Markdown or REPL prose files.",
+        "tests": "Recommended: run the docs test target containing test/docs.jl; build documentation with the repository docs target and inspect both Unicode Input and Emoji Input generated tables, including entries with multiple aliases; run the REPL documentation suite in the standard CI gate. Not executed here because this review job forbids builds and tests."
+      },
+      {
+        "sha": "58e8bb8cb772cbcb030a9affb061e0e7cf0265f9",
+        "risk": "medium",
+        "subsystems": "Base stack-trace filtering in base/errorshow.jl::_backtrace_remove_kwcall_frames!, Base.StackTraces.frame_mi, and test/errorshow.jl.",
+        "indexing_implications": "The change normalizes StackFrame metadata by unwrapping CodeInstance.def; it does not alter collection positions. The test's st[findfirst(...)] correctly uses Joolia's zero-origin result. Displayed frame labels remain human ordinals.",
+        "adaptations": "None. The merged implementation already uses the compatible frame_mi helper, and the imported regression test's indexing is consistent with Joolia's zero-origin contract. No source or test edit is justified.",
+        "tests": "Recommended, not run: rebuild Base, run make test-revise-errorshow, exercise MethodInstance/CodeInstance/no-linfo StackFrames and kwsorter_outer(; s=3), then run python3 contrib/ci/run.py --jobs 4."
+      },
+      {
+        "sha": "346d02acc25c3c4c7d56f2fa825a0af0b6b5cd79",
+        "risk": "medium",
+        "subsystems": "Base reflection (`base/reflection.jl`, `bodyfunction`), Core world-age/global lookup, reflection tests (`test/reflection.jl`).",
+        "indexing_implications": "Existing Joolia conversions in `bodyfunction` are correct: `callexpr.args[0]` and related arguments are zero-origin Expr positions; `ast.code[end-1]` selects the penultimate statement; `Core.SSAValue.id` remains an internal one-origin identifier and is translated at storage access with `ast.code[fsym.id-1]`. The new `world` and `m.primary_world` values are world versions, not indices. Surrounding `method_argnames` handling was also inspected.",
+        "adaptations": "None. The commit only adds a typed `world` keyword and replaces world-insensitive `getfield` calls with `invoke_in_world(world, getglobal, ...)`. Additional index conversion would corrupt the existing AST/SSA boundary.",
+        "tests": "Recommended, not executed: `JULIA_TEST_FAILFAST=1 make test-revise-reflection`, relevant Base foundation checks, and the full CI gate. Exercise the `BodyFunctionWorld` regression with a pre-definition world and `world=m.primary_world`; verify Symbol and GlobalRef lookup paths and existing zero-origin AST/SSA behavior in `test/reflection.jl`."
+      }
+    ]
+  },
+  "integrated": true
+}
