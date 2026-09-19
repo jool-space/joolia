@@ -18,8 +18,11 @@ The batch contains four different revisions:
 The prepared checkout may already contain a clean merge of target into base.
 Do not interpret "already merged at HEAD" as already released or validated.
 The checkpoint on master advances only when a human merges the proposal.
-Review the complete list, including merge commits and their side-branch commits.
-For a merge commit, inspect its first-parent diff and check for merge-only
+The workflow collectively reviews the complete list, including merge commits
+and their side-branch commits. In a per-commit job, review only the separate
+Assigned commits list; use the full batch to understand dependencies and
+interactions. Do not return reviews or make unrelated adaptations for another
+job's SHAs. For an assigned merge commit, inspect its first-parent diff and check for merge-only
 resolutions; do not assume it equals the union of the child diffs.
 
 Current source and the executable's observed behavior outweigh historical notes.
@@ -31,7 +34,7 @@ record those commands as required follow-up, never claim they ran.
 
 ## Review each commit in three views
 
-For each full SHA, inspect:
+For each assigned full SHA, inspect:
 
 1. **Upstream intent.** Read the commit diff against its first parent and the
    surrounding definitions/callers in that revision. Identify the behavior being
