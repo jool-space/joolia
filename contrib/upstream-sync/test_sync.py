@@ -93,12 +93,43 @@ class SyncTests(unittest.TestCase):
         self.config(max_changed_lines=0)
         self.assertEqual(sync.plan(self.tip)['status'], 'blocked')
 
-    def test_runtime_group_isolated(self):
+    def test_runtime_and_compiler_groups_share_a_bounded_batch(self):
+        sync.git('switch', '-q', 'upstream')
+        self.commit('runtime', 'src/example.c', 'runtime\n')
+        runtime = sync.output('rev-parse', 'HEAD')
+        self.commit('compiler', 'Compiler/example.jl', 'compiler\n')
+        target = sync.output('rev-parse', 'HEAD')
+        sync.git('switch', '-q', 'master')
+        batch = sync.plan(target)
+        self.assertEqual(batch['target_sha'], target)
+        self.assertEqual([c['sha'] for c in batch['commits']],
+                         [self.first, self.tip, runtime, target])
+        self.config(max_commits=3)
+        batch = sync.plan(target)
+        self.assertEqual(batch['target_sha'], runtime)
+        self.assertEqual(batch['remaining_first_parent_commits'], [target])
+
+    def test_runtime_batches_respect_diff_limits(self):
         sync.git('switch', '-q', 'upstream')
         self.commit('runtime', 'src/example.c', 'runtime\n')
         target = sync.output('rev-parse', 'HEAD')
         sync.git('switch', '-q', 'master')
+        infos = [sync.commit_info(sha) for sha in (self.first, self.tip)]
+        self.config(max_changed_lines=sum(c['changed_lines'] for c in infos))
         self.assertEqual(sync.plan(target)['target_sha'], self.tip)
+        self.config(max_changed_lines=2500,
+                    max_patch_bytes=sum(c['patch_bytes'] for c in infos))
+        self.assertEqual(sync.plan(target)['target_sha'], self.tip)
+
+    def test_canonical_agent_skills_require_manual_integration(self):
+        sync.git('switch', '-q', 'upstream')
+        self.commit('skill', 'doc/src/devdocs/agents/skills/example/SKILL.md', 'instructions\n')
+        target = sync.output('rev-parse', 'HEAD')
+        sync.git('switch', '-q', 'master')
+        batch = sync.plan(target)
+        self.assertTrue(batch['manual_reasons'])
+        with self.assertRaises(ValueError):
+            sync.validate_review(batch, self.review(batch))
 
     def test_checkpoint_must_be_merged(self):
         self.config(integrated_sha=self.first)

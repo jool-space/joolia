@@ -11,7 +11,8 @@ STATE = 'contrib/upstream-sync/state.json'
 REPORTS = 'contrib/upstream-sync/reports'
 UPSTREAM = 'https://github.com/JuliaLang/julia.git'
 SHA = re.compile(r'[0-9a-f]{40}')
-PROTECTED = ('.github/', '.codex/', '.agents/', 'contrib/ci/', 'contrib/upstream-sync/')
+PROTECTED = ('.github/', '.codex/', '.agents/', '.claude/', 'doc/src/devdocs/agents/',
+             'contrib/ci/', 'contrib/upstream-sync/')
 TRAILER = 'Assisted-by: Codex (GPT-5.6 Luna)'
 GUIDES = ('review-method.md', 'subsystems.md', 'validation.md')
 
@@ -34,7 +35,7 @@ def write_json(path, value):
 
 def protected(path):
     return (path.startswith(PROTECTED) or path in ('AGENTS.md', '.gitmodules') or
-            path.endswith('/AGENTS.md'))
+            path.endswith(('/AGENTS.md', '/SKILL.md')) or path == 'SKILL.md')
 
 
 def commits_since(previous, target):
@@ -102,10 +103,6 @@ def plan(target, state_path=STATE):
             if sha not in cache:
                 cache[sha] = commit_info(sha)
         infos = [cache[sha] for sha in incoming]
-        new_infos = [info for info in infos if info['sha'] not in {c['sha'] for c in selected}]
-        runtime = any(p.startswith(('src/', 'Compiler/')) for c in new_infos for p in c['paths'])
-        if selected and runtime:
-            break
         exceeds = (len(infos) > state['max_commits'] or
                    sum(c['changed_lines'] for c in infos) > state['max_changed_lines'] or
                    sum(c['patch_bytes'] for c in infos) > state['max_patch_bytes'] or
@@ -116,8 +113,6 @@ def plan(target, state_path=STATE):
                 reasons.append('The first upstream group exceeds the batch limits or includes binary changes.')
             break
         selected, tip, status = infos, candidate, 'ready'
-        if runtime:
-            break
     updates = stdlib_updates(base, previous, tip)
     if any(protected(p) for c in selected for p in c['paths']):
         reasons.append('Incoming commits change automation or agent instructions; manual integration required.')

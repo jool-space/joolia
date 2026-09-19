@@ -59,7 +59,11 @@ with a 30-minute timeout; this is a runtime bound, not a dollar/token cap.
 2. Select a first-parent prefix, including every commit reachable through its
    merged branches. Limits are 20 commits, 2,500 changed lines and 250,000 patch
    bytes, counting individual diffs (including merge diffs). Never split an
-   upstream merge group. Isolate groups touching `src/` or `Compiler/`.
+   upstream merge group. Runtime and compiler changes share these budgets with
+   other changes; touching `src/` or `Compiler/` does not force a separate build.
+   Luna still reviews every commit individually and flags unsafe changes for
+   manual integration. A successful merge immediately starts the next batch;
+   the daily schedule is a kickoff, not a one-batch-per-day limit.
 3. Preserve the complete ordered incoming list, filenames, sizes and stdlib
    provenance in a plan artifact. Oversized first groups stop with a diagnostic;
    they are never skipped. A pending sync PR prevents preparing another batch.
