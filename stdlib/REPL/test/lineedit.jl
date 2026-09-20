@@ -370,6 +370,43 @@ seek(buf,0)
 @test !LineEdit.edit_move_down(buf)
 @test position(buf) == 8
 
+# Navigation and indentation must ignore old input beyond the buffer's logical end.
+@testset "reused input buffer boundaries" begin
+    for text in ("", "c", "   ", "α", "α\nβ", "a\n", "\n")
+        buf = IOBuffer()
+        write(buf, text, "  \nstale\n")
+        truncate(buf, sizeof(text))
+        fresh = IOBuffer(text)
+        for pos in (0, sizeof(text))
+            seek(buf, pos)
+            seek(fresh, pos)
+            @test LineEdit.edit_move_down(buf) == LineEdit.edit_move_down(fresh)
+            @test position(buf) == position(fresh)
+            seek(buf, pos)
+            seek(fresh, pos)
+            @test LineEdit.endofline(buf) == LineEdit.endofline(fresh)
+            LineEdit.move_line_end(buf)
+            LineEdit.move_line_end(fresh)
+            @test position(buf) == position(fresh)
+        end
+        seekend(buf)
+        @test !LineEdit.edit_move_down(buf)
+        @test position(buf) == sizeof(text)
+        @test LineEdit.endofline(buf) == sizeof(text)
+    end
+    buf = IOBuffer()
+    write(buf, "a\nb")
+    truncate(buf, 1)
+    seekstart(buf)
+    write(buf, "c")
+    @test !LineEdit.edit_move_down(buf)
+    @test position(buf) == 1
+    buf = IOBuffer()
+    write(buf, "     x")
+    truncate(buf, 3)
+    @test LineEdit.leadingspaces(buf, 0) == 3
+end
+
 ## edit_delete_prev_word ##
 
 buf = IOBuffer(Vector{UInt8}("type X\n "), read=true, write=true)

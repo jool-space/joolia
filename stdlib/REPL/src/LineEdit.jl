@@ -1130,7 +1130,7 @@ function edit_move_down(buf::IOBuffer)
     npos = something(_findprev(buf.data, isequal(UInt8('\n')), position(buf)), -1)
     # We're interested in character count, not byte count
     offset = length(String(buf.data[(npos+1):(position(buf)-1)]))
-    npos2 = findnext(isequal(UInt8('\n')), buf.data, position(buf))
+    npos2 = _findnext(buf, isequal(UInt8('\n')), position(buf))
     if npos2 === nothing #we're in the last line
         return false
     end
@@ -1298,7 +1298,7 @@ function edit_insert_newline(s::PromptState, align::Int = 0 - options(s).auto_in
     if autoindent && ! options(s).auto_indent_tmp_off
         beg = beginofline(buf)
         line_start = beg == 0 ? 0 : beg + 1
-        next_nonspace = something(findnext(_notspace, buf.data, line_start), buf.size)
+        next_nonspace = something(_findnext(buf, _notspace, line_start), buf.size)
         align = min(next_nonspace - line_start,
                     position(buf) - line_start) # indentation must not increase
         align < 0 && (align = buf.size-line_start)
@@ -1341,10 +1341,18 @@ _notspace(c) = c != _space
 _findprev(data, pred, pos::Int) = isempty(data) || pos <= 0 ? nothing :
     findprev(pred, data, min(pos - 1, lastindex(data)))
 
+# Spare capacity may contain bytes from a previous, longer history entry.
+function _findnext(buf::IOBuffer, pred, pos::Int)
+    for i in pos:buf.size-1
+        pred(buf.data[i]) && return i
+    end
+    return nothing
+end
+
 beginofline(buf::IOBuffer, pos::Int=position(buf)) = something(_findprev(buf.data, isequal(_newline), pos), 0)
 
 function endofline(buf::IOBuffer, pos::Int=position(buf))
-    eol = findnext(isequal(_newline), buf.data, pos)
+    eol = _findnext(buf, isequal(_newline), pos)
     eol === nothing ? buf.size : eol
 end
 
@@ -1727,7 +1735,7 @@ end
 # (which can also be "end of line" or "end of buffer")
 function leadingspaces(buf::IOBuffer, b::Int)
     line_start = b == 0 ? 0 : b + 1
-    ls = something(findnext(_notspace, buf.data, line_start), buf.size)
+    ls = something(_findnext(buf, _notspace, line_start), buf.size)
     return ls - line_start
 end
 
@@ -2668,7 +2676,7 @@ end
 
 function move_line_end(buf::IOBuffer)
     eof(buf) && return
-    pos = findnext(isequal(UInt8('\n')), buf.data, position(buf))
+    pos = _findnext(buf, isequal(UInt8('\n')), position(buf))
     if pos === nothing
         move_input_end(buf)
         return

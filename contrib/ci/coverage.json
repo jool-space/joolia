@@ -4,7 +4,7 @@
   "partial_coverage": {
     "Base and Compiler": "Bootstrap foundation targets; full upstream suites are not yet ported.",
     "Pkg": "Miscellaneous/lifecycle suite plus a real package REPL using a local versioned registry; full resolver and registry suites are not yet ported.",
-    "REPL": "Styled PTY startup, backspace, completion, package add/status/test and package loading; full REPL suite is not yet ported.",
+    "REPL": "Styled PTY startup, backspace, multiline history navigation, completion, package add/status/test and package loading; full REPL suite is not yet ported.",
     "LinearAlgebra": "Dense multiplication in the package lifecycle fixture; factorizations and the full suite are not certified.",
     "Other stdlibs and ecosystem packages": "Build/precompilation only unless exercised by the named suites; not certified.",
     "Revise-based tests": "Blocked by unported JuliaInterpreter and LoweredCodeUtils; CI uses the ordinary test runner."

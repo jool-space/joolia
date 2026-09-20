@@ -167,6 +167,18 @@ def main():
                 repl.send("o" + " " * spaces + "\x7f\n")
                 end = repl.wait("\n73\n", start)
                 repl.wait("joolia> ", end)
+            # Down must leave recalled multiline history and return to the empty draft.
+            repl.julia('history_navigation_count = 0')
+            start = len(repl.text())
+            repl.send("\x1b[200~begin\n    history_navigation_count += 1\nend\x1b[201~\n")
+            end = repl.wait("\n1\n", start)
+            repl.wait("joolia> ", end)
+            start = len(repl.text())
+            repl.send("0\n")
+            end = repl.wait("\n0\n", start)
+            repl.wait("joolia> ", end)
+            repl.send("\x1b[A\x1b[A" + "\x1b[B" * 6)
+            repl.julia('@assert history_navigation_count == 1')
             repl.package("add CIRoot", "Updating")
             manifest = tomllib.loads((root / "project/Manifest.toml").read_text())
             assert manifest["deps"]["CIRoot"][0]["version"] == "2.0.0"
@@ -180,7 +192,7 @@ def main():
             assert not list((root / "depot/packages").rglob("*.mem")), "Pkg.test enabled allocation logging"
         finally:
             repl.close()
-    print("Styled REPL, backspace, completion, versioned dependency resolution, loading and Pkg.test passed.")
+    print("Styled REPL, backspace, multiline history navigation, completion, versioned dependency resolution, loading and Pkg.test passed.")
 
 
 if __name__ == "__main__":
