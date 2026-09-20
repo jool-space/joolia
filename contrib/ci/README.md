@@ -24,7 +24,8 @@ The required stages are:
 5. A styled PTY session using the bundled REPL/Pkg. A local Git registry has two
    versions of a package: only the newer version requires another package. The
    test installs the newer version through `pkg> add`, checks both manifest
-   entries, loads the package, exercises backspace and Tab completion, and runs
+   entries, loads the package, exercises backspace, multiline history navigation and Tab
+   completion, and runs
    `pkg> test`. Test workers must have allocation tracking disabled and leave no
    `.mem` files. No General registry or package-server access is needed here.
 
@@ -48,7 +49,7 @@ A subset run is not a full CI pass. Rebuild after source edits before checking
 interactive behavior: `pkg>` loads bundled caches without source freshness
 checks, whereas `using Pkg` in a script can load a different package instance.
 
-The workflow runs x86-64 on PRs and pushes to `master`. Daily scheduled runs and
+The workflow runs x86-64 on PRs and pushes to `master` or `baseline/**` branches. Daily scheduled runs and
 manual dispatches run both x86-64 and ARM64 on fresh GitHub-hosted Ubuntu 24.04
 VMs. Only compressed dependency downloads are cached; system images, bundled
 package images and compiled test depots are never restored from CI caches.

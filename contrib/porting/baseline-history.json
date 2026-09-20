@@ -1,0 +1,963 @@
+{
+  "source_master": "57d27b961063dae2323809b7ac71d10d5b7154de",
+  "original_checkpoint": "6580bd5dcd0a57fd39c785d73bc41d3ecf68e086",
+  "upstream_baseline": "07e2c78d9b7515e37a79bec20795ca96123ade9f",
+  "counts": {
+    "omitted-upstream": 45,
+    "retained": 34,
+    "selected-content": 5,
+    "backported": 3,
+    "omitted-integration": 69,
+    "omitted-dependent-adaptation": 2
+  },
+  "commits": [
+    {
+      "sha": "a1f6137869f4c3a49f8bbeca94c43faf0a763124",
+      "subject": "Bounds-check `lo`/`hi` in the legacy `sort!(v, lo, hi, alg, order)` entry points",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "cb1307d08461e099964f18bc4743d6656e11c713",
+      "subject": "precompilation: do not error when every requested package is in the sysimage",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "5f1ed914cd6ee02b6eccdb0bff1108d2303c6beb",
+      "subject": "REPL: restore StyledStrings colours after the OSC response tests",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "c8fc0ec194a09b652683d55cb418d625930e92ec",
+      "subject": "runtime: fix `modifyglobal!` on an untyped declared global",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "5e0349f60090ad89802f13888d571032f230cf7f",
+      "subject": "inference: record the world range of `isdefinedglobal` queries",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "8df8133b2b3a4fe4c82ef2082023719886277bd7",
+      "subject": "runtime: add `partition_owner` and kind helpers for binding partitions",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "309a870f23a4c6f609c44ddae392e905e3aa15d5",
+      "subject": "inference: key binding invalidation on partition identity",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "20742d1061d785a43052159a3f3f151e56f9dea3",
+      "subject": "inference: model `swapglobal!` and `replaceglobal!` as one binding access",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "b15965c2e0683f4f5d96fce8262e627c15d42011",
+      "subject": "reinfer: revalidate binding edges with `binding_access_range`",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "ddead8f48758f0f9151301070e0fa96cb815c7b2",
+      "subject": "runtime: add `*_partition` global access builtins",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "9e008e629aed2136f0b712988aaace012a92674c",
+      "subject": "runtime: make a builtin constant binding immutable",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "0a2ec2edb1c31f49ac2c20c020f5fbcd9d9e5df1",
+      "subject": "Revert \"codegen: avoid baking in binding values without a forward edge\"",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "98ebd1fa87c17e9226718737a1e2955535327c6e",
+      "subject": "IR: reformulate global accesses to binding partitions",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "668021d677f9409dd4bc63358b7a21212567ed02",
+      "subject": "JuliaSyntax: Remove (and gitignore) the stale `JuliaSyntax/docs/Manifest.toml`",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "507f4e79997ed162074b965e73571b6b4e69b653",
+      "subject": "llvm: Update Clang to 22.1.8+2",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "021f062c5d4c310b688afef17ee21e9e9794512f",
+      "subject": "JuliaSyntax: Drop the dangling `is_dotted` and `is_decorated` names",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "9b0103b846bfd5c9b2830b33a36ae785149e49b7",
+      "subject": "codegen: handle dynamic-index extractelement in late GC lowering",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "10a29b3b48d4217c79b5daa192bcb6d58810ffd1",
+      "subject": "lmdb: Don't let a command-line CFLAGS override drop `-fPIC`",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "9b33f2cf5b99c1da16009b636ca5a534135af333",
+      "subject": "fix malformed markdown link in `nth` docstring",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "7fd697495f7e5a0a4e0bf260b90d7971e2ff86b3",
+      "subject": "loading: precompile all packages of a `using A, B` statement in one session",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "6c8f6625e2eca9ee205b419abd01f310e0c96053",
+      "subject": "binaryplatforms: Sort tags so `show` and `triplet` output is stable",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "e82fabd1160be348426958cea51a88a76694f97f",
+      "subject": "Merge branch vtjnash/jn-getglobal-reimpl",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "c2c03cffa3e40bdb0755f00e67d319b125e185d7",
+      "subject": "precompilation: recursively collect workspace roots",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "332d73e76fd35757618c0cc7671949b9bf8f3442",
+      "subject": "make `hash` match `==` for some compiler data structures",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "f9e09211e0a6602c737afa7130bd40d2f0174566",
+      "subject": "test/llvmpasses: Fix shlibext substitution (and thus un-break CI)",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "272aa7e2a0f6786b6c5a0d3cd6e7619386e01222",
+      "subject": "JuliaSyntax: Add a docstring for `build_tree`",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "8a8738036066c8f4d09b58a820e01dab0d9a36a7",
+      "subject": "gc: move elided write-barrier annotations to precede their stores",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "5046c81b8940754494ffd54cb3769768ebd5a011",
+      "subject": "gc: make \"elided\" (special case) GC write-barriers per-backend",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "4c0017f9c52cfd0aae87782fa401735ac7ee2bc9",
+      "subject": "gc: Combine genericmemory span operations with their barriers",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "c30eb697107c8821a8af6f924a2c91fcbca63f09",
+      "subject": "cancellation: match GC intrinsics by identity, not by name",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "0a510b8ce20da26c434aac1e6c384604fc01d472",
+      "subject": "stdlib: Import pristine ArgTools at f77276a25334",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "257d71c06284a3d16854d3e17a7bc7e947885013",
+      "subject": "stdlib: Add ArgTools as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "f50beafce2a5e362d7e9edbf0581453279a9acbd",
+      "subject": "stdlib: Import pristine DelimitedFiles at 269726255101",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "ece815937f9af9907339e79b41f735e95ff66c54",
+      "subject": "stdlib: Add DelimitedFiles as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "32bf06a95512e795e94866c53ece4198c625a988",
+      "subject": "stdlib: Import pristine Distributed at a7ea563843cb",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "1dacb0915c823c1ea9d19201487c20987e830174",
+      "subject": "stdlib: Add Distributed as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "b4433cab3309ef94897385726adb58b62ece7ac4",
+      "subject": "stdlib: Import pristine Downloads at 66706fe293b3",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "17903b4792c2c8830885aa6c68ba589294af0a47",
+      "subject": "stdlib: Add Downloads as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "b12750d8d53f82918cc548a7dea69e6b60d0e1ef",
+      "subject": "stdlib: Import pristine JuliaSyntaxHighlighting at dae5817ad3ab",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "fcad1ac515db79e0fedda87a8fad5115529a1492",
+      "subject": "stdlib: Add JuliaSyntaxHighlighting as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "02254e2915bb9c457c1ca3208ce99023c881a170",
+      "subject": "stdlib: Import pristine LazyArtifacts at bdb8ac40a19c",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "4f73c482d1e24d095c8334070eaa7d6b3a1680a2",
+      "subject": "stdlib: Add LazyArtifacts as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "7866a6e0b2e3e77c97a260210f8def0456ee7202",
+      "subject": "stdlib: Import pristine LibCURL at b16e4d0c99b0",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "febd054aa12c1c094603bc7a1414538332ded8cf",
+      "subject": "stdlib: Add LibCURL as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "0bd8a02ba47cd4a714ddeb3883824874e9d009db",
+      "subject": "stdlib: Import pristine LinearAlgebra at 802d661bfc25",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "ba5143549b300a1e06338ed85debfab94e9c2458",
+      "subject": "stdlib: Add LinearAlgebra as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "2cb8af2f7157ebac192ea35da338446d605ae850",
+      "subject": "stdlib: Import pristine NetworkOptions at 7034c55dbf52",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "1e8791422c3cfe662c3bc9150effdbc70dc429c8",
+      "subject": "stdlib: Add NetworkOptions as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "a815f503b7e95d634825387b29852aed1face54c",
+      "subject": "stdlib: Import pristine Pkg at 4b15456053f9",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "4c7be880df4d2ce5960723f52d9cf947c8d104e1",
+      "subject": "stdlib: Add Pkg as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "45ef1d2dcdd16d8eba95010de452865ef492e766",
+      "subject": "stdlib: Import pristine SHA at b1aa926a09b6",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "62d8ae6a8fa9519e199706c774de3c79cf6d1dce",
+      "subject": "stdlib: Add SHA as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "505e3f80ac7aec8588a73aab5a0b9444ac080c67",
+      "subject": "stdlib: Import pristine SparseArrays at f4b0d5072423",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "097b2ee6f41b9c55575f395bfce84d480f3677e1",
+      "subject": "stdlib: Add SparseArrays as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "eb1486d301e95d0edb63c2cb969aa3d9fae5b7d9",
+      "subject": "stdlib: Import pristine Statistics at e7bf7a47d467",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "ee78a9aeff8f03b193ba30c0669146d2b625f35b",
+      "subject": "stdlib: Add Statistics as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "84103e3062c65910d44296614667028865bec976",
+      "subject": "stdlib: Import pristine StyledStrings at 171b359d4b87",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "81d35edd14b8dc39f9ffe276e58e5a5161f72392",
+      "subject": "stdlib: Add StyledStrings as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "fca6d34db71ed0fd53b35721f3cd05dfb99161b9",
+      "subject": "stdlib: Import pristine SuiteSparse at e8285dd13a6d",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "9183c0aeae41b67b68aedeb3fd48813e851b390a",
+      "subject": "stdlib: Add SuiteSparse as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "ba3508c59068a10b95546d2aefb69b3ea830b075",
+      "subject": "stdlib: Import pristine Tar at 1ea3c30a1c91",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "b56c03898d7326b22d84c9524fe3ec91bca0e81f",
+      "subject": "stdlib: Add Tar as a squashed upstream subtree",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "7e6eb9e46592ec7cf5bed2b93e9fcadaee991d1e",
+      "subject": "stdlib: Preserve zero-origin ports in tracked subtree sources",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "624288d3804cb990d73f8a77a6b825552aad33d7",
+      "subject": "stdlib: Build directly from vendored subtree sources",
+      "decision": "retained",
+      "reason": "Existing subtree ancestry at the original stdlib revisions; includes the original port and build conversion"
+    },
+    {
+      "sha": "c88d0c9908cf70e6e4ab9aad1a79edf5917dcba7",
+      "subject": "joolia: Merge 26 upstream Julia commits through 272aa7e2a0",
+      "decision": "selected-content",
+      "reason": "Retired patch-helper test only; exclude all 26 incoming Julia commits and their adaptations"
+    },
+    {
+      "sha": "c078433b9e7b9c7c8bea019f458a52322c793f5a",
+      "subject": "stdlib: Complete subtree tooling and record integration checks",
+      "decision": "selected-content",
+      "reason": "Subtree import ordering and retired patch-helper test; omit later integration claims"
+    },
+    {
+      "sha": "c75b0fb6e283dde309858cd83f54850752ce7fef",
+      "subject": "Pkg: Fix progress bars for zero-origin indices",
+      "decision": "backported",
+      "reason": "Pkg progress and test-depot indexing"
+    },
+    {
+      "sha": "2428beaa22fd306967a3327c2ad227ecec2bc81a",
+      "subject": "Merge branch topolarity/ct/wb-fixes",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "64b009bcceda5e4a85bb71851408a9bc13f88ea1",
+      "subject": "Pkg: Preserve dependency edges and allocation modes",
+      "decision": "backported",
+      "reason": "Resolver dependency edges and allocation-mode propagation"
+    },
+    {
+      "sha": "ac7b08d4ebcd029e18a31bb29266b90e1cd0d0f3",
+      "subject": "CI: Build and test Joolia on GitHub Actions",
+      "decision": "backported",
+      "reason": "Standalone build/test CI and bootstrap paths"
+    },
+    {
+      "sha": "0d7752bee1fe8d007fe5b9d276904487d092f919",
+      "subject": "signals-unix: skip the calling thread in the suspend-based membarrier",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "f3c70411bfee76c662f7807202305bc4fd8f059d",
+      "subject": "libsupport: force `LC_COLLATE` to `\"C\"`",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "e58e0698340b722dbf94c870914f8f5070286cdf",
+      "subject": "CI: Add bounded upstream sync proposals with Codex",
+      "decision": "selected-content",
+      "reason": "Indexing contract only; omit sync machinery"
+    },
+    {
+      "sha": "511a57af1da6c22cd827ba43e336fcf4b51b42ec",
+      "subject": "CI: Target the fork explicitly in upstream sync GitHub commands",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "548a151eb0e17cc29ba6c8513128bf2066199611",
+      "subject": "CI: Use a normalized upstream sync artifact path",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "7f5097dfad3c4a67558dd208d3bab175e332940e",
+      "subject": "gmp: Import `exponent` so the `BigInt` method is reachable",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "71e0769e019ff9dc3c27118b742acd1248f25c27",
+      "subject": "math: Add an `exponent` method for `Bool`",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "0ee345ddfd835ab5edf7a22f8f8eb4ba0d57ade5",
+      "subject": "base: Remove scoped value trim comments",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "5d2fcf16939ac96343d34226d938ddd35914c6b1",
+      "subject": "loading: fall back to source when a pinned dependency's cache is gone",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "71d29e95457cd3870c6e13a4a8f170f22bd1d7f9",
+      "subject": "codegen: convert the `setglobalonce!` internal result to a `Bool`",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "9bc48db402eefac7c613d60c4f54d7d0fef5738a",
+      "subject": "codegen: factor out `emit_globalop_runtime_call` [NFC]",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "bb92f91a6069fbc08ecc1346b8baf99b3bf84a92",
+      "subject": "module: factor out `jl_binding_not_writable_error` [NFC]",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "53efe7eca879b513b199718847e6f30e7c86ff70",
+      "subject": "module: give the global RMW store helpers their own loops [NFC]",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "12fbf6b9b315b71aaa96b7a766c5c23c89f36d90",
+      "subject": "module: perform `jl_disable_binding` under `world_counter_lock` [NFCI]",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "53f4db20b59cf7620a364b3b9a419f4a8eb0bdcd",
+      "subject": "toplevel: restructure `jl_declare_global` as straight-line code [NFCI]",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "749bc4e20490bac5bb01f69bd433d8dc8a6b36e3",
+      "subject": "precompilation: skip dependents of failed packages, add force options",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "81093121d4e6cf469154d977e2ecd6b7488ea0de",
+      "subject": "doc: cover the TTFX jobs and artifact downloads in the buildkite-logs skill",
+      "decision": "omitted-upstream",
+      "reason": "Julia changes newer than the pinned upstream revision"
+    },
+    {
+      "sha": "843e8c6fd355c23c0ba0ca39ab99363b86432238",
+      "subject": "upstream: Merge Julia through 2428beaa22fd",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "cdb4436ce8d387a3f0e52ee7baae302fbc1bd9be",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "cb9743b7eea211cfa48db7b827d80fd1003dfb77",
+      "subject": "CI: Guide semantic port reviews and avoid upstream PR cross-references",
+      "decision": "selected-content",
+      "reason": "Porting guides only, adapted for deliberate integrations"
+    },
+    {
+      "sha": "05360520f6914b7889183589463d333ac9563b1f",
+      "subject": "CI: Merge tested upstream batches and continue syncing",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "0a1c5f1cdd95d7183729d7f0ad554f7dae238511",
+      "subject": "Merge branch 'master' into sync/julia-272aa7e2a0f6-2428beaa22fd",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "a6ff4b0e79c7a2afd2c10d33cc60c705e222222e",
+      "subject": "CI: Approve checks for validated upstream sync PRs",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "2739668cead444a74adbeb11c89108217d3866e2",
+      "subject": "CI: Start sync workflow approvals before builds finish",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "0d2252af51e48810dc3a44cd17712a3524dd70f3",
+      "subject": "CI: Read protection enforcement from the branch API",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "0f878b468ab9e98e2299321590d9b20d11cb15b3",
+      "subject": "CI: Resume sync merge checks when master advances",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "0401f2b388a096cfa9b63b67f48fbc389d4c7f8a",
+      "subject": "Merge branch jool-space/ci/sync-workflow-approval",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "5896035483e321caa7976efd4d5d664ad08929de",
+      "subject": "Merge branch 'master' into sync/julia-272aa7e2a0f6-2428beaa22fd",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "c909a90710262fdd61858d1799e62e8c1fcf7bd7",
+      "subject": "upstream: Integrate reviewed batch (2428beaa22fd)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "5221d2e7bd9645fcf4edae9a95dadaacfe0a9a64",
+      "subject": "CI: Run sync gate after workflow completion",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "adb57062656a558d9cd2abfd98b5c501dde16b46",
+      "subject": "CI: Allow the sync bot to start Codex reviews",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "472f4401d3bc13f8121c012b88d8dbc5402492fc",
+      "subject": "Merge branch jool-space/ci/sync-completion-trigger",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "6621320a434846073c017f840ede46463f946047",
+      "subject": "CI: Resume idle sync queues after master advances",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "2ee4ecd0774ebe8842976ee95b0727499ac2dc4d",
+      "subject": "upstream: Merge Julia through 0d7752bee1fe",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "5a7a0b0b334505fce93f8471b3660adc0b8058fe",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "245616569a24163010fce51e6b77601833f7b7dd",
+      "subject": "Merge branch jool-space/ci/sync-idle-recovery",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "ff94f038c42b80f07bcfec43b9f09fbce6d5d3ae",
+      "subject": "Merge branch 'master' into sync/julia-2428beaa22fd-0d7752bee1fe",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "b168f1971de6fbb958d96ec27d878fef515c0874",
+      "subject": "upstream: Integrate reviewed batch (0d7752bee1fe)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "21364467be652dc542c2178a57bc92b0d0ef8828",
+      "subject": "upstream: Merge Julia through f3c70411bfee",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "e07cf16f12227caefcf1bb85a0be31c53cfd0e39",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "a3fceb0c7bd7bb6bb89c27c75b022408d7325b22",
+      "subject": "CI: Notify sync merging after all required jobs finish",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "134fb54dca7d833972993967b6b41e7dea1f3481",
+      "subject": "Merge branch jool-space/ci/sync-ci-completion",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "80f2284d22f3cec0bbaf5ac8a336d88ae0c0aec4",
+      "subject": "Merge branch 'master' into sync/julia-0d7752bee1fe-f3c70411bfee",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "befa7e40ff73c90b05192f385be4d5932d47a48f",
+      "subject": "upstream: Integrate reviewed batch (f3c70411bfee)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "eba1e03b03b9882f2cc12f487633f30d045c8508",
+      "subject": "upstream: Merge Julia through 71e0769e019f",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "2e49236a0faf864cda3dda2142908d68761329ca",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "193197c34c1402442c0b210eace6ec61a9a5d6a7",
+      "subject": "upstream: Integrate reviewed batch (71e0769e019f)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "4e968c26ba583754b67fcb818471289b43434c2f",
+      "subject": "upstream: Merge Julia through 0ee345ddfd83",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "7ca8f1e845abc5fff9ea2a6265f71f14b85c0ce2",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "33285810f9e12fdeb6b5bd2c51dce38043bcfa48",
+      "subject": "upstream: Integrate reviewed batch (0ee345ddfd83)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "49ad2b9657bc4d4905d0c2b026b8bc2adca27d38",
+      "subject": "upstream: Merge Julia through 5d2fcf16939a",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "6b338dc70c78ebc057c55e68dcf974c69e310c34",
+      "subject": "joolia: Adapt upstream batch to zero-origin semantics",
+      "decision": "omitted-dependent-adaptation",
+      "reason": "Indexing fix applies to a regression fixture introduced by an excluded upstream change"
+    },
+    {
+      "sha": "f797aa32b05bc4bee63395f24f22cb941a547ef0",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "9a0a1aad4558f59272ec7f306fa4814a973bfba0",
+      "subject": "upstream: Integrate reviewed batch (5d2fcf16939a)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "017b2cb226895aa41525e770906283996ea7e8ae",
+      "subject": "upstream: Merge Julia through 71d29e95457c",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "86fa45632dd002f426f99493d45331300aa98fad",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "57af480f4f1b85e7513b1b487c9fa7120c20c6f9",
+      "subject": "upstream: Integrate reviewed batch (71d29e95457c)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "0328e2201c0d35d2b146db747712106f4531e33c",
+      "subject": "upstream: Merge Julia through 9bc48db402ee",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "145bda39368d665f11ffeb115a16ffa8f00d0488",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "ee414e9adbed109e9b08c284cc446ee327bad656",
+      "subject": "upstream: Integrate reviewed batch (9bc48db402ee)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "5bdc15272c717955c0f903dd7bc2217f9804418e",
+      "subject": "upstream: Merge Julia through bb92f91a6069",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "480dd7a67da926b11088d6516c38a4a08390feaf",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "e03fe07b7b9feab5c8264ee2eedd44618c6ef659",
+      "subject": "upstream: Integrate reviewed batch (bb92f91a6069)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "d8b010a2fe2f387b9922845799a2acc2531820e0",
+      "subject": "upstream: Merge Julia through 53efe7eca879",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "4307646a227d632e4d4aeca42bff811b9351e8ea",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "b4d75caf2b89a28051e62d82ab76c6e79c9aeb5a",
+      "subject": "upstream: Integrate reviewed batch (53efe7eca879)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "07a127bc9dbdd38437578a9a0aac0a5cce448220",
+      "subject": "upstream: Merge Julia through 12fbf6b9b315",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "4b23406563b2fb880f287c734aabc20797f8ae66",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "409b6d13b17dafb9824beb86d8516860f398c2fc",
+      "subject": "upstream: Integrate reviewed batch (12fbf6b9b315)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "53cc122d5e8cdf6885003baeb7564269474d79cc",
+      "subject": "upstream: Merge Julia through 53f4db20b59c",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "7f310b5a32f2a9aeeda58d1550a1e12c548678c5",
+      "subject": "upstream: Record reviewed sync batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "5952d7196b5f279e616fe7ff8cb39ff2fafbee70",
+      "subject": "upstream: Integrate reviewed batch (53f4db20b59c)",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "cd10bc5aaec455f567718f90638b4f92d5a59d65",
+      "subject": "CI: Batch runtime and compiler updates within review budgets",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "9aa6e7e9438207af935afb939a088e50e662b785",
+      "subject": "upstream: Integrate manually reviewed precompilation changes",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "c39fcec82c45b14ffe531b9a134be0e00c01d4b2",
+      "subject": "Pkg: Expose dependency skipping and forced precompilation",
+      "decision": "omitted-dependent-adaptation",
+      "reason": "Pkg skip/force controls require the excluded newer Base precompilation driver"
+    },
+    {
+      "sha": "77524eb408ed59c1f4fa204b3214a4e4674bb776",
+      "subject": "upstream: Record resolution of the held precompilation batch",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "3e908a34e2288af911f514f095b76592af616912",
+      "subject": "Merge branch jool-space/ci/sync-bounded-batches",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "f8a8bc7317a5540f2ba10b50aa1c7a4798d39f89",
+      "subject": "CI: Bound upstream reviews independently and retain failure progress",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "1aea52b970ee0ba7045a922e901b4c61779ad225",
+      "subject": "CI: Verify sandbox tool execution in the review probe",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "67bbc06efae8c09becaca86724db1e57ee458345",
+      "subject": "Merge branch jool-space/ci/sync-review-deadline",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "3a82db98880adfdd08ee499584dbd86286af3172",
+      "subject": "CI: Preserve upstream reviews in separate per-commit jobs",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "38e2957c519720703878e194e8fb51b9cb9032fa",
+      "subject": "CI: Scope the porting handbook to assigned review commits",
+      "decision": "selected-content",
+      "reason": "Reviewed guidance revision; omit per-job assignment rules"
+    },
+    {
+      "sha": "cab3df2a089091e99afc09f4550d040d8dc4e30f",
+      "subject": "CI: Exercise source editing in the independent action probe",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "724b692020e1c83e65648e765acf52dc855f430f",
+      "subject": "CI: Contain review memory and child processes separately from the runner",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "01dd6f517520ec6a9d0dd1d50df29e1c7348dcde",
+      "subject": "CI: Serialize review jobs to respect Luna token rate limits",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "e41164469aad43f0b79bf6993be1b89dcaa5b197",
+      "subject": "CI: Validate assigned reports and combine compatible review patches",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "ee7ca5abc3ddabe6c0b6d27116fd1db0aab28981",
+      "subject": "CI: Retry failed upstream review jobs once automatically",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    },
+    {
+      "sha": "57d27b961063dae2323809b7ac71d10d5b7154de",
+      "subject": "Merge branch jool-space/ci/sync-per-commit-reviews",
+      "decision": "omitted-integration",
+      "reason": "Upstream merge/adaptation, sync checkpoint, or automation infrastructure; original history remains on master"
+    }
+  ]
+}

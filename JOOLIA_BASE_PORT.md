@@ -1,5 +1,13 @@
 # Base port: boundaries and audit notes
 
+## Pinned baseline and stdlib migration
+
+This branch restores the original port; see [BASELINE.md](BASELINE.md).
+External stdlibs live in tracked `stdlib/Name` subtrees. Historical patch-stack
+instructions below are superseded by [stdlib/VENDORED.md](stdlib/VENDORED.md).
+Historical test results describe their recorded revisions, not a fresh validation
+of this reconstruction.
+
 This is a staged port, not a declaration that every Base method is zero-based.
 The native runtime, compiler bootstrap, and default system image build. Normal
 command-line execution and the full interactive LineEditREPL now work with the
