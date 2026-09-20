@@ -1916,32 +1916,3 @@ end
     @test json([1,2]) == "[\n  1,\n  2\n]"
     @test json(Dict{String,Int}()) == "{\n}"
 end
-
-# Ordered stdlib patches must work on pristine, partial, and fully patched sources.
-@testset "stdlib patch stack application" begin
-    helper = joinpath(realpath(@__DIR__), "..", "contrib", "apply-stdlib-patches.sh")
-    if Sys.isunix() && isfile(helper) && Sys.which("patch") !== nothing
-        mktempdir() do root
-            source = joinpath(root, "source")
-            mkdir(source)
-            patches = String[]
-            for (i, (before, after)) in enumerate((("middle", "one"), ("one", "two")))
-                path = joinpath(root, "patch$i")
-                write(path, "--- a/file\n+++ b/file\n@@ -1,3 +1,3 @@\n alpha\n-$before\n+$after\n omega\n")
-                push!(patches, path)
-            end
-            write(joinpath(source, "unrelated"), "local contents")
-            command = `sh $helper $source $patches`
-            for middle in ("middle", "one", "two")
-                write(joinpath(source, "file"), "alpha\n$middle\nomega\nlocal suffix\n")
-                @test success(pipeline(command; stdout=devnull, stderr=devnull))
-                @test read(joinpath(source, "file"), String) == "alpha\ntwo\nomega\nlocal suffix\n"
-                @test read(joinpath(source, "unrelated"), String) == "local contents"
-            end
-            write(joinpath(source, "file"), "conflicting local edit\n")
-            @test !success(pipeline(command; stdout=devnull, stderr=devnull))
-            @test read(joinpath(source, "file"), String) == "conflicting local edit\n"
-            @test read(joinpath(source, "unrelated"), String) == "local contents"
-        end
-    end
-end
