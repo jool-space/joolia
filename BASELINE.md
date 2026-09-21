@@ -7,7 +7,9 @@ latest nightly. Its upstream Julia revision is
 `07e2c78d9b` (Julia 1.14.0-DEV, September 16, 2026).
 The initial Joolia checkpoint is `6580bd5dcd`; `baseline/first-working`
 preserves that exact commit. `baseline/initial-port` adds the independent
-improvements listed below.
+improvements listed below. `main` is the default development branch built from
+that tested baseline. The former default branch is retained as `master` and
+`archive/upstream-sync-2026-09-21`.
 
 The original `src/`, `Compiler/`, `base/`, `JuliaSyntax/` and `JuliaLowering/`
 trees are preserved byte-for-byte from that checkpoint. The manual 26-commit
@@ -43,7 +45,10 @@ CI automation changes; it is not a count of 158 independent Joolia changes.
 Sync workflows, agent invocation, automatic merging, queue recovery and sync
 report/checkpoint files are not part of this branch. The original experiment
 remains in master's history. The repository's sync and auto-merge variables were
-set to false when this branch was constructed; ordinary build/test CI is retained.
+set to false when this branch was constructed. Both sync workflows were disabled
+when the baseline became `main`; ordinary build/test CI is retained. The protected
+`main` branch requires `Build and test (ubuntu-24.04)`, with no requirement for
+the retired sync tooling.
 
 `c39fcec82c` is not an independent Pkg fix: its skip/force precompile API requires
 the excluded newer Base driver. `6b338dc70c` adjusts a test fixture introduced by
@@ -61,6 +66,8 @@ python3 contrib/ci/run.py --jobs 8
 This builds fresh artifacts and uses isolated test depots. Only compressed
 native dependency archives may be reused; no system image, bundled package
 cache or native Joolia object from the newer tree is used to validate this branch.
+The reconstructed baseline passed the complete local gate and the hosted
+[build/test run](https://github.com/jool-space/joolia/actions/runs/35518136764).
 Results and individual logs are written to `ci-results/`. The machine-readable
 coverage limits remain in [coverage.json](contrib/ci/coverage.json).
 

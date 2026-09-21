@@ -2,7 +2,7 @@ name: Joolia CI
 
 on:
   push:
-    branches: [master, 'baseline/**']
+    branches: [main, 'baseline/**']
   pull_request:
   workflow_dispatch:
   schedule:

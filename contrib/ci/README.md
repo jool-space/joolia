@@ -49,7 +49,7 @@ A subset run is not a full CI pass. Rebuild after source edits before checking
 interactive behavior: `pkg>` loads bundled caches without source freshness
 checks, whereas `using Pkg` in a script can load a different package instance.
 
-The workflow runs x86-64 on PRs and pushes to `master` or `baseline/**` branches. Daily scheduled runs and
+The workflow runs x86-64 on PRs and pushes to `main` or `baseline/**` branches. Daily scheduled runs and
 manual dispatches run both x86-64 and ARM64 on fresh GitHub-hosted Ubuntu 24.04
 VMs. Only compressed dependency downloads are cached; system images, bundled
 package images and compiled test depots are never restored from CI caches.
